@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/dist/
+/vegaload
+/vegaload.exe
+
+# Go
+*.test
+*.out
+vendor/
+
+# Local scenario run artifacts
+*.vl-report.html
+*.vl-report.json
+
+# OS/editor noise
+.DS_Store
+.idea/
+*.swp

@@ -1,0 +1,10 @@
+# Default reviewers for VegaLoad.
+# Adjust paths/owners as the two of you actually divide the work.
+
+internal/engine/     @umamukkara
+internal/protocol/   @umamukkara
+internal/mcp/        @ksatchit
+internal/bridge/     @ksatchit
+
+# Everything else defaults to both.
+*                    @umamukkara @ksatchit

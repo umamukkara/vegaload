@@ -1,0 +1,58 @@
+{
+  "version": "v1",
+  "cases": [
+    {
+      "name": "create_scenario writes a JS scenario",
+      "tool": "create_scenario",
+      "arguments": {"name": "${WORKDIR}/eval-scenario", "force": true},
+      "expect_contains": {"created": true}
+    },
+    {
+      "name": "run_test rejects a scenario_path + target combination",
+      "tool": "run_test",
+      "arguments": {"scenario_path": "${WORKDIR}/eval-scenario.vl.js", "target": "http://127.0.0.1:1", "protocol": "http1"},
+      "expect_error": true
+    },
+    {
+      "name": "run_test against an unreachable loopback port still reports cleanly (per-iteration failures aren't a CLI error)",
+      "tool": "run_test",
+      "arguments": {"target": "http://127.0.0.1:1", "protocol": "http1", "vus": 1, "duration": "1s", "yes": true, "no_report": true}
+    },
+    {
+      "name": "get_results requires report_path",
+      "tool": "get_results",
+      "arguments": {},
+      "expect_error": true
+    },
+    {
+      "name": "get_results reads back the fixture report",
+      "tool": "get_results",
+      "arguments": {"report_path": "${WORKDIR}/fixture-report.json"},
+      "expect_contains": {"total": 100, "failed": 0}
+    },
+    {
+      "name": "suggest_thresholds derives a p95 ceiling from the fixture report",
+      "tool": "suggest_thresholds",
+      "arguments": {"report_path": "${WORKDIR}/fixture-report.json"},
+      "expect_contains": {"latency_p95": "60ms"}
+    },
+    {
+      "name": "diagnose_failure explains the fixture report with narration disabled",
+      "tool": "diagnose_failure",
+      "arguments": {"report_path": "${WORKDIR}/fixture-report.json", "no_llm": true},
+      "expect_contains": {"report_path": "${WORKDIR}/fixture-report.json"}
+    },
+    {
+      "name": "generate_from_spec requires spec_path",
+      "tool": "generate_from_spec",
+      "arguments": {},
+      "expect_error": true
+    },
+    {
+      "name": "generate_from_spec scaffolds a runbook from the fixture OpenAPI spec",
+      "tool": "generate_from_spec",
+      "arguments": {"spec_path": "${WORKDIR}/fixture-spec.json", "name": "${WORKDIR}/eval-widgets", "force": true},
+      "expect_contains": {"created": true, "endpoints": 1}
+    }
+  ]
+}
