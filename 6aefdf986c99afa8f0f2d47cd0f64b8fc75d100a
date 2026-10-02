@@ -1,0 +1,203 @@
+examples/sample-app/README.md
+  human 3,5-6,11-17,19-23,25,27-43,46-80,83,86-89
+examples/README.md
+  human 3-5
+.github/workflows/ci.yml
+  human 19-25
+examples/scenarios/README.md
+  human 30-56
+examples/sample-app/grpc.go
+  human 1-334
+README.md
+  human 45-46
+examples/sample-app/TESTING.md
+  human 1-224
+examples/sample-app/protocols_test.go
+  human 1-392
+examples/sample-app/widgets.proto
+  human 1-47
+examples/sample-app/main.go
+  human 1,4-7,16-23,25-31,36,40,46-49,62-67,72-74,106-148,156-208,243-257,266-269,273-292,294-295,298-310,312-330
+examples/sample-app/go.mod
+  human 4-16
+examples/sample-app/go.sum
+  human 1-34
+---
+{
+  "attestations": [
+    {
+      "entries": [
+        {
+          "accepted_lines": 73,
+          "added_lines": 73,
+          "deleted_lines": 19,
+          "hash": "human",
+          "lines": "3,5-6,11-17,19-23,25,27-43,46-80,83,86-89",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/README.md"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 3,
+          "added_lines": 3,
+          "deleted_lines": 2,
+          "hash": "human",
+          "lines": "3-5",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/README.md"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 7,
+          "added_lines": 7,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "19-25",
+          "overridden_lines": 0
+        }
+      ],
+      "file": ".github/workflows/ci.yml"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 27,
+          "added_lines": 27,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "30-56",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/scenarios/README.md"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 334,
+          "added_lines": 334,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "1-334",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/grpc.go"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 2,
+          "added_lines": 2,
+          "deleted_lines": 1,
+          "hash": "human",
+          "lines": "45-46",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "README.md"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 224,
+          "added_lines": 224,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "1-224",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/TESTING.md"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 392,
+          "added_lines": 392,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "1-392",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/protocols_test.go"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 47,
+          "added_lines": 47,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "1-47",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/widgets.proto"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 204,
+          "added_lines": 204,
+          "deleted_lines": 23,
+          "hash": "human",
+          "lines": "1,4-7,16-23,25-31,36,40,46-49,62-67,72-74,106-148,156-208,243-257,266-269,273-292,294-295,298-310,312-330",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/main.go"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 13,
+          "added_lines": 13,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "4-16",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/go.mod"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 34,
+          "added_lines": 34,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "1-34",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "examples/sample-app/go.sum"
+    }
+  ],
+  "base_commit_sha": "9ab91b37ecff43d12c84f8ed94c37714bfc0b16f",
+  "branch": "sample_app_updates",
+  "commit_sha": "6aefdf986c99afa8f0f2d47cd0f64b8fc75d100a",
+  "commit_time": "2026-10-02T18:11:54+05:30",
+  "commit_type": "direct_commit",
+  "harness_aidlc_version": "1.4.34",
+  "prompts": {
+    "human": {
+      "accepted_lines": 1360,
+      "agent_id": null,
+      "human_author": "Karthik S <karthik.s@harness.io>",
+      "overriden_lines": 0,
+      "total_additions": 1360,
+      "total_deletions": 45
+    }
+  },
+  "repo": "https://github.com/vegaload/vegaload",
+  "schema_version": "authorship/3.0.0"
+}
