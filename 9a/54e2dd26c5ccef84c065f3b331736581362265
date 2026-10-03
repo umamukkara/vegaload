@@ -1,0 +1,41 @@
+examples/sample-app/protocols_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 357-361,371-373,391-412
+internal/engine/arrival.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 85
+cmd/vegaload/run_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 130-132,158-160
+examples/sample-app/grpc.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 79-83
+internal/protocol/grpc/grpc_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 5,7,11-12,34-35,42-45,186-234
+examples/sample-app/TESTING.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 64,120
+internal/protocol/grpc/grpc.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 35-40,43-46,100-103
+internal/engine/vu.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 9-14,30,38-50
+internal/engine/vu_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 5,38,43,45,51-52,55-113
+internal/engine/arrival_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 82-99
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9a54e2dd26c5ccef84c065f3b331736581362265",
+  "prompts": {
+    "cc0a0aeb12c9b269": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2a9d5a9a-0f78-4305-807c-4df61b6b8efe",
+        "model": "default"
+      },
+      "human_author": "Karthik S <karthik.s@harness.io>",
+      "total_additions": 216,
+      "total_deletions": 72,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
