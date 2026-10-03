@@ -1,0 +1,22 @@
+.gitignore
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 13-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e56c4e86f00c920564bef00c746c521634654252",
+  "prompts": {
+    "cc0a0aeb12c9b269": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2a9d5a9a-0f78-4305-807c-4df61b6b8efe",
+        "model": "default"
+      },
+      "human_author": "Karthik S <karthik.s@harness.io>",
+      "total_additions": 60,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
