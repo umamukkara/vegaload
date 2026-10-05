@@ -1,0 +1,63 @@
+AGENTS.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 57
+internal/compare/compare.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-152
+internal/skills/bundles/claude-code/SKILL.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 3,9,42-44,60-62
+internal/mcp/tools.go
+  s_cc0a0aeb12c9b2::t_9d2f22178413a8 347-350
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 26,329-346,351-386
+cmd/vegaload/compare_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-57
+examples/scenarios/README.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 67-95,109,122,130
+README.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 131-150,161,163-165,168
+cmd/vegaload/main.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 4-5,38-39,67,79
+examples/scenarios/compare/baseline.json
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-40
+examples/scenarios/compare/candidate-regressed.json
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-40
+internal/eval/v1/cases.json
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 46-53
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 45
+cmd/vegaload/eval.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 139,147-148,173-179
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 180
+internal/skills/bundles/cursor/vegaload.mdc
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 9,29-30,36-37
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 38
+cmd/vegaload/compare.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-151
+internal/mcp/tools_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 231-281
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 282
+cmd/vegaload/mcp.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 44
+cmd/vegaload/eval_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 71
+internal/compare/compare_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-118
+examples/scenarios/compare/candidate-ok.json
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "160e49420aa3e512f5d4a9bfbe276cb835dfc89b",
+  "prompts": {
+    "cc0a0aeb12c9b269": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2a9d5a9a-0f78-4305-807c-4df61b6b8efe",
+        "model": "default"
+      },
+      "human_author": "Karthik S <karthik.s@harness.io>",
+      "total_additions": 812,
+      "total_deletions": 35,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
