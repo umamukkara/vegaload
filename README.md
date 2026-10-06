@@ -199,6 +199,36 @@ of any model's tool-picking behavior:
 ./vegaload mcp eval
 ```
 
+### 5. Check that everything is wired up
+
+```
+./vegaload doctor
+```
+
+checks that VegaLoad works from here and says how to fix anything that does
+not. It looks at the CLI itself (version, `PATH`, writable folders), at each
+agent host it finds (Cursor, Claude Code, and Claude Desktop on macOS), and
+optionally at a target. For a host that is installed but has no VegaLoad
+MCP entry, that is a warning, not a failure — using the CLI alone is
+healthy. When VegaLoad *is* registered, doctor starts the configured
+server, performs a real MCP handshake, and expects all seven tools. An
+installed editor with no VegaLoad setup does not fail the command.
+
+```
+./vegaload doctor -target http://localhost:8080   # also check a target
+./vegaload doctor -fix                            # repair what can be repaired safely
+./vegaload doctor -fix -dry-run                   # show what -fix would change
+./vegaload doctor -output json                    # for CI; exits 1 if any check fails
+```
+
+`-fix` only adds missing MCP entries and rules files in the project, and
+rewrites a stale server command. It never overwrites a rules file you edited,
+and it changes files in your home directory only when you name the host, as in
+`-host cursor`. `-smoke` adds a one-user, one-second test against `-target`
+(it sends real traffic, so it is off by default). `-harness` is a placeholder
+until `--move-to-harness` ships: it makes no network call and cannot verify
+credentials.
+
 See [`examples/scenarios/README.md`](./examples/scenarios/README.md) for
 this same walkthrough as a standalone, copy-pasteable script.
 
@@ -212,6 +242,7 @@ this same walkthrough as a standalone, copy-pasteable script.
 | `vegaload mcp serve`     | Run an MCP server over stdio for agent-native use                     |
 | `vegaload mcp eval`      | Run the versioned MCP tool-calling eval suite against this binary     |
 | `vegaload init`          | Register the MCP server and skill bundles for the current project     |
+| `vegaload doctor`        | Check the CLI, agent hosts, and a target; `-fix` repairs what it can   |
 
 Every command supports `-output text` (default), `json`, or (`run` only)
 `jsonl`. Run `vegaload <command> -h` for its full flag list, or `vegaload

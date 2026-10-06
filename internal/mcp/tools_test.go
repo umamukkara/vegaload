@@ -332,3 +332,18 @@ func endsWithArgs(args []string, suffix []string) bool {
 	}
 	return strings.Join(args[len(args)-len(suffix):], "\x00") == strings.Join(suffix, "\x00")
 }
+
+func TestCoreToolNames_MatchRegisteredTools(t *testing.T) {
+	registered := map[string]bool{}
+	for _, tool := range NewTools("/nonexistent/vegaload") {
+		registered[tool.Name] = true
+	}
+	for _, name := range CoreToolNames {
+		if !registered[name] {
+			t.Errorf("CoreToolNames lists %q but NewTools does not register it", name)
+		}
+	}
+	if len(registered) != len(CoreToolNames) {
+		t.Errorf("NewTools registers %d tools, CoreToolNames lists %d: update CoreToolNames", len(registered), len(CoreToolNames))
+	}
+}

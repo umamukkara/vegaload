@@ -41,6 +41,8 @@ func run(args []string) int {
 		return cmdMCP(args[1:])
 	case "init":
 		return cmdInit(args[1:])
+	case "doctor":
+		return cmdDoctor(args[1:])
 	case "version":
 		fmt.Printf("vegaload %s\n", version)
 		return 0
@@ -68,10 +70,11 @@ Commands:
   mcp serve  Run an MCP server over stdio for agent-native use (Claude Code, Cursor, ...)
   mcp eval   Run the versioned MCP tool-calling eval suite against this binary
   init       Register the MCP server and skill bundles for this project
+  doctor     Check that VegaLoad is set up and working (CLI, agent hosts, target)
   version    Print the vegaload version
   help       Show this help text
 
-Every command supports -output text (default), json, or (run only) jsonl.
+Every command supports -output text (default) or json; run and doctor also support jsonl.
 A "run" also writes a self-contained HTML report by default — see
 "vegaload run -h" for -report/-no-report/-no-open.
 
@@ -79,5 +82,6 @@ Run "vegaload run -h" for the run command's flags.
 Run "vegaload compare -h" for baseline-vs-candidate flags.
 Run "vegaload mcp serve -h" for the MCP server's tools.
 Run "vegaload mcp eval -output json" for machine-readable eval results.
-Run "vegaload init -h" for what init writes.`)
+Run "vegaload init -h" for what init writes.
+Run "vegaload doctor -h" for what doctor checks and how -fix works.`)
 }

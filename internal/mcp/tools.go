@@ -437,3 +437,16 @@ func generateFromSpecTool(exePath string) Tool {
 		},
 	}
 }
+
+// CoreToolNames are the tools every VegaLoad MCP server must expose
+// (FR-MCP-03). `vegaload doctor` checks a host's live server against
+// this list; a test keeps it in step with NewTools.
+var CoreToolNames = []string{
+	"create_scenario",
+	"run_test",
+	"get_results",
+	"suggest_thresholds",
+	"diagnose_failure",
+	"compare_reports",
+	"generate_from_spec",
+}
