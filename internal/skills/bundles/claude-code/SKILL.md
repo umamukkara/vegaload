@@ -64,7 +64,8 @@ couldn't also do.
    check that it works with one user. Fix it if `valid` is false.
 3. Call **run_test** with the target/protocol (or scenario) and shape the user
    asked for. If the user has a baseline report, pass `baseline_path` (and
-   `max_regression`, in percent) to gate the run on it in one call.
+   `max_regression`, in percent) to gate the run on it in one call. Pass
+   `junit_path` to also write JUnit XML for a CI system.
 4. Read the `report_path` it returns, or call **get_results** later to re-read
    it.
 5. If the run had failures or looks degraded, call **diagnose_failure** on

@@ -1,7 +1,8 @@
 name: VegaLoad
 description: >-
   Install VegaLoad, the open-source load testing tool, and optionally run it.
-  Add -threshold flags and the step fails when a threshold is broken.
+  Add -threshold flags and the step fails when a threshold is broken. A run
+  also adds its results to the job summary, and -junit writes JUnit XML.
 author: VegaLoad
 branding:
   icon: activity

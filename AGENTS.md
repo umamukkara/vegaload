@@ -59,6 +59,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - In scenarios, `check(value, {name: test})` counts named assertions without failing the iteration; gate with `-threshold "check_rate >= 99%"`.
 - `vegaload validate <file>` — run a scenario once, with one user, to check that it works before a real run. Exit 0 valid, 1 not valid.
 - `vegaload run -baseline <report.json> -max-regression <percent>` — compare the run with a baseline file you supply. Exit 3 if p95 or the error rate is worse by more than that percent. There is no baseline store.
+- `vegaload run -junit <file>` — also write JUnit XML: each threshold, check and the baseline gate is one test case. Inside GitHub Actions, `run` also appends a Markdown summary to the job page (`-no-step-summary` turns that off).
 - `vegaload diagnose <report>` — explain a failed run.
 - `vegaload compare <baseline.json> <candidate.json>` — diff a candidate report against a baseline; exits non-zero on regression.
 - `vegaload mcp serve` — start the MCP server (stdio by default).

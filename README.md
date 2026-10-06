@@ -262,6 +262,16 @@ checks fails that threshold. Use fixed check names. A run keeps at most 100 dist
 names; any more are counted together as `(other checks)`. See
 `examples/scenarios/checks.vl.js`.
 
+#### JUnit XML for CI
+
+`-junit results.xml` also writes the verdicts as JUnit XML, so a CI system
+can show them as test results. Each threshold, each check and the baseline
+gate is one test case. A failed threshold, a check that failed even once,
+or a baseline the run is worse than is a failed test case. A failed check
+does not change the exit code of `vegaload run`, but it does show as a
+failed test case, because the report says what happened and the exit code
+is the gate. A run with none of these writes an empty suite.
+
 Thresholds can also come from a file, with `-thresholds gate.json`. The file
 is a JSON list of `{"name", "metric", "operator", "value"}`, or the output of
 `vegaload diagnose -output json`, so a baseline run can set the bar for the
@@ -367,6 +377,26 @@ threshold fails the build:
       run -target https://staging.example.com/health -protocol http1
       -vus 20 -duration 1m -allow-target staging.example.com
       -threshold "p95 < 300ms" -threshold "error_rate < 1%"
+```
+
+Inside GitHub Actions, `vegaload run` also appends a summary to the job's
+page: the key numbers, and the verdict of each threshold, check and
+baseline gate. It does this on its own, because GitHub sets
+`GITHUB_STEP_SUMMARY`. Pass `-no-step-summary` to turn it off. Add `-junit`
+to write JUnit XML as well, which many CI systems show as test results:
+
+```yaml
+- uses: vegaload/vegaload@v0.3.0
+  with:
+    args: >-
+      run -target https://staging.example.com/health -protocol http1
+      -vus 20 -duration 1m -allow-target staging.example.com
+      -threshold "p95 < 300ms" -junit vegaload-junit.xml
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: vegaload-junit
+    path: vegaload-junit.xml
 ```
 
 - `args` is what you would type after `vegaload`, with the same quoting.
