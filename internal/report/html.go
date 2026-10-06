@@ -5,6 +5,7 @@ import (
 	"html"
 	"os"
 	"strings"
+	"time"
 )
 
 // WriteHTML implements FR-RPT-01: one self-contained HTML file for res,
@@ -39,6 +40,7 @@ func renderHTML(res *Result) string {
 	fmt.Fprintf(&b, "</section>\n")
 
 	b.WriteString(thresholdsSection(res))
+	b.WriteString(baselineSection(res))
 	b.WriteString(checksSection(res))
 
 	fmt.Fprintf(&b, "<section class=\"latency\">\n<h2>Latency</h2>\n<table>\n<tr><th>min</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>max</th><th>mean</th></tr>\n")
@@ -82,6 +84,40 @@ func thresholdsSection(res *Result) string {
 	}
 	b.WriteString("</table>\n</section>\n")
 	return b.String()
+}
+
+// baselineSection renders the baseline gate (FR-CLI-14), or nothing when
+// the run had no baseline. The verdict is written out as PASS or FAIL.
+func baselineSection(res *Result) string {
+	bl := res.Baseline
+	if bl == nil {
+		return ""
+	}
+	var b strings.Builder
+	verdict, cls := "Within the baseline", "pass"
+	if !bl.Passed {
+		verdict, cls = "Worse than the baseline", "fail"
+	}
+	fmt.Fprintf(&b, "<section class=\"baseline\">\n<h2>Baseline <span class=\"badge %s\">%s</span></h2>\n", cls, verdict)
+	fmt.Fprintf(&b, "<p>Compared with %s. Each metric may be up to %g%% worse.</p>\n", html.EscapeString(bl.Path), bl.MaxRegressionPercent)
+	b.WriteString("<table>\n<tr><th>result</th><th>metric</th><th>baseline</th><th>this run</th></tr>\n")
+	for _, m := range bl.Metrics {
+		word, c := "PASS", "pass"
+		if m.Regressed {
+			word, c = "FAIL", "fail"
+		}
+		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+			c, word, html.EscapeString(m.Name), baselineValue(m.Baseline, m.Unit), baselineValue(m.Candidate, m.Unit))
+	}
+	b.WriteString("</table>\n</section>\n")
+	return b.String()
+}
+
+func baselineValue(v float64, unit string) string {
+	if unit == "ns" {
+		return time.Duration(v).Round(1e3).String()
+	}
+	return fmt.Sprintf("%.2f%%", v*100)
 }
 
 // checksSection renders the table of named checks (FR-CLI-12), or

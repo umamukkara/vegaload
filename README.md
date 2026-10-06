@@ -198,6 +198,23 @@ exits non-zero if error rate or p95 latency got worse. Optional slack:
 Checked-in fixtures under `examples/scenarios/compare/` show both an ok and
 a regressed pair without needing a live target.
 
+Or do it in one command, with the baseline as a file you keep:
+
+```
+./vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -vus 10 -duration 30s -baseline baseline.json -max-regression 10
+```
+
+The run exits 3 if p95 latency, or the error rate, is worse than the
+baseline by more than 10 percent. It uses the same comparison as
+`vegaload compare`. The error rate may rise by that percent of the
+baseline's error rate, so a baseline with no errors allows none. Use a
+`-threshold "error_rate < 1%"` for an absolute limit. Without
+`-max-regression`, any increase fails. VegaLoad keeps no baseline store.
+The baseline is a file you supply, from `-out`. The summary, JSON, HTML
+report and audit log show the verdict. From an agent, `run_test` takes
+`baseline_path` and `max_regression`.
+
 ### Gate a run on pass/fail thresholds
 
 Add `-threshold` to make a run pass or fail on its own numbers, for example

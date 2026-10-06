@@ -81,6 +81,16 @@ default). Optional slack for CI noise:
 vegaload compare -error-rate-delta 0.01 -p95-ratio 1.2 baseline.json candidate.json
 ```
 
+To gate the run itself, in one command:
+
+```
+vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -vus 10 -duration 30s -baseline baseline.json -max-regression 10
+```
+
+It exits 3 if p95 or the error rate is more than 10 percent worse than the
+baseline. Without `-max-regression`, any increase fails.
+
 Without running the sample app, the checked-in fixtures under
 [`compare/`](./compare/) show both outcomes:
 

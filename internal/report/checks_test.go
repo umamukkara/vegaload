@@ -103,3 +103,19 @@ func TestCollector_RecordCheck_CapsDistinctNames(t *testing.T) {
 		t.Fatalf("total checks %d: counts must not be lost", total)
 	}
 }
+
+func TestBaselineSection_ShowsVerdictAndEscapesPath(t *testing.T) {
+	res := &Result{Baseline: &BaselineResult{
+		Path: "<b>.json", MaxRegressionPercent: 10, Passed: false,
+		Metrics: []BaselineMetric{{Name: "latency.p95", Baseline: 1e8, Candidate: 2e8, Unit: "ns", Regressed: true}},
+	}}
+	got := baselineSection(res)
+	for _, want := range []string{"Worse than the baseline", "FAIL", "latency.p95", "&lt;b&gt;.json", "100ms", "200ms"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+	if baselineSection(&Result{}) != "" {
+		t.Error("no baseline should render nothing")
+	}
+}

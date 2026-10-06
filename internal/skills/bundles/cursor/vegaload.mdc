@@ -17,7 +17,9 @@ alwaysApply: false
   `check_rate` threshold metric.
 - `run_test` — run a load test against a scenario file or a protocol-direct
   target (`target` + `protocol`). Choose `executor`: `fixed-vus`, `ramp`,
-  `step`, or `constant-arrival-rate`. Returns the run's results and, unless
+  `step`, or `constant-arrival-rate`. Pass `baseline_path` (and `max_regression`,
+  in percent) to compare the run with an earlier report; the result then has
+  `baseline.passed`. Returns the run's results and, unless
   `no_report` is set, a path to a self-contained HTML report.
   A non-localhost target that isn't in `allow_targets` is refused unless
   `yes: true` is set — this MCP server has no terminal to prompt a human on,

@@ -89,20 +89,22 @@ func createScenarioTool(exePath string) Tool {
 // --- run_test : wraps `vegaload run` ---
 
 type runTestArgs struct {
-	ScenarioPath string   `json:"scenario_path,omitempty"`
-	Target       string   `json:"target,omitempty"`
-	Protocol     string   `json:"protocol,omitempty"`
-	Executor     string   `json:"executor,omitempty"`
-	VUs          int      `json:"vus,omitempty"`
-	Duration     string   `json:"duration,omitempty"`
-	Stages       string   `json:"stages,omitempty"`
-	Rate         float64  `json:"rate,omitempty"`
-	MaxVUs       int      `json:"max_vus,omitempty"`
-	AllowTargets []string `json:"allow_targets,omitempty"`
-	Yes          bool     `json:"yes,omitempty"`
-	ReportPath   string   `json:"report_path,omitempty"`
-	NoReport     bool     `json:"no_report,omitempty"`
-	Thresholds   []string `json:"thresholds,omitempty"`
+	ScenarioPath  string   `json:"scenario_path,omitempty"`
+	Target        string   `json:"target,omitempty"`
+	Protocol      string   `json:"protocol,omitempty"`
+	Executor      string   `json:"executor,omitempty"`
+	VUs           int      `json:"vus,omitempty"`
+	Duration      string   `json:"duration,omitempty"`
+	Stages        string   `json:"stages,omitempty"`
+	Rate          float64  `json:"rate,omitempty"`
+	MaxVUs        int      `json:"max_vus,omitempty"`
+	AllowTargets  []string `json:"allow_targets,omitempty"`
+	Yes           bool     `json:"yes,omitempty"`
+	ReportPath    string   `json:"report_path,omitempty"`
+	NoReport      bool     `json:"no_report,omitempty"`
+	Thresholds    []string `json:"thresholds,omitempty"`
+	BaselinePath  string   `json:"baseline_path,omitempty"`
+	MaxRegression *float64 `json:"max_regression,omitempty"`
 }
 
 func runTestTool(exePath string) Tool {
@@ -115,24 +117,27 @@ func runTestTool(exePath string) Tool {
 			"from a terminal, since this tool has no interactive terminal of its own to prompt on. Optional thresholds " +
 			"(each like \"p95 < 300ms\" or \"error_rate < 1%\") make the run pass or fail: the result then carries " +
 			"thresholds and thresholds_passed. A breached threshold is a normal result with thresholds_passed false, " +
-			"not a tool error — the same run exits 3 from a terminal.",
+			"not a tool error — the same run exits 3 from a terminal. With baseline_path the run is also compared with an earlier " +
+			"report, and the result carries baseline with passed true or false; a worse run is a normal result too.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"scenario_path": map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
-				"target":        map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
-				"protocol":      map[string]any{"type": "string", "description": "http1, http2, grpc, or websocket (protocol-direct mode)"},
-				"executor":      map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
-				"vus":           map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
-				"duration":      map[string]any{"type": "string", "description": "run duration, e.g. \"30s\" (fixed-vus, constant-arrival-rate)"},
-				"stages":        map[string]any{"type": "string", "description": "comma-separated target:duration stages for ramp/step, e.g. \"10:30s,0:10s\""},
-				"rate":          map[string]any{"type": "number", "description": "iterations per second (constant-arrival-rate)"},
-				"max_vus":       map[string]any{"type": "integer", "description": "max concurrent VUs (constant-arrival-rate)"},
-				"allow_targets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "additional hosts allowed without confirmation"},
-				"yes":           map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
-				"report_path":   map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
-				"no_report":     map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
-				"thresholds":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed)"},
+				"scenario_path":  map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
+				"target":         map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
+				"protocol":       map[string]any{"type": "string", "description": "http1, http2, grpc, or websocket (protocol-direct mode)"},
+				"executor":       map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
+				"vus":            map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
+				"duration":       map[string]any{"type": "string", "description": "run duration, e.g. \"30s\" (fixed-vus, constant-arrival-rate)"},
+				"stages":         map[string]any{"type": "string", "description": "comma-separated target:duration stages for ramp/step, e.g. \"10:30s,0:10s\""},
+				"rate":           map[string]any{"type": "number", "description": "iterations per second (constant-arrival-rate)"},
+				"max_vus":        map[string]any{"type": "integer", "description": "max concurrent VUs (constant-arrival-rate)"},
+				"allow_targets":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "additional hosts allowed without confirmation"},
+				"yes":            map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
+				"report_path":    map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
+				"no_report":      map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
+				"thresholds":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed)"},
+				"baseline_path":  map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
+				"max_regression": map[string]any{"type": "number", "description": "with baseline_path: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)"},
 			},
 		},
 		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -185,6 +190,12 @@ func runTestTool(exePath string) Tool {
 			}
 			if in.Yes {
 				args = append(args, "-yes")
+			}
+			if in.BaselinePath != "" {
+				args = append(args, "-baseline", in.BaselinePath)
+			}
+			if in.MaxRegression != nil {
+				args = append(args, "-max-regression", strconv.FormatFloat(*in.MaxRegression, 'f', -1, 64))
 			}
 			if in.NoReport {
 				args = append(args, "-no-report")

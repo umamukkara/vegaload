@@ -34,6 +34,11 @@ type Result struct {
 	Thresholds       []ThresholdResult `json:"thresholds,omitempty"`
 	ThresholdsPassed *bool             `json:"thresholds_passed,omitempty"`
 
+	// Baseline is the verdict of the baseline gate (FR-CLI-14): this run
+	// compared with a baseline report the user supplied. It is omitted
+	// when the run had no baseline.
+	Baseline *BaselineResult `json:"baseline,omitempty"`
+
 	// Checks is the pass and fail count of each named check the scenario
 	// made with check() (FR-CLI-12), in the order each name was first
 	// seen. It is omitted when the scenario made no checks. A failed
@@ -78,6 +83,29 @@ type ThresholdResult struct {
 	Value    string `json:"value"`
 	Observed string `json:"observed"`
 	Passed   bool   `json:"passed"`
+}
+
+// BaselineResult is the verdict of a run's baseline gate (FR-CLI-14). It
+// only covers the two gated metrics, p95 latency and error rate; the full
+// comparison is what `vegaload compare` prints.
+type BaselineResult struct {
+	Path string `json:"path"`
+	// MaxRegressionPercent is how much worse than the baseline each gated
+	// metric may be before the gate fails.
+	MaxRegressionPercent float64          `json:"max_regression_percent"`
+	Passed               bool             `json:"passed"`
+	Metrics              []BaselineMetric `json:"metrics"`
+	Notes                []string         `json:"notes,omitempty"`
+}
+
+// BaselineMetric is one gated metric: its baseline and this run's value,
+// in the unit given ("ns" for p95, "ratio" for the error rate).
+type BaselineMetric struct {
+	Name      string  `json:"name"`
+	Baseline  float64 `json:"baseline"`
+	Candidate float64 `json:"candidate"`
+	Unit      string  `json:"unit"`
+	Regressed bool    `json:"regressed"`
 }
 
 // Latency holds the percentiles and summary stats FR-RPT-01 asks for.
