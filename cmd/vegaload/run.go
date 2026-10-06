@@ -140,6 +140,13 @@ type runConfig struct {
 	BaselinePath  string
 	MaxRegression float64 // percent
 	Baseline      *report.Result
+
+	// FR-RPT-05: a JUnit XML file, and the GitHub Actions job summary.
+	JUnitPath     string
+	NoStepSummary bool
+	// StepSummaryPath is where the Markdown summary is appended. It
+	// comes from GITHUB_STEP_SUMMARY, so it is empty outside Actions.
+	StepSummaryPath string
 }
 
 // parseRunArgs parses run's flags into a runConfig. It returns a usage
@@ -199,6 +206,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.StringVar(&cfg.BaselinePath, "baseline", "", "JSON report of an earlier run (from -out) to compare this run with. If p95 or the error rate is worse by more than -max-regression, the run exits 3")
 	fs.Float64Var(&cfg.MaxRegression, "max-regression", 0, "with -baseline: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)")
 
+	// FR-RPT-05: JUnit XML and the GitHub Actions job summary.
+	fs.StringVar(&cfg.JUnitPath, "junit", "", "also write a JUnit XML file to this path: each threshold, check and the baseline gate is one test case, so CI systems show the results natively")
+	fs.BoolVar(&cfg.NoStepSummary, "no-step-summary", false, "inside GitHub Actions, do not append the run's summary to the job summary")
+
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload run [flags] [scenario-file]")
 		fmt.Fprintln(fs.Output(), "Flags must come before the scenario file, e.g. \"vegaload run -vus 10 scenario.vl.js\" —")
@@ -245,6 +256,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 			return nil, fmt.Errorf("-threshold: %w", err)
 		}
 		cfg.Thresholds = append(cfg.Thresholds, ts...)
+	}
+
+	if !cfg.NoStepSummary {
+		cfg.StepSummaryPath = os.Getenv("GITHUB_STEP_SUMMARY")
 	}
 
 	maxRegressionSet := false
@@ -649,6 +664,19 @@ func cmdRun(args []string) int {
 		if err := report.WriteJSON(cfg.OutPath, result); err != nil {
 			fmt.Fprintf(os.Stderr, "vegaload run: writing -out: %v\n", err)
 			return 1
+		}
+	}
+
+	// FR-RPT-05. A failure here is a warning, like the HTML report: the
+	// load test itself already happened, and its exit code is the gate.
+	if cfg.JUnitPath != "" {
+		if err := report.WriteJUnit(cfg.JUnitPath, result); err != nil {
+			fmt.Fprintf(os.Stderr, "vegaload run: warning: writing -junit: %v\n", err)
+		}
+	}
+	if cfg.StepSummaryPath != "" {
+		if err := report.AppendStepSummary(cfg.StepSummaryPath, result); err != nil {
+			fmt.Fprintf(os.Stderr, "vegaload run: warning: writing the GitHub job summary: %v\n", err)
 		}
 	}
 

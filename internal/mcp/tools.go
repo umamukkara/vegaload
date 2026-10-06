@@ -105,6 +105,7 @@ type runTestArgs struct {
 	Thresholds    []string `json:"thresholds,omitempty"`
 	BaselinePath  string   `json:"baseline_path,omitempty"`
 	MaxRegression *float64 `json:"max_regression,omitempty"`
+	JUnitPath     string   `json:"junit_path,omitempty"`
 }
 
 func runTestTool(exePath string) Tool {
@@ -137,6 +138,7 @@ func runTestTool(exePath string) Tool {
 				"no_report":      map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
 				"thresholds":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed)"},
 				"baseline_path":  map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
+				"junit_path":     map[string]any{"type": "string", "description": "also write a JUnit XML file here: each threshold, check and the baseline gate is one test case"},
 				"max_regression": map[string]any{"type": "number", "description": "with baseline_path: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)"},
 			},
 		},
@@ -196,6 +198,9 @@ func runTestTool(exePath string) Tool {
 			}
 			if in.MaxRegression != nil {
 				args = append(args, "-max-regression", strconv.FormatFloat(*in.MaxRegression, 'f', -1, 64))
+			}
+			if in.JUnitPath != "" {
+				args = append(args, "-junit", in.JUnitPath)
 			}
 			if in.NoReport {
 				args = append(args, "-no-report")

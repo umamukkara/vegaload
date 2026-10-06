@@ -479,3 +479,16 @@ func TestRunTestTool_PassesBaselineFlags(t *testing.T) {
 		t.Errorf("args = %s", args)
 	}
 }
+
+func TestRunTestTool_PassesJUnitFlag(t *testing.T) {
+	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
+	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)
+	if _, err := callTool(t, NewTools(bin), "run_test", map[string]any{
+		"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true, "junit_path": "out/junit.xml",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(readArgs(t, argsFile), " "); !strings.Contains(args, "-junit out/junit.xml") {
+		t.Errorf("args = %s", args)
+	}
+}
