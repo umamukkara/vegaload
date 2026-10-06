@@ -130,6 +130,50 @@ vegaload run -vus 5 -duration 10s http_ws_chain.py   # same flow, Python
 
 (flags before the scenario file -- see `vegaload run -h`)
 
+## More scenario flows
+
+`crud-flow.vl.js` (and its Python twin, `crud_flow.py`) is a session in one
+scenario: create a widget, read it back by the id the create returned, then
+list all widgets and check the new one is in the list. Each step uses what
+the one before it returned, which a single fixed `-target` cannot do:
+
+```
+vegaload run -vus 5 -duration 10s crud-flow.vl.js
+vegaload run -vus 5 -duration 10s crud_flow.py   # same flow, Python
+```
+
+The sample app fails about 3% of creates on purpose, so expect a failed
+iteration or two per hundred. A much higher failure rate means a step in
+the flow is really broken.
+
+## Load shapes
+
+Everything above uses the default shape, a fixed number of virtual users
+(`-vus`) for a fixed time (`-duration`). `-executor` picks another one. The
+commands below use the sample app's `/widgets` endpoint, and every one of
+them also works with a scenario file in place of `-target`/`-protocol`:
+
+```
+# Ramp: climb to 10 users over 30s, to 20 over the next 30s, then drain
+vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -executor ramp -vus 10 -stages 10:30s,20:30s,0:10s
+
+# Step: hold 5 users for 30s, jump to 10 for 30s, then to 20 for 30s
+vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -executor step -vus 10 -stages 5:30s,10:30s,20:30s
+
+# Constant arrival rate: start 50 iterations every second, using as many
+# users as it takes, up to -max-vus
+vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -executor constant-arrival-rate -rate 50 -max-vus 100 -duration 30s
+```
+
+Use a fixed or ramped number of users to ask "how does it behave with this
+many people?". Use a constant arrival rate to ask "can it keep up with this
+many requests a second?": if the server slows down, VegaLoad keeps arriving
+at the same rate instead of waiting, so a slow server shows up as growing
+latency and dropped arrivals, not as a lower request rate.
+
 ## 6. Do all of this from an agent instead
 
 ```
