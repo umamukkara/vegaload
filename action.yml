@@ -1,0 +1,64 @@
+name: VegaLoad
+description: >-
+  Install VegaLoad, the open-source load testing tool, and optionally run it.
+  Add -threshold flags and the step fails when a threshold is broken.
+author: VegaLoad
+branding:
+  icon: activity
+  color: blue
+
+inputs:
+  version:
+    description: >-
+      VegaLoad version to install, for example v0.3.0. Leave it empty to use
+      the version the action itself was called with (uses: vegaload/vegaload@v0.3.0),
+      or the latest release when the action is called by a branch name.
+    required: false
+    default: ""
+  args:
+    description: >-
+      Arguments for vegaload, written as you would type them in a shell, for
+      example: run -target http://localhost:8080/health -protocol http1 -vus 10
+      -duration 30s -threshold "p95 < 300ms". Leave it empty to only install.
+      The step fails when vegaload exits with a non-zero code (a broken
+      threshold exits 3).
+    required: false
+    default: ""
+  working-directory:
+    description: Directory to run vegaload in.
+    required: false
+    default: "."
+  repository:
+    description: GitHub repository to download releases from. You do not need to change this.
+    required: false
+    default: vegaload/vegaload
+
+outputs:
+  version:
+    description: The VegaLoad version that was installed, for example v0.3.0.
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install VegaLoad
+      id: install
+      shell: bash
+      env:
+        VEGALOAD_REPOSITORY: ${{ inputs.repository }}
+        VEGALOAD_VERSION: ${{ inputs.version }}
+        VEGALOAD_ACTION_REF: ${{ github.action_ref }}
+      run: bash "${{ github.action_path }}/.github/action/install.sh"
+
+    - name: Run VegaLoad
+      if: inputs.args != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VEGALOAD_ARGS: ${{ inputs.args }}
+      # The arguments come from the workflow file of the repository that
+      # runs this job, the same place any other `run:` command comes from.
+      # They are passed through an environment variable, never pasted into
+      # the script, and evaluated so that quotes and backslash line breaks
+      # work the way they do in a terminal.
+      run: eval "vegaload $VEGALOAD_ARGS"

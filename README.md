@@ -292,6 +292,32 @@ Every command supports `-output text` (default), `json`, or (`run` only)
 `jsonl`. Run `vegaload <command> -h` for its full flag list, or `vegaload
 help` for the top-level summary.
 
+## Use in GitHub Actions
+
+This repository is also a GitHub Action. It installs a released VegaLoad
+(Linux and macOS runners) and runs it, and the step fails when `vegaload`
+exits with a non-zero code. With `-threshold`, that means a broken
+threshold fails the build:
+
+```yaml
+- uses: vegaload/vegaload@v0.3.0
+  with:
+    args: >-
+      run -target https://staging.example.com/health -protocol http1
+      -vus 20 -duration 1m -allow-target staging.example.com
+      -threshold "p95 < 300ms" -threshold "error_rate < 1%"
+```
+
+- `args` is what you would type after `vegaload`, with the same quoting.
+  Leave it out to only install, then call `vegaload` in later steps.
+- The action installs the version you pin after the `@`. Set `version:` to
+  install a different one. A branch name such as `@main` installs the
+  latest release.
+- The archive is checked against the release's `checksums.txt` before it
+  is used. Nothing is sent anywhere except the downloads from the GitHub
+  release.
+- The step's `version` output is the installed version.
+
 ## License
 
 Apache-2.0. See `LICENSE`.

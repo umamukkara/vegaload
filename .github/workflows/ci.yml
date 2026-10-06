@@ -50,3 +50,70 @@ jobs:
           args: release --snapshot --clean --skip=publish
         env:
           HOMEBREW_TAP_TOKEN: dry-run
+
+  # Runs the GitHub Action (action.yml) from this repository against the
+  # sample app on Linux and macOS. The action installs the latest release,
+  # so the threshold checks only run once a release that has -threshold exists.
+  github-action:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Start the sample app
+        run: |
+          cd examples/sample-app
+          go build -o "$RUNNER_TEMP/sample-app" .
+          ("$RUNNER_TEMP/sample-app" > "$RUNNER_TEMP/sample-app.log" 2>&1 &)
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/health && break
+            sleep 1
+          done
+      - name: Install only
+        id: install
+        uses: ./
+      - name: The binary is on the PATH
+        run: |
+          test -n "${{ steps.install.outputs.version }}"
+          vegaload version
+      - name: Run a load test through the action
+        uses: ./
+        with:
+          args: >-
+            run -target http://127.0.0.1:8080/widgets -protocol http1
+            -vus 2 -duration 3s -no-report -no-open
+      - name: Does this release support thresholds?
+        id: thresholds
+        run: |
+          if vegaload run -h 2>&1 | grep -q -- '-threshold'; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "The latest release has no -threshold yet, skipping the threshold checks."
+          fi
+      - name: A threshold that holds passes the step
+        if: steps.thresholds.outputs.supported == 'true'
+        uses: ./
+        with:
+          args: >-
+            run -target http://127.0.0.1:8080/widgets -protocol http1
+            -vus 2 -duration 3s -no-report -no-open
+            -threshold "p95 < 5s" -threshold "error_rate < 50%"
+      - name: A broken threshold fails the step
+        if: steps.thresholds.outputs.supported == 'true'
+        id: breach
+        continue-on-error: true
+        uses: ./
+        with:
+          args: >-
+            run -target http://127.0.0.1:8080/widgets -protocol http1
+            -vus 2 -duration 3s -no-report -no-open
+            -threshold "fast: p95 < 1us"
+      - name: The broken threshold really failed the step
+        if: steps.thresholds.outputs.supported == 'true'
+        run: test "${{ steps.breach.outcome }}" = "failure"
