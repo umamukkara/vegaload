@@ -26,6 +26,7 @@ type Env struct {
 
 	Getenv      func(string) string
 	LookPath    func(string) (string, error)
+	DirExists   func(string) bool // nil means the real file system
 	LookupHost  func(ctx context.Context, host string) ([]string, error)
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 	HTTPClient  *http.Client
@@ -69,5 +70,5 @@ func DefaultEnv(version string) (Env, error) {
 }
 
 func (e Env) hostEnv() hosts.Env {
-	return hosts.Env{OS: e.OS, Home: e.Home, Dir: e.Dir, LookPath: e.LookPath}
+	return hosts.Env{OS: e.OS, Home: e.Home, Dir: e.Dir, LookPath: e.LookPath, DirExists: e.DirExists}
 }

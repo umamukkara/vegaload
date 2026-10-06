@@ -38,6 +38,12 @@ func testEnv(t *testing.T) Env {
 		t.Fatal(err)
 	}
 	return Env{
+		// Only directories under the temp root exist, so host detection
+		// never sees what is really installed on the machine running the tests.
+		DirExists: func(p string) bool {
+			fi, err := os.Stat(p)
+			return err == nil && fi.IsDir() && strings.HasPrefix(p, root)
+		},
 		Version: "1.2.3", Exe: exe, OS: "darwin", Arch: "arm64", Home: home, Dir: dir,
 		Getenv:   func(string) string { return "" },
 		LookPath: func(n string) (string, error) { return "", errors.New("not found") },

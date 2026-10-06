@@ -30,6 +30,10 @@ type Env struct {
 	Home     string // the user's home directory
 	Dir      string // the project directory being checked
 	LookPath func(name string) (string, error)
+	// DirExists reports whether a directory exists. Nil means the real
+	// file system; tests pass a fake so detection never depends on what
+	// happens to be installed on the machine running them.
+	DirExists func(path string) bool
 }
 
 func (e Env) onPath(name string) bool {
@@ -40,7 +44,10 @@ func (e Env) onPath(name string) bool {
 	return err == nil
 }
 
-func dirExists(p string) bool {
+func (e Env) dirExists(p string) bool {
+	if e.DirExists != nil {
+		return e.DirExists(p)
+	}
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
 }
@@ -235,9 +242,9 @@ func cursor() Host {
 			switch {
 			case e.onPath("cursor"):
 				return true, "cursor on PATH"
-			case e.OS == "darwin" && dirExists("/Applications/Cursor.app"):
+			case e.OS == "darwin" && e.dirExists("/Applications/Cursor.app"):
 				return true, "/Applications/Cursor.app"
-			case dirExists(filepath.Join(e.Home, ".cursor")):
+			case e.dirExists(filepath.Join(e.Home, ".cursor")):
 				return true, "~/.cursor"
 			}
 			return false, ""
@@ -262,7 +269,7 @@ func claudeCode() Host {
 			switch {
 			case e.onPath("claude"):
 				return true, "claude on PATH"
-			case dirExists(filepath.Join(e.Home, ".claude")):
+			case e.dirExists(filepath.Join(e.Home, ".claude")):
 				return true, "~/.claude"
 			}
 			return false, ""
@@ -288,9 +295,9 @@ func claudeDesktop() Host {
 		Supported: func(osName string) bool { return osName == "darwin" },
 		Detect: func(e Env) (bool, string) {
 			switch {
-			case dirExists("/Applications/Claude.app"):
+			case e.dirExists("/Applications/Claude.app"):
 				return true, "/Applications/Claude.app"
-			case dirExists(filepath.Join(e.Home, "Library", "Application Support", "Claude")):
+			case e.dirExists(filepath.Join(e.Home, "Library", "Application Support", "Claude")):
 				return true, "~/Library/Application Support/Claude"
 			}
 			return false, ""
