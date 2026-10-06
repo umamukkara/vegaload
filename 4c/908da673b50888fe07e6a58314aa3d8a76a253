@@ -1,0 +1,35 @@
+cmd/vegaload/main.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 77
+cmd/vegaload/doctor.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 37,48-49
+internal/doctor/harness.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 7-10,13,16-20
+cmd/vegaload/doctor_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 103
+internal/doctor/doctor_test.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 111-128,455,462-464,466-468
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 469
+README.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 211-215,228-230
+internal/doctor/hostchecks.go
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 216-228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c908da673b50888fe07e6a58314aa3d8a76a253",
+  "prompts": {
+    "cc0a0aeb12c9b269": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2a9d5a9a-0f78-4305-807c-4df61b6b8efe",
+        "model": "default"
+      },
+      "human_author": "Karthik S <karthik.s@harness.io>",
+      "total_additions": 70,
+      "total_deletions": 102,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
