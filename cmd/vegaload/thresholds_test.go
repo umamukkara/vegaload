@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,5 +194,118 @@ func TestPrintResult_ShowsThresholds(t *testing.T) {
 	printResult(&plain, &report.Result{Executor: "fixed-vus"})
 	if strings.Contains(plain.String(), "threshold") {
 		t.Errorf("a run without thresholds must not print a thresholds block:\n%s", plain.String())
+	}
+}
+
+// checksRun runs a scripted scenario that makes one passing and one
+// failing check on every iteration, plus whatever extra flags are given.
+func checksRun(t *testing.T, scenarioName, scenarioSrc string, extra ...string) (int, map[string]any) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	scenario := filepath.Join(dir, scenarioName)
+	src := strings.ReplaceAll(scenarioSrc, "{{URL}}", srv.URL)
+	if err := os.WriteFile(scenario, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "summary.json")
+	args := []string{
+		"-vus", "2", "-duration", "300ms",
+		"-no-report", "-audit-log", filepath.Join(dir, "audit.log"),
+		"-out", out,
+	}
+	args = append(args, extra...)
+	args = append(args, scenario)
+	code := cmdRun(args)
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("no summary written (exit %d): %v", code, err)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatalf("summary is not JSON: %v", err)
+	}
+	return code, summary
+}
+
+const jsChecksScenario = `
+export default function () {
+  const res = http.get("{{URL}}");
+  check(res, {
+    "status is 200": (r) => r.status === 200,
+    "never true": () => false,
+  });
+}
+`
+
+func TestCmdRun_Checks_AppearInSummary(t *testing.T) {
+	code, summary := checksRun(t, "checks.vl.js", jsChecksScenario)
+	if code != 0 {
+		t.Fatalf("failed checks must not fail the run: exit code = %d, want 0", code)
+	}
+	list, ok := summary["checks"].([]any)
+	if !ok || len(list) != 2 {
+		t.Fatalf("summary checks = %v, want 2 entries", summary["checks"])
+	}
+	first := list[0].(map[string]any)
+	second := list[1].(map[string]any)
+	if first["name"] != "status is 200" || first["fails"].(float64) != 0 || first["passes"].(float64) == 0 {
+		t.Errorf("first check = %v", first)
+	}
+	if second["name"] != "never true" || second["passes"].(float64) != 0 || second["fails"].(float64) == 0 {
+		t.Errorf("second check = %v", second)
+	}
+	// The failed check did not count as a failed request.
+	if summary["failed"].(float64) != 0 {
+		t.Errorf("failed = %v, want 0: a failed check is not a failed request", summary["failed"])
+	}
+}
+
+func TestCmdRun_CheckRateThreshold_BreachExitsThree(t *testing.T) {
+	// Half of all checks fail, so 99% is breached and 10% is not.
+	code, summary := checksRun(t, "checks.vl.js", jsChecksScenario, "-threshold", "checks: check_rate >= 99%")
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3", code)
+	}
+	if summary["thresholds_passed"] != false {
+		t.Errorf("thresholds_passed = %v, want false", summary["thresholds_passed"])
+	}
+
+	code, _ = checksRun(t, "checks.vl.js", jsChecksScenario, "-threshold", "check_rate >= 10%")
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 when the check rate is above the limit", code)
+	}
+}
+
+func TestCmdRun_CheckRateThreshold_NoChecksFails(t *testing.T) {
+	code, _ := checksRun(t, "plain.vl.js", `export default function () { http.get("{{URL}}"); }`,
+		"-threshold", "check_rate >= 50%")
+	if code != 3 {
+		t.Errorf("exit code = %d, want 3: a run with no checks cannot pass a check_rate threshold", code)
+	}
+}
+
+func TestCmdRun_PythonChecks(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not on PATH")
+	}
+	code, summary := checksRun(t, "checks.py", `
+def iteration():
+    res = http.get("{{URL}}")
+    check(res, {
+        "status is 200": lambda r: r.status == 200,
+        "never true": lambda r: False,
+    })
+`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if list, ok := summary["checks"].([]any); !ok || len(list) != 2 {
+		t.Errorf("summary checks = %v, want 2 entries", summary["checks"])
 	}
 }

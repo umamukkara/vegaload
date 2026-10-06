@@ -95,6 +95,11 @@ func (r *repeatedFlags) Set(v string) error {
 type runConfig struct {
 	ScenarioPath string
 
+	// checkRecorder is where scripted VUs report check() outcomes
+	// (FR-CLI-12). runScenarioWithCollector sets it to the run's
+	// collector; it is not a flag.
+	checkRecorder netapi.CheckRecorder
+
 	Executor string // fixed-vus, ramp, step, constant-arrival-rate
 	VUs      int
 	Duration time.Duration
@@ -413,7 +418,12 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 			return nil, nil, err
 		}
 		pool := newVUPool(concurrency, func() (iterCloser, error) {
-			return script.NewVU(check, cfg.Timeout)
+			vu, err := script.NewVU(check, cfg.Timeout)
+			if err != nil {
+				return nil, err
+			}
+			vu.SetCheckRecorder(cfg.checkRecorder)
+			return vu, nil
 		})
 		// Validate the script once, up front, the same way
 		// protocol-direct mode's New() fails fast on a bad target,
@@ -430,7 +440,12 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 		return nil, nil, err
 	}
 	pool := newVUPool(concurrency, func() (iterCloser, error) {
-		return script.NewVU(check, cfg.Timeout)
+		vu, err := script.NewVU(check, cfg.Timeout)
+		if err != nil {
+			return nil, err
+		}
+		vu.SetCheckRecorder(cfg.checkRecorder)
+		return vu, nil
 	})
 	if _, err := pool.borrowAndRelease(); err != nil {
 		return nil, nil, err
@@ -453,6 +468,10 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	if err != nil {
 		return nil, err
 	}
+
+	// Scripts report their check() outcomes straight to the collector
+	// (FR-CLI-12).
+	cfg.checkRecorder = collector
 
 	iter, closeFn, err := buildIteration(cfg)
 	if err != nil {
@@ -721,7 +740,25 @@ func printResult(w io.Writer, r *report.Result) {
 	fmt.Fprintf(w, "  total:    %d\n", r.Total)
 	fmt.Fprintf(w, "  failed:   %d\n", r.Failed)
 	fmt.Fprintf(w, "  mean:     %s\n", r.Latency.Mean)
+	printChecks(w, r)
 	printThresholds(w, r)
+}
+
+// printChecks writes the checks block of the text summary, if the
+// scenario made any checks (FR-CLI-12).
+func printChecks(w io.Writer, r *report.Result) {
+	if len(r.Checks) == 0 {
+		return
+	}
+	rate, _ := r.CheckRate()
+	fmt.Fprintf(w, "\nchecks (%.2f%% passed)\n", rate*100)
+	for _, c := range r.Checks {
+		status := "PASS"
+		if c.Fails > 0 {
+			status = "FAIL"
+		}
+		fmt.Fprintf(w, "  %s  %s  (%d passed, %d failed)\n", status, c.Name, c.Passes, c.Fails)
+	}
 }
 
 // printThresholds writes the thresholds block of the text summary, if

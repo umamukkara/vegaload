@@ -160,6 +160,29 @@ class WS:
 http = HTTP()
 ws = WS()
 
+def check(value, tests):
+    """check(value, {"name": test, ...}): run each test on value and count
+    it as passed or failed. A test is a function, called with value, or a
+    plain bool. A test that raises counts as failed. Returns True only if
+    every test passed."""
+    if not isinstance(tests, dict):
+        raise TypeError("check: want check(value, {name: test, ...})")
+    all_passed = True
+    for name, test in tests.items():
+        if callable(test):
+            try:
+                passed = bool(test(value))
+            except Exception:
+                passed = False
+        elif isinstance(test, bool):
+            passed = test
+        else:
+            raise TypeError("check: %r must be a function or a bool" % (name,))
+        _call("check", name=str(name), ok=passed)
+        if not passed:
+            all_passed = False
+    return all_passed
+
 def _respond_ready(ok, error=None):
     msg = {"type": "ready", "ok": ok}
     if error is not None:
@@ -177,7 +200,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws},
+            init_globals={"http": http, "ws": ws, "check": check},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:
@@ -250,6 +273,7 @@ type message struct {
 	Headers  map[string]string `json:"headers"`
 	Body     string            `json:"body"`
 	Insecure bool              `json:"insecure"`
+	Name     string            `json:"name"`
 	Handle   int               `json:"handle"`
 	Data     string            `json:"data"`
 	Text     bool              `json:"text"`
@@ -285,7 +309,14 @@ type VU struct {
 
 	conns      map[int]*netapi.WSConn
 	nextHandle int
+
+	// checks receives every check() outcome (FR-CLI-12). It may be nil.
+	checks netapi.CheckRecorder
 }
+
+// SetCheckRecorder sets where this VU reports the outcome of every
+// check() its script makes. Call it before the first Iteration.
+func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
 
 // NewVU starts a fresh python3 subprocess for one virtual user and waits
 // for its ready signal, which is also where a script that fails to
@@ -466,6 +497,11 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 	switch msg.Op {
 	case "http":
 		return v.callHTTP(msg)
+	case "check":
+		if v.checks != nil {
+			v.checks.RecordCheck(msg.Name, msg.OK)
+		}
+		return map[string]interface{}{}, nil
 	case "ws_connect":
 		return v.callWSConnect(msg)
 	case "ws_send":

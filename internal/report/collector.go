@@ -41,6 +41,13 @@ type Collector struct {
 	// every one of potentially a million iterations.
 	liveTotal  atomic.Int64
 	liveFailed atomic.Int64
+
+	// checks holds the per-name totals of check() calls (FR-CLI-12),
+	// guarded by checkMu rather than mu so a busy scenario that checks
+	// every response does not contend with Record.
+	checkMu    sync.Mutex
+	checkOrder []string
+	checks     map[string]*CheckResult
 }
 
 // NewCollector returns a Collector ready to record a run that is
@@ -64,6 +71,41 @@ func (c *Collector) Record(r engine.IterationResult) {
 	if s.failed {
 		c.liveFailed.Add(1)
 	}
+}
+
+// RecordCheck counts one evaluation of the named check (FR-CLI-12). It
+// implements netapi.CheckRecorder and is safe for concurrent use.
+func (c *Collector) RecordCheck(name string, passed bool) {
+	c.checkMu.Lock()
+	defer c.checkMu.Unlock()
+	if c.checks == nil {
+		c.checks = map[string]*CheckResult{}
+	}
+	cr := c.checks[name]
+	if cr == nil {
+		cr = &CheckResult{Name: name}
+		c.checks[name] = cr
+		c.checkOrder = append(c.checkOrder, name)
+	}
+	if passed {
+		cr.Passes++
+	} else {
+		cr.Fails++
+	}
+}
+
+// snapshotChecks returns a copy of the check totals, in first-seen order.
+func (c *Collector) snapshotChecks() []CheckResult {
+	c.checkMu.Lock()
+	defer c.checkMu.Unlock()
+	if len(c.checkOrder) == 0 {
+		return nil
+	}
+	out := make([]CheckResult, 0, len(c.checkOrder))
+	for _, n := range c.checkOrder {
+		out = append(out, *c.checks[n])
+	}
+	return out
 }
 
 // Counts returns the total and failed iteration counts recorded so
@@ -94,6 +136,7 @@ func (c *Collector) Finish(executor string, elapsed time.Duration) *Result {
 		StartedAt: c.start,
 		Elapsed:   elapsed,
 		Total:     int64(len(samples)),
+		Checks:    c.snapshotChecks(),
 	}
 	if len(samples) == 0 {
 		return res

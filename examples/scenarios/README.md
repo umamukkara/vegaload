@@ -172,6 +172,19 @@ The sample app fails about 3% of creates on purpose, so expect a failed
 iteration or two per hundred. A much higher failure rate means a step in
 the flow is really broken.
 
+### Checks
+
+`checks.vl.js` (and `checks.py`) use `check(value, {name: test})` to count
+named assertions without failing the iteration. Failed checks show in the
+summary and HTML report. Add `check_rate` as a threshold to gate the run:
+
+```
+vegaload run -vus 5 -duration 10s \
+  -threshold "checks pass: check_rate >= 99%" checks.vl.js
+```
+
+A run that made no checks fails a `check_rate` threshold.
+
 ## Load shapes
 
 Everything above uses the default shape, a fixed number of virtual users

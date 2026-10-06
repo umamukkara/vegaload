@@ -12,6 +12,9 @@ alwaysApply: false
 - `create_scenario` — scaffold a scenario file (`vegaload new`). The
   scenario's `http`/`ws` globals can make real calls, carrying a value from
   one into the next, under the same per-call allowlist described below.
+  Scripts can also call `check(value, {name: test})` to count named
+  assertions without failing the iteration; gate on them with the
+  `check_rate` threshold metric.
 - `run_test` — run a load test against a scenario file or a protocol-direct
   target (`target` + `protocol`). Choose `executor`: `fixed-vus`, `ramp`,
   `step`, or `constant-arrival-rate`. Returns the run's results and, unless
