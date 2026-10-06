@@ -100,12 +100,7 @@ func TestDoctor_FailsThenFixesMissingCursorSetup(t *testing.T) {
 func TestDoctor_AgreesWithInit(t *testing.T) {
 	// A project set up by `vegaload init` must pass every host check.
 	dir := t.TempDir()
-	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd) //nolint:errcheck
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	if code := cmdInit(nil); code != 0 {
+	if code := cmdInit([]string{"-dir", dir}); code != 0 {
 		t.Fatalf("init exit %d", code)
 	}
 	code, out, _, _ := doctorRun(t, "-dir", dir, "-host", "cursor,claude-code", "-only", "host", "-strict")

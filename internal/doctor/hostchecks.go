@@ -213,6 +213,19 @@ func hostCheckSet(env Env, ch chosenHost) []Check {
 			r.Detail = detail
 			return r
 		}
+		// Auto-detected hosts (Cursor is installed, ~/.cursor exists) with
+		// no VegaLoad files must not fail the run: CLI-only is healthy.
+		// Named hosts (-host cursor) and projects that already have host
+		// files still Fail so init/doctor stay in agreement.
+		if !ch.explicit && !hasProjectFiles(h, henv) {
+			r := result(Warn, fmt.Sprintf("%s is installed but VegaLoad is not registered. Using the CLI alone is fully supported.", h.Name))
+			r.Detail = detail
+			r.Fix = "Run `vegaload init` in this project if you want the agent path."
+			if fixCfg != nil {
+				r.fix = mergeFix(fixCfg.Path, env.Exe, false)
+			}
+			return r
+		}
 		r := result(Fail, fmt.Sprintf("%s has no vegaload MCP server registered", h.Name))
 		r.Detail = detail
 		r.Fix = "Run `vegaload init` in this project."

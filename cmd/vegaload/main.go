@@ -74,7 +74,7 @@ Commands:
   version    Print the vegaload version
   help       Show this help text
 
-Every command supports -output text (default), json, or (run only) jsonl.
+Every command supports -output text (default) or json; run and doctor also support jsonl.
 A "run" also writes a self-contained HTML report by default — see
 "vegaload run -h" for -report/-no-report/-no-open.
 

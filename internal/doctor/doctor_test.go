@@ -108,6 +108,24 @@ func TestHostNone_ReportsNoHostChecks(t *testing.T) {
 	}
 }
 
+func TestAutoDetectedHostWithoutVegaloadIsWarnNotFail(t *testing.T) {
+	env := testEnv(t)
+	if err := os.MkdirAll(filepath.Join(env.Home, ".cursor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rep := run(t, env, Options{Only: []string{"host.cursor"}})
+	cfg := byID(t, rep, "host.cursor.config")
+	if cfg.Status != Warn {
+		t.Fatalf("auto-detected Cursor with no VegaLoad files: config = %+v, want warn", cfg)
+	}
+	if rep.ExitCode(false) != 0 {
+		t.Errorf("CLI-only with Cursor installed must exit 0, summary %+v", rep.Summary)
+	}
+	if byID(t, run(t, env, Options{Hosts: []string{"cursor"}, Only: []string{"host.cursor.config"}}), "host.cursor.config").Status != Fail {
+		t.Error("-host cursor (explicit) should still fail when VegaLoad is not registered")
+	}
+}
+
 func TestMissingConfigFailsThenFixRegistersAndHandshakePasses(t *testing.T) {
 	env := testEnv(t)
 	opt := Options{Hosts: []string{"cursor"}, Only: []string{"host"}}
@@ -434,40 +452,21 @@ func (f failTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return nil, errors.New("blocked")
 }
 
-func TestHarnessChecksOffMakeNoCalls(t *testing.T) {
+func TestHarnessPlaceholderMakesNoCalls(t *testing.T) {
 	env := testEnv(t)
 	env.HTTPClient = &http.Client{Transport: failTransport{t}}
 	rep := run(t, env, Options{Hosts: []string{"none"}, Only: []string{"harness"}})
 	if r := byID(t, rep, "harness.off"); r.Status != Skip {
 		t.Errorf("harness.off = %+v", r)
 	}
-}
-
-func TestHarnessChecksOn(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
-	defer srv.Close()
-	env := testEnv(t)
-	env.Getenv = func(n string) string {
-		switch n {
-		case "VEGALOAD_HARNESS_URL":
-			return srv.URL
-		case "HARNESS_API_KEY":
-			return "super-secret-value"
+	rep = run(t, env, Options{Hosts: []string{"none"}, Only: []string{"harness"}, Harness: true})
+	if r := byID(t, rep, "harness.placeholder"); r.Status != Skip {
+		t.Errorf("harness.placeholder = %+v, want skip (no network)", r)
+	}
+	for _, id := range ids(rep) {
+		if id == "harness.credentials" || id == "harness.reachable" {
+			t.Errorf("did not expect %s on placeholder harness check", id)
 		}
-		return ""
-	}
-	rep := run(t, env, Options{Hosts: []string{"none"}, Only: []string{"harness"}, Harness: true})
-	if r := byID(t, rep, "harness.credentials"); r.Status != Pass || strings.Contains(r.Message, "super-secret-value") {
-		t.Errorf("credentials = %+v", r)
-	}
-	if r := byID(t, rep, "harness.reachable"); r.Status != Pass {
-		t.Errorf("reachable = %+v", r)
-	}
-	env.Getenv = func(string) string { return "" }
-	env.HTTPClient = &http.Client{Transport: failTransport{t}}
-	rep = run(t, env, Options{Hosts: []string{"none"}, Only: []string{"harness.credentials"}, Harness: true})
-	if r := byID(t, rep, "harness.credentials"); r.Status != Fail {
-		t.Errorf("missing key = %+v", r)
 	}
 }
 
