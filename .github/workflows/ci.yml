@@ -69,11 +69,18 @@ jobs:
         run: |
           cd examples/sample-app
           go build -o "$RUNNER_TEMP/sample-app" .
-          ("$RUNNER_TEMP/sample-app" > "$RUNNER_TEMP/sample-app.log" 2>&1 &)
+          ("$RUNNER_TEMP/sample-app" -addr 127.0.0.1:18080 > "$RUNNER_TEMP/sample-app.log" 2>&1 &)
+          ok=false
           for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8080/health && break
+            if curl -fsS http://127.0.0.1:18080/health; then ok=true; break; fi
             sleep 1
           done
+          if [ "$ok" != true ]; then
+            echo "The sample app did not start. Its log:"
+            cat "$RUNNER_TEMP/sample-app.log"
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:18080/widgets
       - name: Install only
         id: install
         uses: ./
@@ -85,7 +92,7 @@ jobs:
         uses: ./
         with:
           args: >-
-            run -target http://127.0.0.1:8080/widgets -protocol http1
+            run -target http://127.0.0.1:18080/widgets -protocol http1
             -vus 2 -duration 3s -no-report -no-open
       - name: Does this release support thresholds?
         id: thresholds
@@ -101,7 +108,7 @@ jobs:
         uses: ./
         with:
           args: >-
-            run -target http://127.0.0.1:8080/widgets -protocol http1
+            run -target http://127.0.0.1:18080/widgets -protocol http1
             -vus 2 -duration 3s -no-report -no-open
             -threshold "p95 < 5s" -threshold "error_rate < 50%"
       - name: A broken threshold fails the step
@@ -111,7 +118,7 @@ jobs:
         uses: ./
         with:
           args: >-
-            run -target http://127.0.0.1:8080/widgets -protocol http1
+            run -target http://127.0.0.1:18080/widgets -protocol http1
             -vus 2 -duration 3s -no-report -no-open
             -threshold "fast: p95 < 1us"
       - name: The broken threshold really failed the step
