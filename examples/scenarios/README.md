@@ -1,7 +1,7 @@
 # scenarios
 
-Ready-to-run examples against [`../sample-app`](../sample-app), plus one
-scripted scenario file. Start the sample app first:
+Ready-to-run examples against [`../sample-app`](../sample-app), plus two
+scripted scenario files. Start the sample app first:
 
 ```
 cd ../sample-app && go run .
@@ -96,8 +96,9 @@ vegaload compare compare/baseline.json compare/candidate-regressed.json
 
 `generate_from_spec` (the MCP tool) and `vegaload new -from-openapi` (the CLI
 command behind it) are the same thing -- a Markdown runbook of one
-ready-to-run command per endpoint, not a scripted scenario (see
-`smoke.vl.js`'s comment for why):
+ready-to-run command per endpoint, not a chained scenario (an OpenAPI spec
+describes each endpoint on its own, not how their responses should feed
+into each other -- see `internal/openapi`'s doc comment):
 
 ```
 vegaload new -from-openapi ../sample-app/openapi.json sample-app
@@ -110,11 +111,21 @@ each of `/health`, `/widgets` (GET and POST), and `/widgets/{id}`.
 
 `smoke.vl.js` is here as the "a test is a real file" example (see
 `AGENTS.md`), not a load test of the sample app -- it exercises VegaLoad's VU
-pool and executor shapes against plain JS, since Phase 0's scripting
-runtimes can't reach the network yet:
+pool and executor shapes against plain JS without making any network call:
 
 ```
 vegaload run -vus 5 -duration 5s smoke.vl.js
+```
+
+`http-ws-chain.vl.js` (and its Python twin, `http_ws_chain.py`) is the real
+FR-CLI-08 shape: a scenario's `http`/`ws` globals make real calls against the
+sample app, carrying a value from one into the next -- here, a widget's
+freshly-created id from a `POST /widgets` call into a `/ws/echo` WebSocket
+message:
+
+```
+vegaload run -vus 5 -duration 10s http-ws-chain.vl.js
+vegaload run -vus 5 -duration 10s http_ws_chain.py   # same flow, Python
 ```
 
 (flags before the scenario file -- see `vegaload run -h`)
