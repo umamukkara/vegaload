@@ -6,7 +6,7 @@ description: Use VegaLoad to load-test an HTTP/gRPC/WebSocket API — create a s
 # VegaLoad load testing
 
 VegaLoad is an open-source load testing tool. `vegaload init` registered its MCP
-server for this project, which exposes seven tools — every one of them a thin
+server for this project, which exposes eight tools — every one of them a thin
 wrapper around the same `vegaload` CLI commands you could run yourself from a
 terminal, so nothing here does anything a human running `vegaload` by hand
 couldn't also do.
@@ -49,6 +49,12 @@ couldn't also do.
 - **generate_from_spec** — given a JSON OpenAPI document, generate a runbook
   (one ready-to-run `vegaload run` command per endpoint). Only JSON specs are
   supported — ask the user to export YAML specs to JSON first.
+- **validate_scenario** — run a scenario once, with one user and one iteration,
+  and report whether it works (`vegaload validate`). It makes real calls, under
+  the same host rules as **run_test**. Returns `valid`, and when not valid, the
+  `stage` (`load` or `iteration`) and `error`. Call it after writing or editing
+  a scenario and before **run_test**. A failed `check()` does not make a
+  scenario invalid.
 
 ## Typical flow
 

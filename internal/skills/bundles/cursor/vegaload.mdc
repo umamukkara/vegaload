@@ -6,7 +6,7 @@ alwaysApply: false
 # VegaLoad load testing
 
 `vegaload init` registered VegaLoad's MCP server for this project (see
-`.cursor/mcp.json`). It exposes seven tools, each a thin wrapper around a
+`.cursor/mcp.json`). It exposes eight tools, each a thin wrapper around a
 `vegaload` CLI command you could run yourself in a terminal:
 
 - `create_scenario` — scaffold a scenario file (`vegaload new`). The
@@ -33,8 +33,12 @@ alwaysApply: false
   (`vegaload compare`); reports whether error rate or p95 latency regressed.
 - `generate_from_spec` — generate a runbook of ready-to-run `vegaload run`
   commands from a JSON OpenAPI spec (JSON only, not YAML).
+- `validate_scenario` — run a scenario once, with one user, and report whether
+  it works (`vegaload validate`). Makes real calls under the same host rules as
+  `run_test`. Returns `valid`, and when not valid, `stage` and `error`. Call it
+  before `run_test` on any new or edited scenario.
 
-Typical flow: generate_from_spec (if an OpenAPI spec was given) → run_test →
+Typical flow: generate_from_spec (if an OpenAPI spec was given) → validate_scenario → run_test →
 get_results / diagnose_failure → suggest_thresholds once a baseline looks
 healthy → compare_reports after a later run. Summarize results in plain
 language (total requests, failure rate, p95 latency) and mention the HTML

@@ -33,6 +33,7 @@ func NewTools(exePath string) []Tool {
 		diagnoseFailureTool(exePath),
 		compareReportsTool(exePath),
 		generateFromSpecTool(exePath),
+		validateScenarioTool(exePath),
 	}
 }
 
@@ -471,4 +472,71 @@ var CoreToolNames = []string{
 	"diagnose_failure",
 	"compare_reports",
 	"generate_from_spec",
+	"validate_scenario",
+}
+
+// --- validate_scenario : wraps `vegaload validate` (FR-MCP-07) ---
+
+type validateScenarioArgs struct {
+	ScenarioPath string   `json:"scenario_path"`
+	AllowTargets []string `json:"allow_targets,omitempty"`
+	Yes          bool     `json:"yes,omitempty"`
+	Timeout      string   `json:"timeout,omitempty"`
+}
+
+func validateScenarioTool(exePath string) Tool {
+	return Tool{
+		Name: "validate_scenario",
+		Description: "Check a scenario before a real load test: run it once, with one user and one iteration, and " +
+			"report whether it works. Equivalent to `vegaload validate`. This makes real network calls, under the same " +
+			"host rules as run_test (a non-localhost host that isn't in allow_targets is refused unless yes is set). " +
+			"Returns valid, and when it is not valid, stage (\"load\" if the script could not be read or started, " +
+			"\"iteration\" if the iteration returned an error) and error. A scenario that is not valid is a normal " +
+			"result, not a tool error, so read valid before running run_test. Any check() results are listed too; " +
+			"a failed check does not make the scenario invalid.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"scenario_path": map[string]any{"type": "string", "description": "path to the scenario file (.vl.js or .py)"},
+				"allow_targets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "additional hosts allowed without confirmation"},
+				"yes":           map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted host"},
+				"timeout":       map[string]any{"type": "string", "description": "time limit for the one iteration, e.g. \"30s\" (default 30s)"},
+			},
+			"required": []string{"scenario_path"},
+		},
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in validateScenarioArgs
+			if err := json.Unmarshal(raw, &in); err != nil {
+				return nil, fmt.Errorf("invalid arguments: %w", err)
+			}
+			if in.ScenarioPath == "" {
+				return nil, fmt.Errorf("scenario_path is required")
+			}
+			args := []string{"validate", "-output", "json", "-trigger", "mcp"}
+			if in.Timeout != "" {
+				args = append(args, "-timeout", in.Timeout)
+			}
+			for _, t := range in.AllowTargets {
+				args = append(args, "-allow-target", t)
+			}
+			if in.Yes {
+				args = append(args, "-yes")
+			}
+			args = append(args, in.ScenarioPath) // positional: must come last
+
+			stdout, err := RunCLI(ctx, exePath, args...)
+			// Exit 1 with a JSON body means the scenario is not valid.
+			// That is the answer the caller asked for, not a failure of
+			// the tool, so the result is returned as-is. No JSON body
+			// means validate itself failed (for example a usage error).
+			var result map[string]any
+			if jerr := json.Unmarshal(stdout, &result); jerr != nil {
+				if err != nil {
+					return nil, err
+				}
+				return nil, fmt.Errorf("parsing `vegaload validate` output: %w", jerr)
+			}
+			return result, nil
+		},
+	}
 }

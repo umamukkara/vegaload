@@ -128,6 +128,31 @@ protocol-direct commands from an OpenAPI spec:
 writes `sample-app.vegaload-plan.md`: one ready-to-run `vegaload run`
 command per endpoint the spec declares.
 
+### Check a scenario before a real run
+
+```
+./vegaload validate examples/scenarios/crud-flow.vl.js
+```
+
+`validate` runs the scenario once, with one user and one iteration, and says
+whether it works. It catches a script that will not load (a syntax error, a
+missing file, no `iteration()` in Python) and an iteration that fails (a
+wrong URL, a thrown error, a host that is not allowed). It makes real
+network calls, under the same host rules as `run`, so a host that is not
+localhost needs `-allow-target` or `-yes`. Any `check()` results are listed,
+and a failed check does not make the scenario invalid. Add `-output json`
+for a machine-readable result.
+
+| Exit code | Meaning                          |
+|-----------|----------------------------------|
+| 0         | The scenario loaded and its iteration ran |
+| 1         | The scenario is not valid        |
+| 2         | Bad usage                        |
+
+From an agent, the `validate_scenario` tool does the same and returns
+`valid`, and for an invalid scenario the `stage` (`load` or `iteration`) and
+`error`.
+
 ### 3. Explain a run's results
 
 Keep a run's JSON summary alongside its HTML report with `-out`:
@@ -246,9 +271,9 @@ present: a Claude Code skill bundle (`.claude/skills/vegaload`), a Cursor
 rules file (`.cursor/rules/vegaload.mdc`), and an MCP server entry merged
 into both `.mcp.json` and `.cursor/mcp.json`, pointing at this same compiled
 binary running `vegaload mcp serve`. Open the project in Claude Code or
-Cursor afterward and the agent has seven tools — `create_scenario`,
+Cursor afterward and the agent has eight tools — `create_scenario`,
 `run_test`, `get_results`, `suggest_thresholds`, `diagnose_failure`,
-`compare_reports`, `generate_from_spec` — each one calling the exact CLI
+`compare_reports`, `generate_from_spec`, `validate_scenario` — each one calling the exact CLI
 command shown above and parsing its `-output json` result; there is no
 agent-only path that skips the CLI.
 
@@ -273,7 +298,7 @@ agent host it finds (Cursor, Claude Code, and Claude Desktop on macOS), and
 optionally at a target. For a host that is installed but has no VegaLoad
 MCP entry, that is a warning, not a failure — using the CLI alone is
 healthy. When VegaLoad *is* registered, doctor starts the configured
-server, performs a real MCP handshake, and expects all seven tools. An
+server, performs a real MCP handshake, and expects all eight tools. An
 installed editor with no VegaLoad setup does not fail the command.
 
 ```
@@ -299,6 +324,7 @@ this same walkthrough as a standalone, copy-pasteable script.
 | Command                 | What it does                                                          |
 |--------------------------|------------------------------------------------------------------------|
 | `vegaload run`           | Run a load test: a scenario file, or a protocol-direct target         |
+| `vegaload validate`      | Run a scenario once, with one user, to check that it works            |
 | `vegaload new`           | Scaffold a starter scenario file, or a runbook from an OpenAPI spec    |
 | `vegaload diagnose`      | Print environment info, or explain a report's results                |
 | `vegaload mcp serve`     | Run an MCP server over stdio for agent-native use                     |

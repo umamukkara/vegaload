@@ -43,6 +43,8 @@ func run(args []string) int {
 		return cmdInit(args[1:])
 	case "doctor":
 		return cmdDoctor(args[1:])
+	case "validate":
+		return cmdValidate(args[1:])
 	case "version":
 		fmt.Printf("vegaload %s\n", version)
 		return 0
@@ -70,6 +72,7 @@ Commands:
   mcp serve  Run an MCP server over stdio for agent-native use (Claude Code, Cursor, ...)
   mcp eval   Run the versioned MCP tool-calling eval suite against this binary
   init       Register the MCP server and skill bundles for this project
+  validate   Run a scenario once, with one user, to check that it works
   doctor     Check that VegaLoad is set up and working (CLI, agent hosts, target)
   version    Print the vegaload version
   help       Show this help text
