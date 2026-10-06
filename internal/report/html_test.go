@@ -64,3 +64,48 @@ func TestWriteHTML_EmptyResult(t *testing.T) {
 		t.Fatalf("WriteHTML on an empty result should not error: %v", err)
 	}
 }
+
+func TestWriteHTML_Thresholds(t *testing.T) {
+	failed := false
+	res := &Result{
+		Executor: "fixed-vus",
+		Total:    10,
+		Thresholds: []ThresholdResult{
+			{Name: "fast <api>", Metric: "p95", Operator: "<", Value: "1ms", Observed: "3ms", Passed: false},
+			{Name: "low errors", Metric: "error_rate", Operator: "<", Value: "0.01", Observed: "0", Passed: true},
+		},
+		ThresholdsPassed: &failed,
+	}
+	out := renderHTML(res)
+	for _, want := range []string{"Thresholds breached", ">FAIL<", ">PASS<", "fast &lt;api&gt;", "3ms"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report missing %q", want)
+		}
+	}
+	for _, bad := range []string{"http://", "https://"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("report references an external resource (%q)", bad)
+		}
+	}
+
+	passed := true
+	res.Thresholds = res.Thresholds[1:]
+	res.ThresholdsPassed = &passed
+	if out := renderHTML(res); !strings.Contains(out, "All thresholds passed") {
+		t.Error("a passing run should say so")
+	}
+
+	res.Thresholds, res.ThresholdsPassed = nil, nil
+	if out := renderHTML(res); strings.Contains(out, "Thresholds") {
+		t.Error("a run without thresholds must not render a thresholds section")
+	}
+}
+
+// SVG text defaults to a black fill, which is unreadable on the dark
+// theme's background; the chart labels must follow the page's text colour.
+func TestWriteHTML_ChartLabelsFollowTextColour(t *testing.T) {
+	out := renderHTML(&Result{Executor: "fixed-vus"})
+	if !strings.Contains(out, "svg text{fill:currentColor}") {
+		t.Error("chart labels must use currentColor so they read in the dark theme")
+	}
+}

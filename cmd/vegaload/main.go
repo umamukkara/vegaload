@@ -75,6 +75,7 @@ Commands:
   help       Show this help text
 
 Every command supports -output text (default) or json; run and doctor also support jsonl.
+"run -threshold" makes a run pass or fail on its own numbers; a breached threshold exits 3.
 A "run" also writes a self-contained HTML report by default — see
 "vegaload run -h" for -report/-no-report/-no-open.
 

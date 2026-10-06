@@ -92,6 +92,32 @@ vegaload compare compare/baseline.json compare/candidate-ok.json
 vegaload compare compare/baseline.json compare/candidate-regressed.json
 ```
 
+## Gate a run on pass/fail thresholds
+
+`-threshold` makes a run fail on its own numbers, which is what a CI step
+needs. Exit code 3 means the run finished but broke a threshold:
+
+```
+vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -vus 10 -duration 30s \
+  -threshold "p95 < 300ms" -threshold "error_rate < 1%"
+echo $?   # 0 if both held, 3 if either broke
+```
+
+Let a baseline set the bar, then reuse it on later runs:
+
+```
+vegaload diagnose -no-llm -output json baseline.json > gate.json
+vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -vus 10 -duration 30s -thresholds gate.json
+```
+
+A CI job is the same command; the build fails when the exit code is not 0:
+
+```
+- run: vegaload run -target "$TARGET" -protocol http1 -vus 20 -duration 1m -threshold "p95 < 300ms" -threshold "error_rate < 1%"
+```
+
 ## 4. Generate a runbook from an OpenAPI spec
 
 `generate_from_spec` (the MCP tool) and `vegaload new -from-openapi` (the CLI

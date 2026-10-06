@@ -173,6 +173,50 @@ exits non-zero if error rate or p95 latency got worse. Optional slack:
 Checked-in fixtures under `examples/scenarios/compare/` show both an ok and
 a regressed pair without needing a live target.
 
+### Gate a run on pass/fail thresholds
+
+Add `-threshold` to make a run pass or fail on its own numbers, for example
+in CI:
+
+```
+./vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -vus 10 -duration 30s \
+  -threshold "p95 < 300ms" \
+  -threshold "api stays up: error_rate < 1%"
+```
+
+Each threshold is an optional `name:`, a metric, an operator (`<`, `<=`,
+`>`, `>=`) and a value. The metrics are `p50`, `p90`, `p95`, `p99`, `mean`,
+`min`, `max` (durations such as `300ms`), `error_rate` (a fraction like
+`0.01` or a percentage like `1%`), `rps`, `failed` and `total`. Every
+threshold is judged once, on the finished run. A run that completed no
+requests fails all of them.
+
+The text summary, the JSON output, the HTML report and the audit log all
+show each threshold's verdict. The exit code tells a script what happened:
+
+| Exit code | Meaning                                                  |
+|-----------|----------------------------------------------------------|
+| 0         | The run finished and every threshold passed (or none set) |
+| 1         | The run itself failed                                    |
+| 2         | Bad usage, such as a threshold that cannot be parsed     |
+| 3         | The run finished but broke at least one threshold        |
+
+Thresholds can also come from a file, with `-thresholds gate.json`. The file
+is a JSON list of `{"name", "metric", "operator", "value"}`, or the output of
+`vegaload diagnose -output json`, so a baseline run can set the bar for the
+next ones:
+
+```
+./vegaload diagnose -no-llm -output json baseline.json > gate.json
+./vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
+  -vus 10 -duration 30s -thresholds gate.json
+```
+
+`diagnose` also prints the same suggestion as ready-to-paste `-threshold`
+flags. From an agent, `run_test` takes a `thresholds` list; a breach comes
+back as a normal result with `thresholds_passed: false`.
+
 ### 5. Hand all of this to an agent
 
 ```

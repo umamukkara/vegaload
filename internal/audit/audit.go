@@ -31,6 +31,11 @@ type Entry struct {
 	Error        string        `json:"error,omitempty"`
 	Total        int64         `json:"total,omitempty"`
 	Failed       int64         `json:"failed,omitempty"`
+
+	// Thresholds are the pass/fail thresholds the run was given
+	// (FR-CLI-11), as text, and whether they all passed.
+	Thresholds       []string `json:"thresholds,omitempty"`
+	ThresholdsPassed *bool    `json:"thresholds_passed,omitempty"`
 }
 
 // DefaultPath is where a run's audit record is appended when the caller

@@ -347,3 +347,74 @@ func TestCoreToolNames_MatchRegisteredTools(t *testing.T) {
 		t.Errorf("NewTools registers %d tools, CoreToolNames lists %d: update CoreToolNames", len(registered), len(CoreToolNames))
 	}
 }
+
+func TestRunTestTool_PassesThresholdsAsFlags(t *testing.T) {
+	passed := true
+	resultJSON, _ := json.Marshal(report.Result{
+		Executor: "fixed-vus", Total: 10,
+		Thresholds:       []report.ThresholdResult{{Name: "p95 < 300ms", Metric: "p95", Operator: "<", Value: "300ms", Observed: "12ms", Passed: true}},
+		ThresholdsPassed: &passed,
+	})
+	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)
+	tools := NewTools(bin)
+
+	out, err := callTool(t, tools, "run_test", map[string]any{
+		"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true,
+		"thresholds": []string{"p95 < 300ms", "fast: error_rate < 1%"},
+	})
+	if err != nil {
+		t.Fatalf("run_test returned error: %v", err)
+	}
+	res := out.(map[string]any)["result"].(report.Result)
+	if res.ThresholdsPassed == nil || !*res.ThresholdsPassed || len(res.Thresholds) != 1 {
+		t.Errorf("result thresholds = %+v", res)
+	}
+
+	args := readArgs(t, argsFile)
+	for _, want := range []string{"-threshold", "p95 < 300ms", "fast: error_rate < 1%"} {
+		if !containsArg(args, want) {
+			t.Errorf("args %v missing %q", args, want)
+		}
+	}
+}
+
+// A breached threshold is exit 3 from the CLI, but for an agent it is a
+// normal result to read, not a tool failure.
+func TestRunTestTool_BreachedThresholdIsAResultNotAnError(t *testing.T) {
+	failed := false
+	resultJSON, _ := json.Marshal(report.Result{
+		Executor: "fixed-vus", Total: 10,
+		Thresholds:       []report.ThresholdResult{{Name: "p95 < 1ns", Metric: "p95", Operator: "<", Value: "1ns", Observed: "5ms", Passed: false}},
+		ThresholdsPassed: &failed,
+	})
+	bin, _ := argRecordingBinary(t, string(resultJSON), 3)
+	tools := NewTools(bin)
+
+	out, err := callTool(t, tools, "run_test", map[string]any{
+		"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true,
+		"thresholds": []string{"p95 < 1ns"},
+	})
+	if err != nil {
+		t.Fatalf("a breached threshold must not be a tool error, got: %v", err)
+	}
+	res := out.(map[string]any)["result"].(report.Result)
+	if res.ThresholdsPassed == nil || *res.ThresholdsPassed {
+		t.Errorf("thresholds_passed = %v, want false", res.ThresholdsPassed)
+	}
+}
+
+// Other non-zero exits (a bad threshold is exit 2, a failed run is 1)
+// are still tool errors.
+func TestRunTestTool_OtherExitCodesStillError(t *testing.T) {
+	for _, code := range []int{1, 2} {
+		bin, _ := argRecordingBinary(t, "", code)
+		tools := NewTools(bin)
+		_, err := callTool(t, tools, "run_test", map[string]any{
+			"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true,
+			"thresholds": []string{"nonsense"},
+		})
+		if err == nil {
+			t.Errorf("exit %d: want a tool error", code)
+		}
+	}
+}

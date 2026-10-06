@@ -48,12 +48,14 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - Write tests alongside the code they test (`_test.go`), not in a separate top-level test tree.
 - Every new CLI flag needs a corresponding line in `vegaload --help` output and in the docs. Don't ship an undocumented flag.
 - Never name the underlying scripting engine (Goja) in user-facing CLI output, error messages, or docs. Describe VegaLoad by the languages it supports: JavaScript, TypeScript, Python. This matches the existing Harness messaging rule.
+- Pass/fail limits on a run are called **thresholds** everywhere users read them: flags, output, errors, docs. Do not use Harness RT terms (probe, hypothesis, resilience score) for them. A threshold stays a plain name, metric, operator and value judged on the run's own numbers. Anything richer belongs to Harness RT, not here.
 - Commit messages: one line, present tense, describing what changed and why, not a log of commands run.
 
 ## Commands an agent should know
 
 - `vegaload run <file>` — run a scenario.
 - `vegaload new --from-openapi <spec>` — generate a starter scenario from an OpenAPI spec.
+- `vegaload run -threshold "p95 < 300ms" ...` — make a run pass or fail on its own numbers. A breach exits 3; `-thresholds <file>` loads them from JSON.
 - `vegaload diagnose <report>` — explain a failed run.
 - `vegaload compare <baseline.json> <candidate.json>` — diff a candidate report against a baseline; exits non-zero on regression.
 - `vegaload mcp serve` — start the MCP server (stdio by default).
