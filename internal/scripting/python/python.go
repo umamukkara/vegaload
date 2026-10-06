@@ -160,6 +160,34 @@ class WS:
 http = HTTP()
 ws = WS()
 
+def check(value, tests):
+    """check(value, {"name": test, ...}): run each test on value and count
+    it as passed or failed. A test is a function, called with value, or a
+    plain bool. A test that raises counts as failed. Returns True only if
+    every test passed."""
+    if not isinstance(tests, dict):
+        raise TypeError("check: want check(value, {name: test, ...})")
+    all_passed = True
+    outcomes = []
+    for name, test in tests.items():
+        if callable(test):
+            try:
+                passed = bool(test(value))
+            except Exception:
+                passed = False
+        elif isinstance(test, bool):
+            passed = test
+        else:
+            raise TypeError("check: %r must be a function or a bool" % (name,))
+        outcomes.append({"name": str(name), "ok": passed})
+        if not passed:
+            all_passed = False
+    # One round trip for the whole call, not one per test, so checks add
+    # as little as possible to the iteration being timed.
+    if outcomes:
+        _call("check", results=outcomes)
+    return all_passed
+
 def _respond_ready(ok, error=None):
     msg = {"type": "ready", "ok": ok}
     if error is not None:
@@ -177,7 +205,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws},
+            init_globals={"http": http, "ws": ws, "check": check},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:
@@ -237,6 +265,12 @@ func Load(path string) (*Script, error) {
 // message is one line of the harness's stdout protocol: a "ready"
 // handshake at startup, a "result" ending one iteration, or a "call"
 // asking the Go side to perform one http/ws operation mid-iteration.
+// checkOutcome is one test's result inside a "check" call.
+type checkOutcome struct {
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+}
+
 type message struct {
 	Type  string `json:"type"`
 	OK    bool   `json:"ok"`
@@ -250,9 +284,12 @@ type message struct {
 	Headers  map[string]string `json:"headers"`
 	Body     string            `json:"body"`
 	Insecure bool              `json:"insecure"`
+	Name     string            `json:"name"`
 	Handle   int               `json:"handle"`
 	Data     string            `json:"data"`
 	Text     bool              `json:"text"`
+	// Results is the batch of outcomes on a "check" call.
+	Results []checkOutcome `json:"results"`
 	// TimeoutMs is a pointer because Python's None (no timeout given)
 	// must stay distinguishable from an explicit 0.
 	TimeoutMs *int `json:"timeout_ms"`
@@ -285,7 +322,14 @@ type VU struct {
 
 	conns      map[int]*netapi.WSConn
 	nextHandle int
+
+	// checks receives every check() outcome (FR-CLI-12). It may be nil.
+	checks netapi.CheckRecorder
 }
+
+// SetCheckRecorder sets where this VU reports the outcome of every
+// check() its script makes. Call it before the first Iteration.
+func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
 
 // NewVU starts a fresh python3 subprocess for one virtual user and waits
 // for its ready signal, which is also where a script that fails to
@@ -466,6 +510,13 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 	switch msg.Op {
 	case "http":
 		return v.callHTTP(msg)
+	case "check":
+		if v.checks != nil {
+			for _, r := range msg.Results {
+				v.checks.RecordCheck(r.Name, r.OK)
+			}
+		}
+		return map[string]interface{}{}, nil
 	case "ws_connect":
 		return v.callWSConnect(msg)
 	case "ws_send":

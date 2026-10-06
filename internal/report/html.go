@@ -39,6 +39,7 @@ func renderHTML(res *Result) string {
 	fmt.Fprintf(&b, "</section>\n")
 
 	b.WriteString(thresholdsSection(res))
+	b.WriteString(checksSection(res))
 
 	fmt.Fprintf(&b, "<section class=\"latency\">\n<h2>Latency</h2>\n<table>\n<tr><th>min</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>max</th><th>mean</th></tr>\n")
 	fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n</table>\n</section>\n",
@@ -78,6 +79,30 @@ func thresholdsSection(res *Result) string {
 		}
 		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%s %s</td><td>%s</td></tr>\n",
 			c, word, html.EscapeString(t.Name), html.EscapeString(t.Operator), html.EscapeString(t.Value), html.EscapeString(t.Observed))
+	}
+	b.WriteString("</table>\n</section>\n")
+	return b.String()
+}
+
+// checksSection renders the table of named checks (FR-CLI-12), or
+// nothing when the scenario made none. Each row shows how many times the
+// check passed and failed; the word PASS or FAIL is written out so the
+// result does not rest on colour alone.
+func checksSection(res *Result) string {
+	if len(res.Checks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	rate, _ := res.CheckRate()
+	fmt.Fprintf(&b, "<section class=\"checks\">\n<h2>Checks <span class=\"badge\">%.2f%% passed</span></h2>\n", rate*100)
+	b.WriteString("<table>\n<tr><th>result</th><th>check</th><th>rate</th><th>passes</th><th>fails</th></tr>\n")
+	for _, c := range res.Checks {
+		word, cls := "PASS", "pass"
+		if c.Fails > 0 {
+			word, cls = "FAIL", "fail"
+		}
+		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%.2f%%</td><td>%d</td><td>%d</td></tr>\n",
+			cls, word, html.EscapeString(c.Name), 100*float64(c.Passes)/float64(c.Passes+c.Fails), c.Passes, c.Fails)
 	}
 	b.WriteString("</table>\n</section>\n")
 	return b.String()

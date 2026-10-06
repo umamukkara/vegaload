@@ -45,12 +45,14 @@ var metrics = map[string]kind{
 	"rps":        kindNumber,
 	"failed":     kindCount,
 	"total":      kindCount,
+	// check_rate is the share of check() calls that passed (FR-CLI-12).
+	"check_rate": kindRatio,
 }
 
 // MetricNames lists the metrics a threshold can use, for help text and
 // error messages.
 func MetricNames() []string {
-	return []string{"p50", "p90", "p95", "p99", "mean", "min", "max", "error_rate", "rps", "failed", "total"}
+	return []string{"p50", "p90", "p95", "p99", "mean", "min", "max", "error_rate", "rps", "failed", "total", "check_rate"}
 }
 
 // Threshold is one parsed pass/fail threshold.
@@ -134,14 +136,14 @@ func parseValue(k kind, metric, text string) (limit float64, canonical string, e
 		if p, ok := strings.CutSuffix(text, "%"); ok {
 			f, perr := strconv.ParseFloat(strings.TrimSpace(p), 64)
 			if perr != nil || f < 0 || f > 100 {
-				return 0, "", fmt.Errorf("error_rate %q: want a percentage from 0%% to 100%%", text)
+				return 0, "", fmt.Errorf("%s %q: want a percentage from 0%% to 100%%", metric, text)
 			}
 			f /= 100
 			return f, formatNumber(f), nil
 		}
 		f, perr := strconv.ParseFloat(text, 64)
 		if perr != nil || f < 0 || f > 1 {
-			return 0, "", fmt.Errorf("error_rate %q: want a fraction from 0 to 1 (like 0.01), or a percentage (like 1%%)", text)
+			return 0, "", fmt.Errorf("%s %q: want a fraction from 0 to 1 (like 0.01), or a percentage (like 1%%)", metric, text)
 		}
 		return f, formatNumber(f), nil
 	case kindCount:
@@ -194,6 +196,18 @@ func Evaluate(ts []Threshold, res *report.Result) []report.ThresholdResult {
 	out := make([]report.ThresholdResult, 0, len(ts))
 	for _, t := range ts {
 		r := report.ThresholdResult{Name: t.Name, Metric: t.Metric, Operator: t.Operator, Value: t.Value}
+		if t.Metric == "check_rate" {
+			rate, any := res.CheckRate()
+			if !any {
+				r.Observed = "no checks were made"
+				out = append(out, r)
+				continue
+			}
+			r.Observed = formatObserved(t.Metric, rate)
+			r.Passed = compare(rate, t.Operator, t.limit)
+			out = append(out, r)
+			continue
+		}
 		if res.Total == 0 {
 			r.Observed = "no requests completed"
 			out = append(out, r)

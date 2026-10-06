@@ -155,3 +155,50 @@ func TestAllPassed(t *testing.T) {
 		t.Error("one failure: want false")
 	}
 }
+
+func TestCheckRate_ParseAndEvaluate(t *testing.T) {
+	th, err := Parse("checks: check_rate >= 99%")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if th.Metric != "check_rate" || th.Operator != ">=" {
+		t.Fatalf("parsed %+v", th)
+	}
+
+	res := &report.Result{Total: 10, Checks: []report.CheckResult{{Name: "a", Passes: 98, Fails: 2}}}
+	got := Evaluate([]Threshold{th}, res)
+	if got[0].Passed || got[0].Observed != "0.98" {
+		t.Errorf("98%% of checks passing should fail a 99%% threshold: %+v", got[0])
+	}
+
+	res.Checks[0] = report.CheckResult{Name: "a", Passes: 100}
+	if got := Evaluate([]Threshold{th}, res); !got[0].Passed {
+		t.Errorf("100%% of checks passing should pass: %+v", got[0])
+	}
+}
+
+func TestCheckRate_NoChecksFails(t *testing.T) {
+	th, _ := Parse("check_rate >= 50%")
+	got := Evaluate([]Threshold{th}, &report.Result{Total: 10})
+	if got[0].Passed || got[0].Observed != "no checks were made" {
+		t.Errorf("a run with no checks must fail check_rate: %+v", got[0])
+	}
+}
+
+func TestCheckRate_BadValueNamesTheMetric(t *testing.T) {
+	_, err := Parse("check_rate >= 150%")
+	if err == nil || !strings.Contains(err.Error(), "check_rate") {
+		t.Errorf("error = %v, want one that names check_rate", err)
+	}
+}
+
+func TestCheckRate_ZeroRequestsSaysNoChecks(t *testing.T) {
+	ths, err := ParseAll([]string{"check_rate >= 99%"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Evaluate(ths, &report.Result{})
+	if got[0].Passed || got[0].Observed != "no checks were made" {
+		t.Fatalf("got %+v", got[0])
+	}
+}

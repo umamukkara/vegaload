@@ -188,7 +188,8 @@ in CI:
 Each threshold is an optional `name:`, a metric, an operator (`<`, `<=`,
 `>`, `>=`) and a value. The metrics are `p50`, `p90`, `p95`, `p99`, `mean`,
 `min`, `max` (durations such as `300ms`), `error_rate` (a fraction like
-`0.01` or a percentage like `1%`), `rps`, `failed` and `total`. Every
+`0.01` or a percentage like `1%`), `rps`, `failed`, `total` and `check_rate` (the share of `check()` calls
+that passed; see below). Every
 threshold is judged once, on the finished run. A run that completed no
 requests fails all of them.
 
@@ -201,6 +202,23 @@ show each threshold's verdict. The exit code tells a script what happened:
 | 1         | The run itself failed                                    |
 | 2         | Bad usage, such as a threshold that cannot be parsed     |
 | 3         | The run finished but broke at least one threshold        |
+
+#### Checks
+
+In a scenario script, `check(value, {name: test})` counts named assertions
+without failing the iteration. Each test is a function or a boolean; a test
+that throws counts as failed. `check` returns true only if all tests passed.
+
+```js
+check(res, { "status is 200": (r) => r.status === 200 });
+```
+
+In Python the tests are callables or bools, and a test that raises counts as
+failed. The summary, JSON, and HTML report list each check's passes and
+fails. Gate on them with `-threshold "check_rate >= 99%"`. A run with no
+checks fails that threshold. Use fixed check names. A run keeps at most 100 distinct
+names; any more are counted together as `(other checks)`. See
+`examples/scenarios/checks.vl.js`.
 
 Thresholds can also come from a file, with `-thresholds gate.json`. The file
 is a JSON list of `{"name", "metric", "operator", "value"}`, or the output of

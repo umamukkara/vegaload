@@ -32,6 +32,14 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// CheckRecorder receives the outcome of every check a scenario script
+// makes (FR-CLI-12): the check's name and whether it passed. The report
+// Collector implements it. A nil recorder is allowed everywhere it is
+// accepted, and means checks are evaluated but not counted.
+type CheckRecorder interface {
+	RecordCheck(name string, passed bool)
+}
+
 // SafetyCheck is called with the bare host netapi is about to connect
 // to, before every HTTP request and WebSocket dial. Returning a non-nil
 // error refuses the call; the caller (cmd/vegaload) builds this from

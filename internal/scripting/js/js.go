@@ -141,7 +141,16 @@ type VU struct {
 	ctx         context.Context //nolint:containedctx // set per-Iteration; native functions called synchronously from within that same iteration read it to build call/dial contexts.
 
 	openConns []*netapi.WSConn
+
+	// checks receives every check() outcome (FR-CLI-12). It may be nil.
+	checks netapi.CheckRecorder
 }
+
+// SetCheckRecorder sets where this VU reports the outcome of every
+// check() its script makes. Call it before the first Iteration. With no
+// recorder (or nil), check() still runs the tests and returns the
+// result, but nothing is counted.
+func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
 
 // NewVU creates a fresh VU from the script: a new runtime, the script's
 // top-level code run once (so top-level state like a counter declared
@@ -189,6 +198,9 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration) (*VU, er
 	if err := vm.Set("ws", v.newWSGlobal(vm)); err != nil {
 		return nil, fmt.Errorf("js: %w", err)
 	}
+	if err := vm.Set("check", v.newCheckFunc(vm)); err != nil {
+		return nil, fmt.Errorf("js: %w", err)
+	}
 
 	if _, err := vm.RunProgram(s.program); err != nil {
 		return nil, fmt.Errorf("js: running script: %w", err)
@@ -234,6 +246,50 @@ func newConsole(vm *goja.Runtime) *goja.Object {
 	}
 	_ = c.Set("log", logFn)
 	return c
+}
+
+// newCheckFunc builds the global check(value, tests) function
+// (FR-CLI-12):
+//
+//	check(res, {
+//	  "status is 200": (r) => r.status === 200,
+//	  "has an id":     (r) => r.json().id !== undefined,
+//	});
+//
+// Each entry of tests is a name and either a function, called with
+// value, or a plain boolean. A test passes when it returns a truthy
+// value; a test that throws counts as failed. A failed check is counted
+// and the script carries on, so one bad response does not end the
+// iteration. check returns true only if every test passed.
+func (v *VU) newCheckFunc(vm *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		val := call.Argument(0)
+		testsArg := call.Argument(1)
+		if goja.IsUndefined(testsArg) || goja.IsNull(testsArg) {
+			throw(vm, fmt.Errorf("check: want check(value, {name: test, ...})"))
+		}
+		tests := testsArg.ToObject(vm)
+		allPassed := true
+		for _, name := range tests.Keys() {
+			tv := tests.Get(name)
+			passed := false
+			if fn, isFn := goja.AssertFunction(tv); isFn {
+				res, err := fn(goja.Undefined(), val)
+				passed = err == nil && res.ToBoolean()
+			} else if b, isBool := tv.Export().(bool); isBool {
+				passed = b
+			} else {
+				throw(vm, fmt.Errorf("check: %q must be a function or a boolean", name))
+			}
+			if v.checks != nil {
+				v.checks.RecordCheck(name, passed)
+			}
+			if !passed {
+				allPassed = false
+			}
+		}
+		return vm.ToValue(allPassed)
+	}
 }
 
 // throw raises err as a catchable JS exception (a Go Error instance

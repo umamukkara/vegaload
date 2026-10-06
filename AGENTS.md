@@ -56,6 +56,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - `vegaload run <file>` — run a scenario.
 - `vegaload new --from-openapi <spec>` — generate a starter scenario from an OpenAPI spec.
 - `vegaload run -threshold "p95 < 300ms" ...` — make a run pass or fail on its own numbers. A breach exits 3; `-thresholds <file>` loads them from JSON.
+- In scenarios, `check(value, {name: test})` counts named assertions without failing the iteration; gate with `-threshold "check_rate >= 99%"`.
 - `vegaload diagnose <report>` — explain a failed run.
 - `vegaload compare <baseline.json> <candidate.json>` — diff a candidate report against a baseline; exits non-zero on regression.
 - `vegaload mcp serve` — start the MCP server (stdio by default).

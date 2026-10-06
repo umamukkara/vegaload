@@ -131,7 +131,7 @@ func runTestTool(exePath string) Tool {
 				"yes":           map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
 				"report_path":   map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
 				"no_report":     map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
-				"thresholds":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total"},
+				"thresholds":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed)"},
 			},
 		},
 		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {

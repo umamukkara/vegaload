@@ -33,6 +33,36 @@ type Result struct {
 	// is true only when every threshold passed.
 	Thresholds       []ThresholdResult `json:"thresholds,omitempty"`
 	ThresholdsPassed *bool             `json:"thresholds_passed,omitempty"`
+
+	// Checks is the pass and fail count of each named check the scenario
+	// made with check() (FR-CLI-12), in the order each name was first
+	// seen. It is omitted when the scenario made no checks. A failed
+	// check does not fail an iteration or count as a failed request: it
+	// is its own measure, which a threshold can judge through the
+	// check_rate metric.
+	Checks []CheckResult `json:"checks,omitempty"`
+}
+
+// CheckResult is one named check's totals across the whole run.
+type CheckResult struct {
+	Name   string `json:"name"`
+	Passes int64  `json:"passes"`
+	Fails  int64  `json:"fails"`
+}
+
+// CheckRate is the share of all checks that passed, from 0 to 1. The
+// second result is false when the run made no checks, since a rate of
+// nothing is not a rate of 100%.
+func (r *Result) CheckRate() (float64, bool) {
+	var pass, total int64
+	for _, c := range r.Checks {
+		pass += c.Passes
+		total += c.Passes + c.Fails
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return float64(pass) / float64(total), true
 }
 
 // ThresholdResult is one threshold's verdict: what was asked (a name,
