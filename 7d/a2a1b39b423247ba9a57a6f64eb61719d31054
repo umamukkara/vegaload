@@ -1,0 +1,29 @@
+.goreleaser.yaml
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 74
+RELEASING.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 30-31
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 32
+README.md
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 25,33-34
+.github/workflows/release.yml
+  2a9d5a9a-0f78-4305-807c-4df61b6b8efe 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7da2a1b39b423247ba9a57a6f64eb61719d31054",
+  "prompts": {
+    "cc0a0aeb12c9b269": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2a9d5a9a-0f78-4305-807c-4df61b6b8efe",
+        "model": "default"
+      },
+      "human_author": "Karthik S <karthik.s@harness.io>",
+      "total_additions": 7,
+      "total_deletions": 4,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
