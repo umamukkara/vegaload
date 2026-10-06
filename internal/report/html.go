@@ -195,6 +195,7 @@ th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
 figure{margin:0 0 20px}
 figcaption{color:var(--muted);font-size:.8rem;margin-top:4px}
 svg{width:100%;height:auto;color:var(--fg)}
+svg text{fill:currentColor}
 h2{font-size:1.05rem;margin:0 0 10px}
 .badge{display:inline-block;border:1px solid currentColor;border-radius:4px;padding:0 6px;font-size:.78rem;font-weight:600}
 .badge.pass{color:var(--pass)}

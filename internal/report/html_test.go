@@ -100,3 +100,12 @@ func TestWriteHTML_Thresholds(t *testing.T) {
 		t.Error("a run without thresholds must not render a thresholds section")
 	}
 }
+
+// SVG text defaults to a black fill, which is unreadable on the dark
+// theme's background; the chart labels must follow the page's text colour.
+func TestWriteHTML_ChartLabelsFollowTextColour(t *testing.T) {
+	out := renderHTML(&Result{Executor: "fixed-vus"})
+	if !strings.Contains(out, "svg text{fill:currentColor}") {
+		t.Error("chart labels must use currentColor so they read in the dark theme")
+	}
+}
