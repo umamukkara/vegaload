@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,10 @@ type suggestedThresholds struct {
 	LatencyP95   string  `json:"latency_p95"`
 	ErrorRate    float64 `json:"error_rate"`
 	ErrorRatePct string  `json:"error_rate_pct"`
+	// ThresholdFlags are the same suggestion as ready-to-use
+	// `vegaload run -threshold` expressions (FR-CLI-11), so a run can be
+	// gated on them without retyping the numbers.
+	ThresholdFlags []string `json:"threshold_flags"`
 }
 
 // cmdDiagnose has two modes, picked by whether a positional report path
@@ -143,6 +148,10 @@ func cmdDiagnoseReport(path string, output string, noLLM bool) int {
 			LatencyP95:   th.LatencyP95,
 			ErrorRate:    th.ErrorRate,
 			ErrorRatePct: formatPercent(th.ErrorRate),
+			ThresholdFlags: []string{
+				"p95 <= " + th.LatencyP95,
+				"error_rate <= " + strconv.FormatFloat(th.ErrorRate, 'g', -1, 64),
+			},
 		},
 	}
 
@@ -212,6 +221,13 @@ func printResultDiagnosis(w *os.File, rd resultDiagnosis) {
 		fmt.Fprintf(w, "  - %s\n", n)
 	}
 	fmt.Fprintf(w, "suggested thresholds: p95 <= %s, error rate <= %s\n", rd.Thresholds.LatencyP95, rd.Thresholds.ErrorRatePct)
+	if len(rd.Thresholds.ThresholdFlags) > 0 {
+		var flags []string
+		for _, f := range rd.Thresholds.ThresholdFlags {
+			flags = append(flags, fmt.Sprintf("-threshold %q", f))
+		}
+		fmt.Fprintf(w, "gate a run on them:   vegaload run ... %s\n", strings.Join(flags, " "))
+	}
 	if rd.Narrative != "" {
 		fmt.Fprintf(w, "\n%s\n", rd.Narrative)
 	}

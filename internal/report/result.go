@@ -25,6 +25,29 @@ type Result struct {
 	// what lets the HTML report embed it directly even for a
 	// 1,000,000-request run (NFR-03).
 	TimeSeries []Point `json:"time_series"`
+
+	// Thresholds is the verdict of each pass/fail threshold the run was
+	// given (FR-CLI-11), in the order they were given. It is omitted when
+	// the run had none, so reports from before thresholds existed, and
+	// runs that do not use them, look exactly as before. ThresholdsPassed
+	// is true only when every threshold passed.
+	Thresholds       []ThresholdResult `json:"thresholds,omitempty"`
+	ThresholdsPassed *bool             `json:"thresholds_passed,omitempty"`
+}
+
+// ThresholdResult is one threshold's verdict: what was asked (a name,
+// a metric, an operator and a value) and what the run observed. The
+// shape is deliberately plain — a name, a metric, an operator, a value —
+// so anything that reads a saved report can read it without knowing how
+// VegaLoad evaluated it. Value and Observed are strings so durations
+// ("300ms") and plain numbers share one field.
+type ThresholdResult struct {
+	Name     string `json:"name"`
+	Metric   string `json:"metric"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+	Observed string `json:"observed"`
+	Passed   bool   `json:"passed"`
 }
 
 // Latency holds the percentiles and summary stats FR-RPT-01 asks for.

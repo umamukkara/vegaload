@@ -55,7 +55,14 @@ import (
 	"github.com/vegaload/vegaload/internal/scripting/js"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 	"github.com/vegaload/vegaload/internal/scripting/python"
+	"github.com/vegaload/vegaload/internal/threshold"
 )
+
+// exitThresholdsBreached is the exit code of a run that completed but
+// broke one of its pass/fail thresholds (FR-CLI-11). It is distinct from
+// 1 (the run itself failed) and 2 (bad usage) so CI and agents can tell
+// "the test did not meet its bar" apart from "the tool broke".
+const exitThresholdsBreached = 3
 
 // headerFlags accumulates repeated -header "Key: Value" flags into a map.
 type headerFlags map[string]string
@@ -117,6 +124,9 @@ type runConfig struct {
 	ReportPath string
 	NoReport   bool
 	NoOpen     bool
+
+	// FR-CLI-11: pass/fail thresholds judged on the finished run.
+	Thresholds []threshold.Threshold
 }
 
 // parseRunArgs parses run's flags into a runConfig. It returns a usage
@@ -132,6 +142,8 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	var method string
 	var insecure bool
 	var allowTargets repeatedFlags
+	var thresholdExprs repeatedFlags
+	var thresholdsFile string
 
 	fs.StringVar(&cfg.Executor, "executor", "fixed-vus", "load shape: fixed-vus, ramp, step, constant-arrival-rate")
 	fs.IntVar(&cfg.VUs, "vus", 1, "number of virtual users (fixed-vus; also the scripting VU pool size for ramp/step)")
@@ -166,6 +178,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.BoolVar(&cfg.NoReport, "no-report", false, "skip writing the HTML report")
 	fs.BoolVar(&cfg.NoOpen, "no-open", false, "don't auto-open the HTML report in the default browser")
 
+	// FR-CLI-11: pass/fail thresholds.
+	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\" or \"fast: error_rate < 1%\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
+	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, or the output of `vegaload diagnose -output json`)")
+
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload run [flags] [scenario-file]")
 		fmt.Fprintln(fs.Output(), "Flags must come before the scenario file, e.g. \"vegaload run -vus 10 scenario.vl.js\" —")
@@ -197,6 +213,21 @@ func parseRunArgs(args []string) (*runConfig, error) {
 			return nil, fmt.Errorf("-stages: %w", err)
 		}
 		cfg.Stages = stages
+	}
+
+	if thresholdsFile != "" {
+		ts, err := threshold.LoadFile(thresholdsFile)
+		if err != nil {
+			return nil, fmt.Errorf("-thresholds: %w", err)
+		}
+		cfg.Thresholds = append(cfg.Thresholds, ts...)
+	}
+	if len(thresholdExprs) > 0 {
+		ts, err := threshold.ParseAll([]string(thresholdExprs))
+		if err != nil {
+			return nil, fmt.Errorf("-threshold: %w", err)
+		}
+		cfg.Thresholds = append(cfg.Thresholds, ts...)
 	}
 
 	if cfg.ScenarioPath == "" && (cfg.Target.URL == "" || cfg.Protocol == "") {
@@ -435,7 +466,22 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	}
 	elapsed := time.Since(start)
 
-	return collector.Finish(ex.Name(), elapsed), nil
+	result := collector.Finish(ex.Name(), elapsed)
+	applyThresholds(cfg, result)
+	return result, nil
+}
+
+// applyThresholds judges cfg's thresholds against a finished run and
+// records the verdicts on the result, so the text summary, the JSON and
+// JSONL output, the HTML report and the MCP run_test tool all carry the
+// same verdicts. A run without thresholds is left untouched.
+func applyThresholds(cfg *runConfig, result *report.Result) {
+	if len(cfg.Thresholds) == 0 {
+		return
+	}
+	result.Thresholds = threshold.Evaluate(cfg.Thresholds, result)
+	passed := threshold.AllPassed(result.Thresholds)
+	result.ThresholdsPassed = &passed
 }
 
 // enforceSafety implements FR-CLI-06 for cfg: it rejects a run whose
@@ -547,7 +593,26 @@ func cmdRun(args []string) int {
 			// the load test's own result already happened.
 		}
 	}
+
+	// FR-CLI-11: a run that completed but broke a threshold exits 3. The
+	// reason goes to stderr in every output mode, so stdout stays clean
+	// for -output json and jsonl.
+	if result.ThresholdsPassed != nil && !*result.ThresholdsPassed {
+		fmt.Fprintf(os.Stderr, "vegaload run: thresholds breached: %s\n", strings.Join(breachedNames(result), "; "))
+		return exitThresholdsBreached
+	}
 	return 0
+}
+
+// breachedNames lists the thresholds a run broke, with what was observed.
+func breachedNames(result *report.Result) []string {
+	var out []string
+	for _, t := range result.Thresholds {
+		if !t.Passed {
+			out = append(out, fmt.Sprintf("%s (observed %s)", t.Name, t.Observed))
+		}
+	}
+	return out
 }
 
 // runJSONL implements FR-CLI-05's streaming JSONL event mode: a
@@ -640,6 +705,10 @@ func recordAudit(cfg *runConfig, result *report.Result, runErr error) {
 		entry.Outcome = "success"
 		entry.Total = result.Total
 		entry.Failed = result.Failed
+		entry.ThresholdsPassed = result.ThresholdsPassed
+	}
+	for _, t := range cfg.Thresholds {
+		entry.Thresholds = append(entry.Thresholds, t.Expression())
 	}
 	if err := audit.Append(cfg.AuditLogPath, entry); err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload run: warning: could not write audit log: %v\n", err)
@@ -652,4 +721,26 @@ func printResult(w io.Writer, r *report.Result) {
 	fmt.Fprintf(w, "  total:    %d\n", r.Total)
 	fmt.Fprintf(w, "  failed:   %d\n", r.Failed)
 	fmt.Fprintf(w, "  mean:     %s\n", r.Latency.Mean)
+	printThresholds(w, r)
+}
+
+// printThresholds writes the thresholds block of the text summary, if
+// the run had any thresholds.
+func printThresholds(w io.Writer, r *report.Result) {
+	if len(r.Thresholds) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nthresholds")
+	for _, t := range r.Thresholds {
+		status := "PASS"
+		if !t.Passed {
+			status = "FAIL"
+		}
+		fmt.Fprintf(w, "  %s  %s  (observed %s)\n", status, t.Name, t.Observed)
+	}
+	if r.ThresholdsPassed != nil && *r.ThresholdsPassed {
+		fmt.Fprintln(w, "  all thresholds passed")
+	} else {
+		fmt.Fprintln(w, "  thresholds breached")
+	}
 }

@@ -3,13 +3,21 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 
 	"github.com/vegaload/vegaload/internal/report"
 )
+
+// exitThresholdsBreached is the exit code `vegaload run` uses when a
+// run finished but broke one of its -threshold limits (FR-CLI-11). It is
+// the same number cmd/vegaload defines; the MCP layer cannot import that
+// package, so the value is repeated here.
+const exitThresholdsBreached = 3
 
 // NewTools returns FR-MCP-03's tool set, each one a thin wrapper around
 // RunCLI(ctx, exePath, ...) — the exact args a human would type at
@@ -93,6 +101,7 @@ type runTestArgs struct {
 	Yes          bool     `json:"yes,omitempty"`
 	ReportPath   string   `json:"report_path,omitempty"`
 	NoReport     bool     `json:"no_report,omitempty"`
+	Thresholds   []string `json:"thresholds,omitempty"`
 }
 
 func runTestTool(exePath string) Tool {
@@ -102,7 +111,10 @@ func runTestTool(exePath string) Tool {
 			"(target + protocol). Equivalent to `vegaload run`. Returns the run's report.Result and, unless " +
 			"no_report is set, the path to a self-contained HTML report. A non-localhost target that isn't in " +
 			"allow_targets is refused unless yes is set — the same FR-CLI-06 safety gate `vegaload run` enforces " +
-			"from a terminal, since this tool has no interactive terminal of its own to prompt on.",
+			"from a terminal, since this tool has no interactive terminal of its own to prompt on. Optional thresholds " +
+			"(each like \"p95 < 300ms\" or \"error_rate < 1%\") make the run pass or fail: the result then carries " +
+			"thresholds and thresholds_passed. A breached threshold is a normal result with thresholds_passed false, " +
+			"not a tool error — the same run exits 3 from a terminal.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -119,6 +131,7 @@ func runTestTool(exePath string) Tool {
 				"yes":           map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
 				"report_path":   map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
 				"no_report":     map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
+				"thresholds":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total"},
 			},
 		},
 		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -166,6 +179,9 @@ func runTestTool(exePath string) Tool {
 			for _, t := range in.AllowTargets {
 				args = append(args, "-allow-target", t)
 			}
+			for _, t := range in.Thresholds {
+				args = append(args, "-threshold", t)
+			}
 			if in.Yes {
 				args = append(args, "-yes")
 			}
@@ -179,7 +195,13 @@ func runTestTool(exePath string) Tool {
 			}
 
 			stdout, err := RunCLI(ctx, exePath, args...)
-			if err != nil {
+			// Exit 3 means the run finished but broke a threshold. That
+			// is a result the caller asked for, not a tool failure, so
+			// the structured result is returned with thresholds_passed
+			// false. Any other non-zero exit is still an error.
+			var exitErr *exec.ExitError
+			breached := errors.As(err, &exitErr) && exitErr.ExitCode() == exitThresholdsBreached
+			if err != nil && !breached {
 				return nil, err
 			}
 			var result report.Result

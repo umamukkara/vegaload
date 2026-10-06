@@ -38,6 +38,8 @@ func renderHTML(res *Result) string {
 	fmt.Fprintf(&b, "<div class=\"stat\"><span class=\"n\">%.2f%%</span><span class=\"l\">error rate</span></div>\n", errPct)
 	fmt.Fprintf(&b, "</section>\n")
 
+	b.WriteString(thresholdsSection(res))
+
 	fmt.Fprintf(&b, "<section class=\"latency\">\n<h2>Latency</h2>\n<table>\n<tr><th>min</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>max</th><th>mean</th></tr>\n")
 	fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n</table>\n</section>\n",
 		res.Latency.Min.Round(1e3), res.Latency.P50.Round(1e3), res.Latency.P90.Round(1e3),
@@ -51,6 +53,33 @@ func renderHTML(res *Result) string {
 	}
 
 	b.WriteString("</main>\n</body></html>\n")
+	return b.String()
+}
+
+// thresholdsSection renders the pass/fail thresholds table (FR-CLI-11),
+// or nothing when the run had none. The verdict is written as the word
+// PASS or FAIL, never colour alone, so it reads the same for a reader who
+// cannot tell the colours apart and in a printout.
+func thresholdsSection(res *Result) string {
+	if len(res.Thresholds) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	verdict, cls := "All thresholds passed", "pass"
+	if res.ThresholdsPassed == nil || !*res.ThresholdsPassed {
+		verdict, cls = "Thresholds breached", "fail"
+	}
+	fmt.Fprintf(&b, "<section class=\"thresholds\">\n<h2>Thresholds <span class=\"badge %s\">%s</span></h2>\n", cls, verdict)
+	b.WriteString("<table>\n<tr><th>result</th><th>threshold</th><th>limit</th><th>observed</th></tr>\n")
+	for _, t := range res.Thresholds {
+		word, c := "PASS", "pass"
+		if !t.Passed {
+			word, c = "FAIL", "fail"
+		}
+		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%s %s</td><td>%s</td></tr>\n",
+			c, word, html.EscapeString(t.Name), html.EscapeString(t.Operator), html.EscapeString(t.Value), html.EscapeString(t.Observed))
+	}
+	b.WriteString("</table>\n</section>\n")
 	return b.String()
 }
 
@@ -151,8 +180,8 @@ func clamp01(v float64) float64 {
 // external stylesheet — the file must render with no network access),
 // and currentColor-friendly contrast for the inline SVG charts above.
 const reportStyle = `<style>
-:root{--bg:#ffffff;--fg:#1d2433;--muted:#5a6477;--line:#d6dae3}
-@media (prefers-color-scheme:dark){:root{--bg:#161a22;--fg:#e6e8ee;--muted:#9aa3b5;--line:#30384a}}
+:root{--bg:#ffffff;--fg:#1d2433;--muted:#5a6477;--line:#d6dae3;--pass:#1a6b3a;--fail:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#161a22;--fg:#e6e8ee;--muted:#9aa3b5;--line:#30384a;--pass:#5fd08a;--fail:#ff8a80}}
 body{background:var(--bg);color:var(--fg);font-family:-apple-system,"Segoe UI",system-ui,sans-serif;margin:0;padding:24px}
 main{max-width:720px;margin:0 auto}
 h1{font-size:1.4rem;margin:0 0 4px}
@@ -167,5 +196,8 @@ figure{margin:0 0 20px}
 figcaption{color:var(--muted);font-size:.8rem;margin-top:4px}
 svg{width:100%;height:auto;color:var(--fg)}
 h2{font-size:1.05rem;margin:0 0 10px}
+.badge{display:inline-block;border:1px solid currentColor;border-radius:4px;padding:0 6px;font-size:.78rem;font-weight:600}
+.badge.pass{color:var(--pass)}
+.badge.fail{color:var(--fail)}
 </style>
 `
