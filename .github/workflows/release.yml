@@ -1,0 +1,32 @@
+name: Release
+
+# Runs when a version tag such as v0.1.0 is pushed. Builds the binaries,
+# creates the GitHub release, and updates the Homebrew formula in
+# vegaload/homebrew-tap.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          # Pinned to v2: the `brews` block is deprecated and goes away in v3.
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

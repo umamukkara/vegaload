@@ -31,3 +31,22 @@ jobs:
             echo "$UNFORMATTED"
             exit 1
           fi
+
+  # Builds every release target and the Homebrew formula without publishing,
+  # so a broken .goreleaser.yaml fails in a PR and not on release day.
+  release-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+        env:
+          HOMEBREW_TAP_TOKEN: dry-run

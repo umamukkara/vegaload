@@ -22,8 +22,17 @@ out of scope for now.
 
 ## Install
 
-Not yet published to a package registry. For now, build from source (Go
-1.22+):
+With Homebrew (macOS and Linux):
+
+```
+brew install vegaload/tap/vegaload
+vegaload version
+```
+
+`brew tap vegaload/tap` followed by `brew install vegaload` does the same
+thing. Upgrade with `brew upgrade vegaload`.
+
+Or build from source (Go 1.22+):
 
 ```
 git clone https://github.com/vegaload/vegaload
@@ -33,7 +42,9 @@ go build -o vegaload ./cmd/vegaload
 ```
 
 `go install github.com/vegaload/vegaload/cmd/vegaload@latest` also works
-once the repository is public. A scratch-based Docker image builds from the
+once the repository is public. Release archives for Linux, macOS and
+Windows are attached to each [GitHub release](https://github.com/vegaload/vegaload/releases).
+A scratch-based Docker image builds from the
 included `Dockerfile` (`docker build .`); it carries nothing but the binary
 and CA certificates, so Python-scripted scenarios (which shell out to a
 local `python3`) need a different base image — see the `Dockerfile`'s
