@@ -182,6 +182,21 @@ The sample app fails about 3% of creates on purpose, so expect a failed
 iteration or two per hundred. A much higher failure rate means a step in
 the flow is really broken.
 
+### Data files and environment variables
+
+`data-env.vl.js` (and `data_env.py`) take rows from `data/widgets.csv`, so
+each iteration creates a different widget, and read an API key from the
+environment as a secret:
+
+```
+API_KEY=demo-key vegaload run -vus 5 -duration 10s \
+  -data data/widgets.csv -secret-env API_KEY data-env.vl.js
+```
+
+`data.widgets.next()` takes the next row. `data.widgets.random()` takes any
+row. A variable named with `-secret-env` is removed from the summary, the
+JSON output, the audit log and the console. The sample app ignores the key.
+
 ### Checks
 
 `checks.vl.js` (and `checks.py`) use `check(value, {name: test})` to count

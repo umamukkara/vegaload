@@ -492,3 +492,32 @@ func TestRunTestTool_PassesJUnitFlag(t *testing.T) {
 		t.Errorf("args = %s", args)
 	}
 }
+
+func TestRunTestAndValidateTools_PassInputFlags(t *testing.T) {
+	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
+	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)
+	_, err := callTool(t, NewTools(bin), "run_test", map[string]any{
+		"scenario_path": "s.vl.js", "no_report": true,
+		"data_files": []string{"users.csv", "p=pets.json"}, "env": []string{"REGION"}, "secret_env": []string{"API_KEY"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(readArgs(t, argsFile), " ")
+	for _, want := range []string{"-data users.csv", "-data p=pets.json", "-env REGION", "-secret-env API_KEY"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("run_test args missing %q: %s", want, args)
+		}
+	}
+
+	bin2, argsFile2 := argRecordingBinary(t, `{"valid":true}`, 0)
+	if _, err := callTool(t, NewTools(bin2), "validate_scenario", map[string]any{
+		"scenario_path": "s.vl.js", "data_files": []string{"users.csv"}, "secret_env": []string{"API_KEY"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	args2 := readArgs(t, argsFile2)
+	if got := strings.Join(args2, " "); !strings.Contains(got, "-data users.csv") || !strings.Contains(got, "-secret-env API_KEY") || args2[len(args2)-1] != "s.vl.js" {
+		t.Errorf("validate_scenario args = %v", args2)
+	}
+}

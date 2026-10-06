@@ -160,6 +160,69 @@ class WS:
 http = HTTP()
 ws = WS()
 
+class _Env:
+    """env.NAME, env["NAME"] or env.get("NAME", default): an environment
+    variable the run exposed with -env or -secret-env. A name that was not
+    exposed is missing, so env.NAME raises AttributeError."""
+    def __init__(self):
+        self._cache = {}
+
+    def _lookup(self, name):
+        if name not in self._cache:
+            res = _call("env", name=name)
+            self._cache[name] = res["value"] if res.get("found") else None
+        return self._cache[name]
+
+    def get(self, name, default=None):
+        value = self._lookup(name)
+        return default if value is None else value
+
+    def __getitem__(self, name):
+        value = self._lookup(name)
+        if value is None:
+            raise KeyError(name)
+        return value
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        value = self._lookup(name)
+        if value is None:
+            raise AttributeError("env has no variable %r: pass it to vegaload with -env or -secret-env" % name)
+        return value
+
+class _DataFile:
+    def __init__(self, name):
+        self._name = name
+
+    def next(self):
+        return _call("data", name=self._name, action="next")["row"]
+
+    def random(self):
+        return _call("data", name=self._name, action="random")["row"]
+
+    def __len__(self):
+        return _call("data", name=self._name, action="length")["length"]
+
+    @property
+    def length(self):
+        return len(self)
+
+class _Data:
+    """data.NAME is a data file given to vegaload with -data: next() returns
+    the rows in file order, shared by all users, random() returns any row,
+    and len(data.NAME) is the number of rows."""
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return _DataFile(name)
+
+    def __getitem__(self, name):
+        return _DataFile(name)
+
+env = _Env()
+data = _Data()
+
 def check(value, tests):
     """check(value, {"name": test, ...}): run each test on value and count
     it as passed or failed. A test is a function, called with value, or a
@@ -205,7 +268,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws, "check": check},
+            init_globals={"http": http, "ws": ws, "check": check, "env": env, "data": data},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:
@@ -290,6 +353,8 @@ type message struct {
 	Text     bool              `json:"text"`
 	// Results is the batch of outcomes on a "check" call.
 	Results []checkOutcome `json:"results"`
+	// Action is the operation on a "data" call: next, random or length.
+	Action string `json:"action"`
 	// TimeoutMs is a pointer because Python's None (no timeout given)
 	// must stay distinguishable from an explicit 0.
 	TimeoutMs *int `json:"timeout_ms"`
@@ -325,11 +390,24 @@ type VU struct {
 
 	// checks receives every check() outcome (FR-CLI-12). It may be nil.
 	checks netapi.CheckRecorder
+
+	// inputs is what the `env` and `data` globals read (FR-CLI-17). It
+	// may be nil, which exposes nothing.
+	inputs netapi.Inputs
 }
 
 // SetCheckRecorder sets where this VU reports the outcome of every
 // check() its script makes. Call it before the first Iteration.
 func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
+
+// Option changes how NewVU builds a VU. An option is needed, rather than a
+// setter called afterwards, when the script's top-level code has to see it:
+// the top level runs while NewVU waits for the interpreter to be ready.
+type Option func(*VU)
+
+// WithInputs exposes the `env` and `data` globals (FR-CLI-17). Without it,
+// every env name is missing and every data file is unknown.
+func WithInputs(in netapi.Inputs) Option { return func(v *VU) { v.inputs = in } }
 
 // NewVU starts a fresh python3 subprocess for one virtual user and waits
 // for its ready signal, which is also where a script that fails to
@@ -341,7 +419,7 @@ func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
 // makes through http or ws, before connecting; timeout bounds each
 // individual HTTP request and WebSocket handshake, same as
 // js.Script.NewVU's parameters of the same name.
-func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration) (*VU, error) {
+func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...Option) (*VU, error) {
 	cmd := exec.Command(pythonBin, "-u", "-c", harnessSource, s.path) //nolint:gosec // path and interpreter are operator-controlled, not request input
 
 	stdin, err := cmd.StdinPipe()
@@ -369,8 +447,22 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration) (*VU, er
 		timeout:     timeout,
 		conns:       make(map[int]*netapi.WSConn),
 	}
+	for _, opt := range opts {
+		opt(vu)
+	}
 
 	msg, err := vu.readMessage()
+	// While the script's top-level code runs, it may read env and data. Any
+	// other call is refused: there is no iteration yet to run it in.
+	for err == nil && msg.Type == "call" {
+		if msg.Op != "env" && msg.Op != "data" {
+			_ = vu.writeCmd(cmdMsg{Cmd: "call_result", ID: msg.ID, OK: false, Error: fmt.Sprintf("%s calls are not available while the script is loading, only inside iteration()", msg.Op)})
+		} else if herr := vu.handleCall(msg); herr != nil {
+			err = herr
+			break
+		}
+		msg, err = vu.readMessage()
+	}
 	if err != nil {
 		_ = vu.Close()
 		return nil, fmt.Errorf("python: %w", err)
@@ -517,6 +609,10 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 			}
 		}
 		return map[string]interface{}{}, nil
+	case "env":
+		return v.callEnv(msg), nil
+	case "data":
+		return v.callData(msg)
 	case "ws_connect":
 		return v.callWSConnect(msg)
 	case "ws_send":
@@ -527,6 +623,37 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 		return v.callWSClose(msg)
 	default:
 		return nil, fmt.Errorf("unknown call op %q", msg.Op)
+	}
+}
+
+// callEnv answers env.NAME: the variable's value if the run exposed it.
+func (v *VU) callEnv(msg message) interface{} {
+	if v.inputs != nil {
+		if val, ok := v.inputs.Env(msg.Name); ok {
+			return map[string]interface{}{"found": true, "value": val}
+		}
+	}
+	return map[string]interface{}{"found": false}
+}
+
+// callData answers data.NAME.next(), .random() and len(data.NAME).
+func (v *VU) callData(msg message) (interface{}, error) {
+	var ds netapi.Dataset
+	if v.inputs != nil {
+		ds, _ = v.inputs.Dataset(msg.Name)
+	}
+	if ds == nil {
+		return nil, fmt.Errorf("no data file named %q: give it to vegaload with -data", msg.Name)
+	}
+	switch msg.Action {
+	case "next":
+		return map[string]interface{}{"row": ds.Next()}, nil
+	case "random":
+		return map[string]interface{}{"row": ds.Random()}, nil
+	case "length":
+		return map[string]interface{}{"length": ds.Len()}, nil
+	default:
+		return nil, fmt.Errorf("unknown data action %q", msg.Action)
 	}
 }
 

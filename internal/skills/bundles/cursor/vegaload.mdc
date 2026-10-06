@@ -19,7 +19,9 @@ alwaysApply: false
   target (`target` + `protocol`). Choose `executor`: `fixed-vus`, `ramp`,
   `step`, or `constant-arrival-rate`. Pass `baseline_path` (and `max_regression`,
   in percent) to compare the run with an earlier report; the result then has
-  `baseline.passed`. Pass `junit_path` to also write JUnit XML (one test case per
+  `baseline.passed`. Pass `data_files` (CSV or JSON, read in the scenario as
+  `data.NAME.next()`), `env` and `secret_env` (read as `env.NAME`; use
+  `secret_env` for tokens, it removes the value from all output). Pass `junit_path` to also write JUnit XML (one test case per
   threshold, check and baseline gate). Returns the run's results and, unless
   `no_report` is set, a path to a self-contained HTML report.
   A non-localhost target that isn't in `allow_targets` is refused unless

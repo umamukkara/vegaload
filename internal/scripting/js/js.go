@@ -54,6 +54,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
+	"github.com/vegaload/vegaload/internal/secrets"
 )
 
 // Script is a loaded, compiled scenario file, ready to be instantiated
@@ -144,6 +145,10 @@ type VU struct {
 
 	// checks receives every check() outcome (FR-CLI-12). It may be nil.
 	checks netapi.CheckRecorder
+
+	// inputs is what the `env` and `data` globals expose (FR-CLI-17). It
+	// may be nil, which exposes nothing.
+	inputs netapi.Inputs
 }
 
 // SetCheckRecorder sets where this VU reports the outcome of every
@@ -151,6 +156,15 @@ type VU struct {
 // recorder (or nil), check() still runs the tests and returns the
 // result, but nothing is counted.
 func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
+
+// Option changes how NewVU builds a VU. An option is needed, rather than a
+// setter called afterwards, when the script's top-level code has to see it:
+// the top level runs inside NewVU.
+type Option func(*VU)
+
+// WithInputs exposes the `env` and `data` globals (FR-CLI-17). Without it,
+// `env` is an empty object and `data` has no files.
+func WithInputs(in netapi.Inputs) Option { return func(v *VU) { v.inputs = in } }
 
 // NewVU creates a fresh VU from the script: a new runtime, the script's
 // top-level code run once (so top-level state like a counter declared
@@ -163,7 +177,7 @@ func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
 // to happen per call rather than once up front. timeout bounds each
 // individual HTTP request and WebSocket handshake; it does not bound
 // ws.receive, which takes its own optional timeout argument.
-func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration) (*VU, error) {
+func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...Option) (*VU, error) {
 	vm := goja.New()
 	// requestOptions (the http.*/ws.connect options argument) is defined
 	// with `json` tags so its Go field names don't have to match a
@@ -176,6 +190,9 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration) (*VU, er
 		http:        netapi.NewHTTPClient(check, timeout),
 		safetyCheck: check,
 		timeout:     timeout,
+	}
+	for _, opt := range opts {
+		opt(v)
 	}
 
 	exportsObj := vm.NewObject()
@@ -199,6 +216,12 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration) (*VU, er
 		return nil, fmt.Errorf("js: %w", err)
 	}
 	if err := vm.Set("check", v.newCheckFunc(vm)); err != nil {
+		return nil, fmt.Errorf("js: %w", err)
+	}
+	if err := vm.Set("env", v.newEnvGlobal(vm)); err != nil {
+		return nil, fmt.Errorf("js: %w", err)
+	}
+	if err := vm.Set("data", v.newDataGlobal(vm)); err != nil {
 		return nil, fmt.Errorf("js: %w", err)
 	}
 
@@ -241,11 +264,52 @@ func newConsole(vm *goja.Runtime) *goja.Object {
 		for i, a := range call.Arguments {
 			parts[i] = a.String()
 		}
-		fmt.Println(strings.Join(parts, " "))
+		fmt.Println(secrets.Redact(strings.Join(parts, " ")))
 		return goja.Undefined()
 	}
 	_ = c.Set("log", logFn)
 	return c
+}
+
+// newEnvGlobal builds the `env` global (FR-CLI-17): one string property
+// per environment variable the run exposed with -env or -secret-env.
+// A name that was not exposed is undefined.
+func (v *VU) newEnvGlobal(vm *goja.Runtime) *goja.Object {
+	obj := vm.NewObject()
+	if v.inputs == nil {
+		return obj
+	}
+	for _, name := range v.inputs.EnvNames() {
+		if val, ok := v.inputs.Env(name); ok {
+			_ = obj.Set(name, val)
+		}
+	}
+	return obj
+}
+
+// newDataGlobal builds the `data` global (FR-CLI-17): one property per
+// data file, each with next(), random() and length.
+//
+//	const row = data.users.next();   // rows in file order, shared by all VUs
+//	const any = data.users.random(); // any row
+//	data.users.length                // the number of rows
+func (v *VU) newDataGlobal(vm *goja.Runtime) *goja.Object {
+	obj := vm.NewObject()
+	if v.inputs == nil {
+		return obj
+	}
+	for _, name := range v.inputs.DatasetNames() {
+		ds, ok := v.inputs.Dataset(name)
+		if !ok {
+			continue
+		}
+		set := vm.NewObject()
+		_ = set.Set("next", func(goja.FunctionCall) goja.Value { return vm.ToValue(ds.Next()) })
+		_ = set.Set("random", func(goja.FunctionCall) goja.Value { return vm.ToValue(ds.Random()) })
+		_ = set.Set("length", ds.Len())
+		_ = obj.Set(name, set)
+	}
+	return obj
 }
 
 // newCheckFunc builds the global check(value, tests) function

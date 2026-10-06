@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"github.com/vegaload/vegaload/internal/secrets"
 	"strings"
 	"sync"
 	"testing"
@@ -118,5 +119,17 @@ func TestBaselineSection_ShowsVerdictAndEscapesPath(t *testing.T) {
 	}
 	if baselineSection(&Result{}) != "" {
 		t.Error("no baseline should render nothing")
+	}
+}
+
+func TestCollector_RecordCheck_RedactsSecretsInNames(t *testing.T) {
+	secrets.Reset()
+	t.Cleanup(secrets.Reset)
+	secrets.Register("tok-12345")
+	c := NewCollector()
+	c.RecordCheck("sent tok-12345 ok", true)
+	got := c.snapshotChecks()
+	if len(got) != 1 || got[0].Name != "sent [redacted] ok" {
+		t.Fatalf("got %+v", got)
 	}
 }

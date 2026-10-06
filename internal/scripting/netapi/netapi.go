@@ -40,6 +40,31 @@ type CheckRecorder interface {
 	RecordCheck(name string, passed bool)
 }
 
+// Inputs is what a scenario script can read from outside itself
+// (FR-CLI-17): environment variables the run was told to expose, and data
+// files that feed rows to virtual users. The cmd layer builds it from the
+// run's flags; a nil Inputs means the script can read nothing, so `env` is
+// empty and `data` has no files.
+type Inputs interface {
+	// Env returns the value of an exposed environment variable.
+	Env(name string) (string, bool)
+	// EnvNames lists the exposed variable names.
+	EnvNames() []string
+	// Dataset returns the data file registered under name.
+	Dataset(name string) (Dataset, bool)
+	// DatasetNames lists the registered data file names.
+	DatasetNames() []string
+}
+
+// Dataset is one data file's rows. Next hands out the rows in order, one
+// per call, shared by all virtual users, and starts over after the last.
+// Random returns any row. Rows are read-only to the script.
+type Dataset interface {
+	Next() map[string]any
+	Random() map[string]any
+	Len() int
+}
+
 // SafetyCheck is called with the bare host netapi is about to connect
 // to, before every HTTP request and WebSocket dial. Returning a non-nil
 // error refuses the call; the caller (cmd/vegaload) builds this from
