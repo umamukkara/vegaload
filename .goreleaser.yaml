@@ -2,10 +2,6 @@ version: 2
 
 project_name: vegaload
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - id: vegaload
     main: ./cmd/vegaload
@@ -24,14 +20,16 @@ builds:
 
 archives:
   - id: vegaload
-    builds:
+    ids:
       - vegaload
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format: tar.gz
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     files:
       - LICENSE
       - README.md
@@ -53,3 +51,24 @@ release:
   github:
     owner: vegaload
     name: vegaload
+
+# Homebrew formula, pushed to the vegaload/homebrew-tap repo on each tagged
+# release. Needs the HOMEBREW_TAP_TOKEN secret (see RELEASING.md).
+brews:
+  - name: vegaload
+    ids:
+      - vegaload
+    repository:
+      owner: vegaload
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/vegaload/vegaload
+    description: "Open-source load testing for code and AI agents. One static binary."
+    license: Apache-2.0
+    commit_author:
+      name: vegaload-bot
+      email: bot@vegaload.dev
+    commit_msg_template: "vegaload {{ .Tag }}"
+    test: |
+      assert_match "vegaload", shell_output("#{bin}/vegaload version")
