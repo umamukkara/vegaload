@@ -123,3 +123,34 @@ func TestPrintBaseline_ShowsTheVerdict(t *testing.T) {
 		t.Errorf("no baseline should print nothing, got %q", sb.String())
 	}
 }
+
+func TestGateFailures_ListsBothWhenBothFail(t *testing.T) {
+	no, yes := false, true
+	both := &report.Result{
+		Thresholds: []report.ThresholdResult{{Name: "fast", Passed: false, Observed: "2s"}}, ThresholdsPassed: &no,
+		Baseline: &report.BaselineResult{Path: "b.json", Passed: false, Notes: []string{"p95 rose"}},
+	}
+	got := gateFailures(both)
+	if len(got) != 2 || !strings.HasPrefix(got[0], "thresholds breached: fast") || !strings.Contains(got[1], "worse than the baseline b.json: p95 rose") {
+		t.Fatalf("got %q", got)
+	}
+	onlyBaseline := &report.Result{ThresholdsPassed: &yes, Baseline: both.Baseline}
+	if got := gateFailures(onlyBaseline); len(got) != 1 || !strings.Contains(got[0], "baseline") {
+		t.Fatalf("got %q", got)
+	}
+	if got := gateFailures(&report.Result{}); len(got) != 0 {
+		t.Fatalf("a clean run should list nothing, got %q", got)
+	}
+}
+
+func TestCmdRun_Baseline_BothGatesFailExitsThreeWithBothVerdicts(t *testing.T) {
+	b := goodBaseline()
+	b.Latency.P95 = time.Nanosecond
+	code, res, _ := baselineRun(t, "-baseline", writeBaseline(t, b), "-threshold", "p50 < 1ns")
+	if code != 3 || res.ThresholdsPassed == nil || *res.ThresholdsPassed || res.Baseline == nil || res.Baseline.Passed {
+		t.Fatalf("code=%d thresholds=%v baseline=%+v", code, res.ThresholdsPassed, res.Baseline)
+	}
+	if len(gateFailures(&res)) != 2 {
+		t.Fatalf("want both failures listed, got %q", gateFailures(&res))
+	}
+}

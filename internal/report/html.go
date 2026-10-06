@@ -109,7 +109,11 @@ func baselineSection(res *Result) string {
 		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 			c, word, html.EscapeString(m.Name), baselineValue(m.Baseline, m.Unit), baselineValue(m.Candidate, m.Unit))
 	}
-	b.WriteString("</table>\n</section>\n")
+	b.WriteString("</table>\n")
+	for _, n := range bl.Notes {
+		fmt.Fprintf(&b, "<p class=\"note\">%s</p>\n", html.EscapeString(n))
+	}
+	b.WriteString("</section>\n")
 	return b.String()
 }
 

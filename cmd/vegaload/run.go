@@ -663,17 +663,30 @@ func cmdRun(args []string) int {
 	// FR-CLI-11: a run that completed but broke a threshold exits 3. The
 	// reason goes to stderr in every output mode, so stdout stays clean
 	// for -output json and jsonl.
-	if result.ThresholdsPassed != nil && !*result.ThresholdsPassed {
-		fmt.Fprintf(os.Stderr, "vegaload run: thresholds breached: %s\n", strings.Join(breachedNames(result), "; "))
-		return exitThresholdsBreached
-	}
 	// FR-CLI-14: a run that completed but is worse than its baseline by
-	// more than -max-regression also exits 3.
-	if result.Baseline != nil && !result.Baseline.Passed {
-		fmt.Fprintf(os.Stderr, "vegaload run: worse than the baseline %s: %s\n", result.Baseline.Path, strings.Join(result.Baseline.Notes, "; "))
+	// more than -max-regression also exits 3. Both reasons are printed
+	// when both gates fail.
+	if failures := gateFailures(result); len(failures) > 0 {
+		for _, f := range failures {
+			fmt.Fprintf(os.Stderr, "vegaload run: %s\n", f)
+		}
 		return exitThresholdsBreached
 	}
 	return 0
+}
+
+// gateFailures lists why a finished run fails its gates: a breached
+// threshold (FR-CLI-11) and a baseline it is worse than (FR-CLI-14), one
+// line each. It is empty when the run passed every gate.
+func gateFailures(result *report.Result) []string {
+	var out []string
+	if result.ThresholdsPassed != nil && !*result.ThresholdsPassed {
+		out = append(out, "thresholds breached: "+strings.Join(breachedNames(result), "; "))
+	}
+	if b := result.Baseline; b != nil && !b.Passed {
+		out = append(out, fmt.Sprintf("worse than the baseline %s: %s", b.Path, strings.Join(b.Notes, "; ")))
+	}
+	return out
 }
 
 // breachedNames lists the thresholds a run broke, with what was observed.
