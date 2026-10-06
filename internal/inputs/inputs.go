@@ -45,11 +45,38 @@ var _ netapi.Dataset = (*Set)(nil)
 // starts again from the first row after the last.
 func (s *Set) Next() map[string]any {
 	i := s.next.Add(1) - 1
-	return s.rows[i%uint64(len(s.rows))]
+	return copyRow(s.rows[i%uint64(len(s.rows))])
 }
 
 // Random returns any row.
-func (s *Set) Random() map[string]any { return s.rows[rand.Intn(len(s.rows))] }
+func (s *Set) Random() map[string]any { return copyRow(s.rows[rand.Intn(len(s.rows))]) }
+
+// copyRow returns a deep copy of a row. A script gets its own copy, so a
+// change it makes to a row (in JavaScript, `row.name = "x"` writes through
+// to the Go map) is not seen by the next user who draws that row, and two
+// users never write the same map at once.
+func copyRow(row map[string]any) map[string]any {
+	out := make(map[string]any, len(row))
+	for k, v := range row {
+		out[k] = copyValue(v)
+	}
+	return out
+}
+
+func copyValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return copyRow(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = copyValue(e)
+		}
+		return out
+	default:
+		return v // strings, numbers, booleans and nil are values, not shared
+	}
+}
 
 // Len is the number of rows.
 func (s *Set) Len() int { return len(s.rows) }
@@ -117,6 +144,11 @@ func readJSON(r io.Reader) ([]map[string]any, error) {
 	dec := json.NewDecoder(r)
 	if err := dec.Decode(&rows); err != nil {
 		return nil, fmt.Errorf("want a JSON array of objects: %w", err)
+	}
+	for i, row := range rows {
+		if row == nil {
+			return nil, fmt.Errorf("want a JSON array of objects, but item %d is null", i+1)
+		}
 	}
 	return rows, nil
 }

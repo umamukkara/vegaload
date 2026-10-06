@@ -191,3 +191,47 @@ func TestNilInputsExposeNothing(t *testing.T) {
 		t.Fatal("a nil *Inputs has no data files")
 	}
 }
+
+func TestSet_RowsAreCopiesSoAScriptCannotChangeTheFile(t *testing.T) {
+	s, err := LoadSet("u", write(t, "u.json", `[{"name":"ann","tags":["a","b"],"addr":{"city":"Pune"}}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, get := range []func() map[string]any{s.Next, s.Random} {
+		row := get()
+		row["name"] = "changed"
+		row["tags"].([]any)[0] = "changed"
+		row["addr"].(map[string]any)["city"] = "changed"
+
+		again := get()
+		if again["name"] != "ann" || again["tags"].([]any)[0] != "a" || again["addr"].(map[string]any)["city"] != "Pune" {
+			t.Fatalf("a change to one row leaked into the next draw: %v", again)
+		}
+	}
+}
+
+func TestSet_ConcurrentWritersDoNotRace(t *testing.T) {
+	s, _ := LoadSet("u", write(t, "u.json", `[{"n":"a","x":{"y":1}}]`))
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				row := s.Next()
+				row["n"] = "w"
+				row["x"].(map[string]any)["y"] = i
+			}
+		}()
+	}
+	wg.Wait() // run with -race
+}
+
+func TestLoadSet_NullJSONItemIsRejected(t *testing.T) {
+	for _, body := range []string{`[null]`, `[{"a":1},null]`} {
+		_, err := LoadSet("u", write(t, "u.json", body))
+		if err == nil || !strings.Contains(err.Error(), "null") {
+			t.Errorf("%s: err = %v, want it to mention null", body, err)
+		}
+	}
+}

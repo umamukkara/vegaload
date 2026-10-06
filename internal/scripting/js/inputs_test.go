@@ -114,3 +114,20 @@ func TestConsoleLog_RedactsSecrets(t *testing.T) {
 		t.Fatalf("console output = %q", out)
 	}
 }
+
+func TestInputs_ChangingARowDoesNotChangeTheNextOne(t *testing.T) {
+	rec, err := runWithInputs(t, twoRows(t), `
+export default function () {
+  const a = data.users.next();
+  a.name = "changed";
+  data.users.next();
+  const again = data.users.next(); // wraps to the first row
+  check(1, { ["again=" + again.name]: true });
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rec.got, " "); !strings.Contains(got, "again=ann=pass") {
+		t.Fatalf("got %q", got)
+	}
+}
