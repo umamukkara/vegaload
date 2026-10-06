@@ -191,3 +191,14 @@ func TestCheckRate_BadValueNamesTheMetric(t *testing.T) {
 		t.Errorf("error = %v, want one that names check_rate", err)
 	}
 }
+
+func TestCheckRate_ZeroRequestsSaysNoChecks(t *testing.T) {
+	ths, err := ParseAll([]string{"check_rate >= 99%"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Evaluate(ths, &report.Result{})
+	if got[0].Passed || got[0].Observed != "no checks were made" {
+		t.Fatalf("got %+v", got[0])
+	}
+}

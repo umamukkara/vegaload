@@ -757,7 +757,8 @@ func printChecks(w io.Writer, r *report.Result) {
 		if c.Fails > 0 {
 			status = "FAIL"
 		}
-		fmt.Fprintf(w, "  %s  %s  (%d passed, %d failed)\n", status, c.Name, c.Passes, c.Fails)
+		pct := 100 * float64(c.Passes) / float64(c.Passes+c.Fails)
+		fmt.Fprintf(w, "  %s  %s  %.2f%%  (%d passed, %d failed)\n", status, c.Name, pct, c.Passes, c.Fails)
 	}
 }
 

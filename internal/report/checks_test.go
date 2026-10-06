@@ -1,6 +1,7 @@
 package report
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -78,5 +79,27 @@ func TestChecksSection_ShowsEachCheck(t *testing.T) {
 	}
 	if checksSection(&Result{}) != "" {
 		t.Error("a run with no checks must render no checks section")
+	}
+}
+
+func TestCollector_RecordCheck_CapsDistinctNames(t *testing.T) {
+	c := NewCollector()
+	for i := 0; i < MaxCheckNames+50; i++ {
+		c.RecordCheck(fmt.Sprintf("id %d", i), i%2 == 0)
+	}
+	got := c.snapshotChecks()
+	if len(got) != MaxCheckNames+1 {
+		t.Fatalf("got %d check rows, want %d", len(got), MaxCheckNames+1)
+	}
+	other := got[len(got)-1]
+	if other.Name != OtherChecksName || other.Passes+other.Fails != 50 {
+		t.Fatalf("overflow bucket = %+v", other)
+	}
+	var total int64
+	for _, r := range got {
+		total += r.Passes + r.Fails
+	}
+	if total != int64(MaxCheckNames+50) {
+		t.Fatalf("total checks %d: counts must not be lost", total)
 	}
 }

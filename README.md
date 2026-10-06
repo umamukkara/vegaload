@@ -216,7 +216,9 @@ check(res, { "status is 200": (r) => r.status === 200 });
 In Python the tests are callables or bools, and a test that raises counts as
 failed. The summary, JSON, and HTML report list each check's passes and
 fails. Gate on them with `-threshold "check_rate >= 99%"`. A run with no
-checks fails that threshold. See `examples/scenarios/checks.vl.js`.
+checks fails that threshold. Use fixed check names. A run keeps at most 100 distinct
+names; any more are counted together as `(other checks)`. See
+`examples/scenarios/checks.vl.js`.
 
 Thresholds can also come from a file, with `-thresholds gate.json`. The file
 is a JSON list of `{"name", "metric", "operator", "value"}`, or the output of

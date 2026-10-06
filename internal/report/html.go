@@ -95,14 +95,14 @@ func checksSection(res *Result) string {
 	var b strings.Builder
 	rate, _ := res.CheckRate()
 	fmt.Fprintf(&b, "<section class=\"checks\">\n<h2>Checks <span class=\"badge\">%.2f%% passed</span></h2>\n", rate*100)
-	b.WriteString("<table>\n<tr><th>result</th><th>check</th><th>passes</th><th>fails</th></tr>\n")
+	b.WriteString("<table>\n<tr><th>result</th><th>check</th><th>rate</th><th>passes</th><th>fails</th></tr>\n")
 	for _, c := range res.Checks {
 		word, cls := "PASS", "pass"
 		if c.Fails > 0 {
 			word, cls = "FAIL", "fail"
 		}
-		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%d</td><td>%d</td></tr>\n",
-			cls, word, html.EscapeString(c.Name), c.Passes, c.Fails)
+		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%.2f%%</td><td>%d</td><td>%d</td></tr>\n",
+			cls, word, html.EscapeString(c.Name), 100*float64(c.Passes)/float64(c.Passes+c.Fails), c.Passes, c.Fails)
 	}
 	b.WriteString("</table>\n</section>\n")
 	return b.String()

@@ -73,6 +73,13 @@ func (c *Collector) Record(r engine.IterationResult) {
 	}
 }
 
+// MaxCheckNames bounds how many distinct check names a run keeps. Further
+// names are counted together under OtherChecksName.
+const MaxCheckNames = 100
+
+// OtherChecksName is the bucket for check names past MaxCheckNames.
+const OtherChecksName = "(other checks)"
+
 // RecordCheck counts one evaluation of the named check (FR-CLI-12). It
 // implements netapi.CheckRecorder and is safe for concurrent use.
 func (c *Collector) RecordCheck(name string, passed bool) {
@@ -82,6 +89,13 @@ func (c *Collector) RecordCheck(name string, passed bool) {
 		c.checks = map[string]*CheckResult{}
 	}
 	cr := c.checks[name]
+	if cr == nil && len(c.checks) >= MaxCheckNames {
+		// A name built from an id or URL would grow this map with every
+		// iteration. Past the cap, new names share one bucket, so the
+		// counts (and check_rate) stay right and memory stays fixed.
+		name = OtherChecksName
+		cr = c.checks[name]
+	}
 	if cr == nil {
 		cr = &CheckResult{Name: name}
 		c.checks[name] = cr

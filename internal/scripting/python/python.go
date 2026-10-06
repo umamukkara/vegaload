@@ -168,6 +168,7 @@ def check(value, tests):
     if not isinstance(tests, dict):
         raise TypeError("check: want check(value, {name: test, ...})")
     all_passed = True
+    outcomes = []
     for name, test in tests.items():
         if callable(test):
             try:
@@ -178,9 +179,13 @@ def check(value, tests):
             passed = test
         else:
             raise TypeError("check: %r must be a function or a bool" % (name,))
-        _call("check", name=str(name), ok=passed)
+        outcomes.append({"name": str(name), "ok": passed})
         if not passed:
             all_passed = False
+    # One round trip for the whole call, not one per test, so checks add
+    # as little as possible to the iteration being timed.
+    if outcomes:
+        _call("check", results=outcomes)
     return all_passed
 
 def _respond_ready(ok, error=None):
@@ -260,6 +265,12 @@ func Load(path string) (*Script, error) {
 // message is one line of the harness's stdout protocol: a "ready"
 // handshake at startup, a "result" ending one iteration, or a "call"
 // asking the Go side to perform one http/ws operation mid-iteration.
+// checkOutcome is one test's result inside a "check" call.
+type checkOutcome struct {
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+}
+
 type message struct {
 	Type  string `json:"type"`
 	OK    bool   `json:"ok"`
@@ -277,6 +288,8 @@ type message struct {
 	Handle   int               `json:"handle"`
 	Data     string            `json:"data"`
 	Text     bool              `json:"text"`
+	// Results is the batch of outcomes on a "check" call.
+	Results []checkOutcome `json:"results"`
 	// TimeoutMs is a pointer because Python's None (no timeout given)
 	// must stay distinguishable from an explicit 0.
 	TimeoutMs *int `json:"timeout_ms"`
@@ -499,7 +512,9 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 		return v.callHTTP(msg)
 	case "check":
 		if v.checks != nil {
-			v.checks.RecordCheck(msg.Name, msg.OK)
+			for _, r := range msg.Results {
+				v.checks.RecordCheck(r.Name, r.OK)
+			}
 		}
 		return map[string]interface{}{}, nil
 	case "ws_connect":

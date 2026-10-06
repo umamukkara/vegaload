@@ -196,11 +196,6 @@ func Evaluate(ts []Threshold, res *report.Result) []report.ThresholdResult {
 	out := make([]report.ThresholdResult, 0, len(ts))
 	for _, t := range ts {
 		r := report.ThresholdResult{Name: t.Name, Metric: t.Metric, Operator: t.Operator, Value: t.Value}
-		if res.Total == 0 {
-			r.Observed = "no requests completed"
-			out = append(out, r)
-			continue
-		}
 		if t.Metric == "check_rate" {
 			rate, any := res.CheckRate()
 			if !any {
@@ -210,6 +205,11 @@ func Evaluate(ts []Threshold, res *report.Result) []report.ThresholdResult {
 			}
 			r.Observed = formatObserved(t.Metric, rate)
 			r.Passed = compare(rate, t.Operator, t.limit)
+			out = append(out, r)
+			continue
+		}
+		if res.Total == 0 {
+			r.Observed = "no requests completed"
 			out = append(out, r)
 			continue
 		}
