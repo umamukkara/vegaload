@@ -418,3 +418,48 @@ func TestRunTestTool_OtherExitCodesStillError(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateScenarioTool_BuildsArgsAndReturnsResult(t *testing.T) {
+	bin, argsFile := argRecordingBinary(t, `{"scenario":"s.vl.js","valid":true,"elapsed":"10ms"}`, 0)
+	tools := NewTools(bin)
+	out, err := callTool(t, tools, "validate_scenario", map[string]any{
+		"scenario_path": "s.vl.js", "allow_targets": []string{"api.test"}, "yes": true, "timeout": "5s",
+	})
+	if err != nil {
+		t.Fatalf("validate_scenario returned error: %v", err)
+	}
+	if m := out.(map[string]any); m["valid"] != true {
+		t.Fatalf("result = %v", m)
+	}
+	args := readArgs(t, argsFile)
+	want := []string{"validate", "-output", "json", "-trigger", "mcp", "-timeout", "5s", "-allow-target", "api.test", "-yes", "s.vl.js"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", args, want)
+	}
+}
+
+func TestValidateScenarioTool_NotValidIsAResultNotAnError(t *testing.T) {
+	bin, _ := argRecordingBinary(t, `{"scenario":"s.vl.js","valid":false,"stage":"load","error":"js: bad"}`, 1)
+	out, err := callTool(t, NewTools(bin), "validate_scenario", map[string]any{"scenario_path": "s.vl.js"})
+	if err != nil {
+		t.Fatalf("an invalid scenario must not be a tool error: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["valid"] != false || m["stage"] != "load" {
+		t.Fatalf("result = %v", m)
+	}
+}
+
+func TestValidateScenarioTool_UsageFailureIsAnError(t *testing.T) {
+	bin, _ := argRecordingBinary(t, ``, 2)
+	if _, err := callTool(t, NewTools(bin), "validate_scenario", map[string]any{"scenario_path": "s.vl.js"}); err == nil {
+		t.Fatal("expected an error when the CLI printed no result")
+	}
+}
+
+func TestValidateScenarioTool_RequiresScenarioPath(t *testing.T) {
+	bin, _ := argRecordingBinary(t, "{}", 0)
+	if _, err := callTool(t, NewTools(bin), "validate_scenario", map[string]any{}); err == nil {
+		t.Fatal("expected an error without scenario_path")
+	}
+}

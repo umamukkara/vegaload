@@ -582,7 +582,7 @@ func cmdRun(args []string) int {
 		}
 		result, err = runScenario(cfg)
 	}
-	recordAudit(cfg, result, err)
+	recordAudit("run", cfg, result, err)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload run: %v\n", err)
 		return 1
@@ -705,7 +705,7 @@ func writeAndMaybeOpenReport(cfg *runConfig, result *report.Result) error {
 // treatment internal/audit's doc comment describes — since the run
 // itself already happened and its own outcome is what matters most to
 // the caller.
-func recordAudit(cfg *runConfig, result *report.Result, runErr error) {
+func recordAudit(command string, cfg *runConfig, result *report.Result, runErr error) {
 	entry := audit.Entry{
 		Time:         time.Now(),
 		Trigger:      cfg.Trigger,
@@ -730,7 +730,7 @@ func recordAudit(cfg *runConfig, result *report.Result, runErr error) {
 		entry.Thresholds = append(entry.Thresholds, t.Expression())
 	}
 	if err := audit.Append(cfg.AuditLogPath, entry); err != nil {
-		fmt.Fprintf(os.Stderr, "vegaload run: warning: could not write audit log: %v\n", err)
+		fmt.Fprintf(os.Stderr, "vegaload %s: warning: could not write audit log: %v\n", command, err)
 	}
 }
 
