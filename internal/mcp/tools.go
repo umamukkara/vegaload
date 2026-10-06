@@ -106,6 +106,9 @@ type runTestArgs struct {
 	BaselinePath  string   `json:"baseline_path,omitempty"`
 	MaxRegression *float64 `json:"max_regression,omitempty"`
 	JUnitPath     string   `json:"junit_path,omitempty"`
+	DataFiles     []string `json:"data_files,omitempty"`
+	Env           []string `json:"env,omitempty"`
+	SecretEnv     []string `json:"secret_env,omitempty"`
 }
 
 func runTestTool(exePath string) Tool {
@@ -138,6 +141,9 @@ func runTestTool(exePath string) Tool {
 				"no_report":      map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
 				"thresholds":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed)"},
 				"baseline_path":  map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
+				"data_files":     dataFilesSchema,
+				"env":            envSchema,
+				"secret_env":     secretEnvSchema,
 				"junit_path":     map[string]any{"type": "string", "description": "also write a JUnit XML file here: each threshold, check and the baseline gate is one test case"},
 				"max_regression": map[string]any{"type": "number", "description": "with baseline_path: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)"},
 			},
@@ -202,6 +208,7 @@ func runTestTool(exePath string) Tool {
 			if in.JUnitPath != "" {
 				args = append(args, "-junit", in.JUnitPath)
 			}
+			args = appendInputFlags(args, in.DataFiles, in.Env, in.SecretEnv)
 			if in.NoReport {
 				args = append(args, "-no-report")
 			} else if reportPath != "" {
@@ -498,6 +505,9 @@ type validateScenarioArgs struct {
 	AllowTargets []string `json:"allow_targets,omitempty"`
 	Yes          bool     `json:"yes,omitempty"`
 	Timeout      string   `json:"timeout,omitempty"`
+	DataFiles    []string `json:"data_files,omitempty"`
+	Env          []string `json:"env,omitempty"`
+	SecretEnv    []string `json:"secret_env,omitempty"`
 }
 
 func validateScenarioTool(exePath string) Tool {
@@ -517,6 +527,9 @@ func validateScenarioTool(exePath string) Tool {
 				"allow_targets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "additional hosts allowed without confirmation"},
 				"yes":           map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted host"},
 				"timeout":       map[string]any{"type": "string", "description": "time limit for the one iteration, e.g. \"30s\" (default 30s)"},
+				"data_files":    dataFilesSchema,
+				"env":           envSchema,
+				"secret_env":    secretEnvSchema,
 			},
 			"required": []string{"scenario_path"},
 		},
@@ -538,6 +551,7 @@ func validateScenarioTool(exePath string) Tool {
 			if in.Yes {
 				args = append(args, "-yes")
 			}
+			args = appendInputFlags(args, in.DataFiles, in.Env, in.SecretEnv)
 			args = append(args, in.ScenarioPath) // positional: must come last
 
 			stdout, err := RunCLI(ctx, exePath, args...)
@@ -555,4 +569,24 @@ func validateScenarioTool(exePath string) Tool {
 			return result, nil
 		},
 	}
+}
+
+// FR-CLI-17: the data files and environment variables a scenario reads.
+var (
+	dataFilesSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "CSV (header row) or JSON (array of objects) files whose rows the scenario reads as data.NAME.next() or data.NAME.random(). NAME is the file name without its extension, or write name=path"}
+	envSchema       = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "names of environment variables the scenario may read as env.NAME. Scripts cannot see any other variable"}
+	secretEnvSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "like env, but the value is a secret and is removed from results, reports and logs. Use this for tokens and passwords"}
+)
+
+func appendInputFlags(args, dataFiles, env, secretEnv []string) []string {
+	for _, d := range dataFiles {
+		args = append(args, "-data", d)
+	}
+	for _, e := range env {
+		args = append(args, "-env", e)
+	}
+	for _, e := range secretEnv {
+		args = append(args, "-secret-env", e)
+	}
+	return args
 }

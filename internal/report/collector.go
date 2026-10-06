@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/engine"
+	"github.com/vegaload/vegaload/internal/secrets"
 )
 
 // sample is the minimal per-iteration record Collector keeps. Keeping
@@ -83,6 +84,9 @@ const OtherChecksName = "(other checks)"
 // RecordCheck counts one evaluation of the named check (FR-CLI-12). It
 // implements netapi.CheckRecorder and is safe for concurrent use.
 func (c *Collector) RecordCheck(name string, passed bool) {
+	// A check name is text the script chose, so it may carry a secret the
+	// script read (FR-CLI-17).
+	name = secrets.Redact(name)
 	c.checkMu.Lock()
 	defer c.checkMu.Unlock()
 	if c.checks == nil {

@@ -56,6 +56,7 @@ import (
 	"github.com/vegaload/vegaload/internal/scripting/js"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 	"github.com/vegaload/vegaload/internal/scripting/python"
+	"github.com/vegaload/vegaload/internal/secrets"
 	"github.com/vegaload/vegaload/internal/threshold"
 )
 
@@ -147,6 +148,10 @@ type runConfig struct {
 	// StepSummaryPath is where the Markdown summary is appended. It
 	// comes from GITHUB_STEP_SUMMARY, so it is empty outside Actions.
 	StepSummaryPath string
+
+	// FR-CLI-17: data files and environment variables scripts can read.
+	// Inputs is nil when none were given.
+	Inputs netapi.Inputs
 }
 
 // parseRunArgs parses run's flags into a runConfig. It returns a usage
@@ -209,6 +214,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	// FR-RPT-05: JUnit XML and the GitHub Actions job summary.
 	fs.StringVar(&cfg.JUnitPath, "junit", "", "also write a JUnit XML file to this path: each threshold, check and the baseline gate is one test case, so CI systems show the results natively")
 	fs.BoolVar(&cfg.NoStepSummary, "no-step-summary", false, "inside GitHub Actions, do not append the run's summary to the job summary")
+
+	// FR-CLI-17: data files and environment variables for scripts.
+	var scriptInputs scriptInputFlags
+	scriptInputs.register(fs)
 
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload run [flags] [scenario-file]")
@@ -283,6 +292,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 			return nil, fmt.Errorf("-baseline: %s has no requests, so there is nothing to compare with", cfg.BaselinePath)
 		}
 		cfg.Baseline = base
+	}
+
+	if err := scriptInputs.resolve(cfg); err != nil {
+		return nil, err
 	}
 
 	if cfg.ScenarioPath == "" && (cfg.Target.URL == "" || cfg.Protocol == "") {
@@ -468,7 +481,7 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 			return nil, nil, err
 		}
 		pool := newVUPool(concurrency, func() (iterCloser, error) {
-			vu, err := script.NewVU(check, cfg.Timeout)
+			vu, err := script.NewVU(check, cfg.Timeout, python.WithInputs(cfg.Inputs))
 			if err != nil {
 				return nil, err
 			}
@@ -490,7 +503,7 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 		return nil, nil, err
 	}
 	pool := newVUPool(concurrency, func() (iterCloser, error) {
-		vu, err := script.NewVU(check, cfg.Timeout)
+		vu, err := script.NewVU(check, cfg.Timeout, js.WithInputs(cfg.Inputs))
 		if err != nil {
 			return nil, err
 		}
@@ -646,7 +659,7 @@ func cmdRun(args []string) int {
 	}
 	recordAudit("run", cfg, result, err)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vegaload run: %v\n", err)
+		fmt.Fprintf(os.Stderr, "vegaload run: %s\n", secrets.Redact(err.Error()))
 		return 1
 	}
 
@@ -813,7 +826,7 @@ func recordAudit(command string, cfg *runConfig, result *report.Result, runErr e
 	}
 	if runErr != nil {
 		entry.Outcome = "error"
-		entry.Error = runErr.Error()
+		entry.Error = secrets.Redact(runErr.Error()) // FR-CLI-17: a script's error text can carry a secret it read
 	} else {
 		entry.Outcome = "success"
 		entry.Total = result.Total

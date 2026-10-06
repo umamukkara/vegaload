@@ -65,7 +65,10 @@ couldn't also do.
 3. Call **run_test** with the target/protocol (or scenario) and shape the user
    asked for. If the user has a baseline report, pass `baseline_path` (and
    `max_regression`, in percent) to gate the run on it in one call. Pass
-   `junit_path` to also write JUnit XML for a CI system.
+   `junit_path` to also write JUnit XML for a CI system. A scenario can read
+   rows from `data_files` (CSV or JSON) as `data.NAME.next()` and variables
+   from `env` as `env.NAME`. Put tokens and passwords in `secret_env`, which
+   removes them from every output. **validate_scenario** takes the same.
 4. Read the `report_path` it returns, or call **get_results** later to re-read
    it.
 5. If the run had failures or looks degraded, call **diagnose_failure** on

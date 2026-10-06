@@ -19,6 +19,7 @@ import (
 
 	"github.com/vegaload/vegaload/internal/report"
 	"github.com/vegaload/vegaload/internal/safety"
+	"github.com/vegaload/vegaload/internal/secrets"
 )
 
 // validateResult is what `vegaload validate -output json` prints, and
@@ -55,6 +56,8 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&cfg.Yes, "yes", false, "allow hosts that are not localhost or allowlisted (needed for non-interactive and MCP-driven runs)")
 	fs.StringVar(&cfg.Trigger, "trigger", "cli", "what started this run, recorded in the audit log")
 	fs.StringVar(&cfg.AuditLogPath, "audit-log", "", "path to the audit log (default: ~/.vegaload/audit.log)")
+	var scriptInputs scriptInputFlags
+	scriptInputs.register(fs)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload validate [flags] <scenario-file>")
 		fmt.Fprintln(fs.Output(), "Runs the scenario once, with one user and one iteration, and reports whether it works.")
@@ -78,6 +81,10 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.ScenarioPath = fs.Arg(0)
 	cfg.AllowTargets = []string(allowTargets)
+	if err := scriptInputs.resolve(cfg); err != nil {
+		fmt.Fprintf(stderr, "vegaload validate: %v\n", err)
+		return 2
+	}
 
 	res := validateScenario(cfg)
 	recordValidateAudit(cfg, res)
@@ -108,7 +115,8 @@ func validateScenario(cfg *runConfig) *validateResult {
 		res.Elapsed = res.elapsed.Round(time.Millisecond).String()
 		res.Checks = collector.Finish("validate", time.Since(start)).Checks
 		if err != nil {
-			res.Stage, res.Error = stage, err.Error()
+			// FR-CLI-17: the error text can carry a secret the script read.
+			res.Stage, res.Error = stage, secrets.Redact(err.Error())
 			return res
 		}
 		res.Valid = true
