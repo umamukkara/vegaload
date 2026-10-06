@@ -463,3 +463,19 @@ func TestValidateScenarioTool_RequiresScenarioPath(t *testing.T) {
 		t.Fatal("expected an error without scenario_path")
 	}
 }
+
+func TestRunTestTool_PassesBaselineFlags(t *testing.T) {
+	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
+	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)
+	_, err := callTool(t, NewTools(bin), "run_test", map[string]any{
+		"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true,
+		"baseline_path": "base.json", "max_regression": 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(readArgs(t, argsFile), " ")
+	if !strings.Contains(args, "-baseline base.json") || !strings.Contains(args, "-max-regression 0") {
+		t.Errorf("args = %s", args)
+	}
+}

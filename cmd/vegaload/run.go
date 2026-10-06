@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/audit"
+	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/engine"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
@@ -132,6 +133,13 @@ type runConfig struct {
 
 	// FR-CLI-11: pass/fail thresholds judged on the finished run.
 	Thresholds []threshold.Threshold
+
+	// FR-CLI-14: judge the finished run against a baseline report the
+	// user supplies. Baseline is loaded when the flags are parsed, so a
+	// bad path fails before any load is sent.
+	BaselinePath  string
+	MaxRegression float64 // percent
+	Baseline      *report.Result
 }
 
 // parseRunArgs parses run's flags into a runConfig. It returns a usage
@@ -187,6 +195,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\" or \"fast: error_rate < 1%\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
 	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, or the output of `vegaload diagnose -output json`)")
 
+	// FR-CLI-14: baseline gate.
+	fs.StringVar(&cfg.BaselinePath, "baseline", "", "JSON report of an earlier run (from -out) to compare this run with. If p95 or the error rate is worse by more than -max-regression, the run exits 3")
+	fs.Float64Var(&cfg.MaxRegression, "max-regression", 0, "with -baseline: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)")
+
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload run [flags] [scenario-file]")
 		fmt.Fprintln(fs.Output(), "Flags must come before the scenario file, e.g. \"vegaload run -vus 10 scenario.vl.js\" —")
@@ -233,6 +245,29 @@ func parseRunArgs(args []string) (*runConfig, error) {
 			return nil, fmt.Errorf("-threshold: %w", err)
 		}
 		cfg.Thresholds = append(cfg.Thresholds, ts...)
+	}
+
+	maxRegressionSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "max-regression" {
+			maxRegressionSet = true
+		}
+	})
+	if maxRegressionSet && cfg.BaselinePath == "" {
+		return nil, fmt.Errorf("-max-regression needs -baseline")
+	}
+	if cfg.MaxRegression < 0 {
+		return nil, fmt.Errorf("-max-regression %g: want zero or more percent", cfg.MaxRegression)
+	}
+	if cfg.BaselinePath != "" {
+		base, err := loadReportJSON(cfg.BaselinePath)
+		if err != nil {
+			return nil, fmt.Errorf("-baseline: %w", err)
+		}
+		if base.Total == 0 {
+			return nil, fmt.Errorf("-baseline: %s has no requests, so there is nothing to compare with", cfg.BaselinePath)
+		}
+		cfg.Baseline = base
 	}
 
 	if cfg.ScenarioPath == "" && (cfg.Target.URL == "" || cfg.Protocol == "") {
@@ -487,6 +522,7 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 
 	result := collector.Finish(ex.Name(), elapsed)
 	applyThresholds(cfg, result)
+	applyBaseline(cfg, result)
 	return result, nil
 }
 
@@ -501,6 +537,17 @@ func applyThresholds(cfg *runConfig, result *report.Result) {
 	result.Thresholds = threshold.Evaluate(cfg.Thresholds, result)
 	passed := threshold.AllPassed(result.Thresholds)
 	result.ThresholdsPassed = &passed
+}
+
+// applyBaseline judges a finished run against cfg's baseline (FR-CLI-14)
+// and records the verdict on the result, so the text summary, JSON, HTML
+// report and the MCP run_test tool all carry it. A run without a baseline
+// is left untouched.
+func applyBaseline(cfg *runConfig, result *report.Result) {
+	if cfg.Baseline == nil {
+		return
+	}
+	result.Baseline = compare.Gate(cfg.Baseline, result, cfg.BaselinePath, cfg.MaxRegression)
 }
 
 // enforceSafety implements FR-CLI-06 for cfg: it rejects a run whose
@@ -616,11 +663,30 @@ func cmdRun(args []string) int {
 	// FR-CLI-11: a run that completed but broke a threshold exits 3. The
 	// reason goes to stderr in every output mode, so stdout stays clean
 	// for -output json and jsonl.
-	if result.ThresholdsPassed != nil && !*result.ThresholdsPassed {
-		fmt.Fprintf(os.Stderr, "vegaload run: thresholds breached: %s\n", strings.Join(breachedNames(result), "; "))
+	// FR-CLI-14: a run that completed but is worse than its baseline by
+	// more than -max-regression also exits 3. Both reasons are printed
+	// when both gates fail.
+	if failures := gateFailures(result); len(failures) > 0 {
+		for _, f := range failures {
+			fmt.Fprintf(os.Stderr, "vegaload run: %s\n", f)
+		}
 		return exitThresholdsBreached
 	}
 	return 0
+}
+
+// gateFailures lists why a finished run fails its gates: a breached
+// threshold (FR-CLI-11) and a baseline it is worse than (FR-CLI-14), one
+// line each. It is empty when the run passed every gate.
+func gateFailures(result *report.Result) []string {
+	var out []string
+	if result.ThresholdsPassed != nil && !*result.ThresholdsPassed {
+		out = append(out, "thresholds breached: "+strings.Join(breachedNames(result), "; "))
+	}
+	if b := result.Baseline; b != nil && !b.Passed {
+		out = append(out, fmt.Sprintf("worse than the baseline %s: %s", b.Path, strings.Join(b.Notes, "; ")))
+	}
+	return out
 }
 
 // breachedNames lists the thresholds a run broke, with what was observed.
@@ -725,6 +791,10 @@ func recordAudit(command string, cfg *runConfig, result *report.Result, runErr e
 		entry.Total = result.Total
 		entry.Failed = result.Failed
 		entry.ThresholdsPassed = result.ThresholdsPassed
+		if result.Baseline != nil {
+			entry.Baseline = result.Baseline.Path
+			entry.BaselinePassed = &result.Baseline.Passed
+		}
 	}
 	for _, t := range cfg.Thresholds {
 		entry.Thresholds = append(entry.Thresholds, t.Expression())
@@ -742,6 +812,31 @@ func printResult(w io.Writer, r *report.Result) {
 	fmt.Fprintf(w, "  mean:     %s\n", r.Latency.Mean)
 	printChecks(w, r)
 	printThresholds(w, r)
+	printBaseline(w, r)
+}
+
+// printBaseline writes the baseline block of the text summary, if the run
+// had a baseline (FR-CLI-14).
+func printBaseline(w io.Writer, r *report.Result) {
+	b := r.Baseline
+	if b == nil {
+		return
+	}
+	verdict := "PASS"
+	if !b.Passed {
+		verdict = "FAIL"
+	}
+	fmt.Fprintf(w, "\nbaseline %s (max regression %g%%)  %s\n", b.Path, b.MaxRegressionPercent, verdict)
+	for _, m := range b.Metrics {
+		status := "PASS"
+		if m.Regressed {
+			status = "FAIL"
+		}
+		fmt.Fprintf(w, "  %s  %s  baseline %s  now %s\n", status, m.Name, formatMetric(m.Baseline, m.Unit), formatMetric(m.Candidate, m.Unit))
+	}
+	for _, n := range b.Notes {
+		fmt.Fprintf(w, "  - %s\n", n)
+	}
 }
 
 // printChecks writes the checks block of the text summary, if the

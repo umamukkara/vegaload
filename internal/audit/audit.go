@@ -36,6 +36,11 @@ type Entry struct {
 	// (FR-CLI-11), as text, and whether they all passed.
 	Thresholds       []string `json:"thresholds,omitempty"`
 	ThresholdsPassed *bool    `json:"thresholds_passed,omitempty"`
+
+	// Baseline is the report a run was compared with (FR-CLI-14), and
+	// whether the run stayed within the allowed regression.
+	Baseline       string `json:"baseline,omitempty"`
+	BaselinePassed *bool  `json:"baseline_passed,omitempty"`
 }
 
 // DefaultPath is where a run's audit record is appended when the caller

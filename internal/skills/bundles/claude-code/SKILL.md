@@ -63,7 +63,8 @@ couldn't also do.
 2. For a scenario you just wrote or edited, call **validate_scenario** first to
    check that it works with one user. Fix it if `valid` is false.
 3. Call **run_test** with the target/protocol (or scenario) and shape the user
-   asked for.
+   asked for. If the user has a baseline report, pass `baseline_path` (and
+   `max_regression`, in percent) to gate the run on it in one call.
 4. Read the `report_path` it returns, or call **get_results** later to re-read
    it.
 5. If the run had failures or looks degraded, call **diagnose_failure** on
