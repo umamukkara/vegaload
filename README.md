@@ -211,7 +211,7 @@ agent host it finds (Cursor, Claude Code, and Claude Desktop on macOS), and
 optionally at a target. For each host it checks the MCP config, that the
 configured command exists and matches this version, that the rules files are
 present, and then starts the configured server and performs a real MCP
-handshake, expecting all six tools back. Using VegaLoad from the CLI alone,
+handshake, expecting all seven tools back. Using VegaLoad from the CLI alone,
 with no agent host, is a healthy result.
 
 ```

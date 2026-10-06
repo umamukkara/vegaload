@@ -447,5 +447,6 @@ var CoreToolNames = []string{
 	"get_results",
 	"suggest_thresholds",
 	"diagnose_failure",
+	"compare_reports",
 	"generate_from_spec",
 }
