@@ -37,6 +37,7 @@ Keep these modules separate. Do not let one reach into another's internals.
 - **Protocol drivers**: HTTP/1.1, HTTP/2, gRPC, WebSocket. Each implements a shared `Protocol` interface. Adding a new protocol should never require editing the core engine.
 - **Output/reporting**: the self-contained HTML report, plus optional JSON/Parquet export. Implements a shared `Output` interface.
 - **MCP layer**: calls the same CLI commands a human would run, then parses their output. It must not call core-engine functions directly. If the MCP layer needs new data, add a CLI flag or output mode first, then have MCP use it.
+- **Doctor and host adapters**: `internal/doctor` holds the checks and `internal/hosts` holds where each agent host keeps its files. `vegaload init` and `vegaload doctor` both read from `internal/hosts`, so they cannot disagree. To support a new host, add one adapter there. Do not add host paths anywhere else.
 - **Harness bridge** (`--move-to-harness`): talks to the Harness RT API. Lives in its own package. The core engine must have zero awareness that Harness RT exists.
 
 When in doubt about where new code belongs, put it in the smallest module that needs it, not in core.
@@ -56,6 +57,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - `vegaload diagnose <report>` — explain a failed run.
 - `vegaload compare <baseline.json> <candidate.json>` — diff a candidate report against a baseline; exits non-zero on regression.
 - `vegaload mcp serve` — start the MCP server (stdio by default).
+- `vegaload doctor` — check the setup (CLI, agent hosts, target). Run it first when something is not working; `-fix` repairs what it safely can.
 - `vegaload --move-to-harness <test-name|all>` — push a test to Harness RT.
 - `go test ./...` — run the test suite. Run this before proposing any change as finished.
 

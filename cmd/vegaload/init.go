@@ -21,15 +21,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vegaload/vegaload/internal/skills"
+	"github.com/vegaload/vegaload/internal/hosts"
 )
 
 // initResult records what cmdInit did for one file, for both its text
 // and -output json reporting.
-type initResult struct {
-	Path   string `json:"path"`
-	Status string `json:"status"` // "created", "updated", or "skipped (exists)"
-}
+type initResult = hosts.WriteResult
 
 func cmdInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
@@ -40,6 +37,7 @@ func cmdInit(args []string) int {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload init [flags]")
 		fmt.Fprintln(fs.Output(), "Registers VegaLoad's MCP server and skill bundles for this project")
 		fmt.Fprintln(fs.Output(), "(Claude Code: .claude/skills/vegaload, .mcp.json; Cursor: .cursor/rules, .cursor/mcp.json).")
+		fmt.Fprintln(fs.Output(), "Run \"vegaload doctor\" afterwards to check that everything is wired up.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -62,31 +60,24 @@ func cmdInit(args []string) int {
 	var results []initResult
 	failed := false
 
-	writeFile := func(relPath, content string) {
-		path := filepath.Join(*dir, relPath)
-		res, err := writeSkillFile(path, content, *force)
+	// The files and their order come from internal/hosts, the same
+	// source `vegaload doctor` checks and repairs.
+	for _, a := range hosts.ProjectArtifacts() {
+		path := filepath.Join(*dir, a.RelPath)
+		var res initResult
+		var err error
+		if a.Kind == "mcp" {
+			res, err = hosts.MergeConfigFile(path, exePath, *force)
+		} else {
+			res, err = hosts.WriteFile(path, a.Content, *force)
+		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vegaload init: %s: %v\n", relPath, err)
+			fmt.Fprintf(os.Stderr, "vegaload init: %s: %v\n", a.RelPath, err)
 			failed = true
-			return
+			continue
 		}
 		results = append(results, res)
 	}
-	writeMCPConfig := func(relPath string) {
-		path := filepath.Join(*dir, relPath)
-		res, err := mergeMCPConfigFile(path, exePath, *force)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "vegaload init: %s: %v\n", relPath, err)
-			failed = true
-			return
-		}
-		results = append(results, res)
-	}
-
-	writeFile(filepath.Join(".claude", "skills", "vegaload", "SKILL.md"), skills.ClaudeCode)
-	writeFile(filepath.Join(".cursor", "rules", "vegaload.mdc"), skills.Cursor)
-	writeMCPConfig(".mcp.json")
-	writeMCPConfig(filepath.Join(".cursor", "mcp.json"))
 
 	if *output == "json" {
 		if err := json.NewEncoder(os.Stdout).Encode(results); err != nil {
@@ -102,61 +93,4 @@ func cmdInit(args []string) int {
 		return 1
 	}
 	return 0
-}
-
-// writeSkillFile writes content to path, creating any missing parent
-// directories, unless path already exists and force is false, in which
-// case it reports "skipped (exists)" without touching the file.
-func writeSkillFile(path, content string, force bool) (initResult, error) {
-	if !force {
-		if _, err := os.Stat(path); err == nil {
-			return initResult{Path: path, Status: "skipped (exists)"}, nil
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return initResult{}, err
-	}
-	status := "created"
-	if _, err := os.Stat(path); err == nil {
-		status = "updated"
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return initResult{}, err
-	}
-	return initResult{Path: path, Status: status}, nil
-}
-
-// mergeMCPConfigFile reads path (if it exists), merges in a "vegaload"
-// MCP server entry via internal/skills.MergeMCPServerConfig, and writes
-// the result back — creating the file and its parent directory if
-// neither existed yet.
-func mergeMCPConfigFile(path, exePath string, force bool) (initResult, error) {
-	var existing []byte
-	existed := false
-	if data, err := os.ReadFile(path); err == nil {
-		existing = data
-		existed = true
-	} else if !os.IsNotExist(err) {
-		return initResult{}, err
-	}
-
-	merged, changed, err := skills.MergeMCPServerConfig(existing, exePath, force)
-	if err != nil {
-		return initResult{}, err
-	}
-	if !changed {
-		return initResult{Path: path, Status: "skipped (exists)"}, nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return initResult{}, err
-	}
-	if err := os.WriteFile(path, merged, 0o644); err != nil {
-		return initResult{}, err
-	}
-	status := "created"
-	if existed {
-		status = "updated"
-	}
-	return initResult{Path: path, Status: status}, nil
 }
