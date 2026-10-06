@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/vegaload/vegaload/internal/audit"
+	"github.com/vegaload/vegaload/internal/report"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -128,5 +130,76 @@ func TestValidate_PythonScenario(t *testing.T) {
 	code, out, _ := validate(t, p)
 	if code != 0 || !strings.Contains(out, "PASS  status is 200") {
 		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+// readAudit returns the audit entries written to the log at path.
+func readAudit(t *testing.T, path string) []audit.Entry {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading audit log: %v", err)
+	}
+	var out []audit.Entry
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var e audit.Entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("audit line %q: %v", line, err)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func validateAudited(t *testing.T, scenario string) audit.Entry {
+	t.Helper()
+	log := filepath.Join(t.TempDir(), "audit.log")
+	var out, errb bytes.Buffer
+	runValidate([]string{"-audit-log", log, scenario}, &out, &errb)
+	entries := readAudit(t, log)
+	if len(entries) != 1 {
+		t.Fatalf("want 1 audit entry, got %d", len(entries))
+	}
+	return entries[0]
+}
+
+func TestValidate_AuditEntry_Valid(t *testing.T) {
+	srv := okServer(t)
+	p := writeScenario(t, "ok.vl.js", `export default function () { http.get("`+srv.URL+`/"); }`)
+	e := validateAudited(t, p)
+	if e.Outcome != "success" || e.Executor != "validate" || e.VUs != 1 || e.Total != 1 || e.Failed != 0 || e.Duration <= 0 || e.ScenarioPath != p {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestValidate_AuditEntry_LoadFailure(t *testing.T) {
+	p := writeScenario(t, "bad.vl.js", `export default function( {`)
+	e := validateAudited(t, p)
+	if e.Outcome != "error" || e.Total != 0 || e.Executor != "validate" || !strings.HasPrefix(e.Error, "load:") {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestValidate_AuditEntry_RefusedHostIsAnIterationError(t *testing.T) {
+	p := writeScenario(t, "far.vl.js", `export default function () { http.get("http://example.com/"); }`)
+	e := validateAudited(t, p)
+	if e.Outcome != "error" || e.Total != 0 || !strings.HasPrefix(e.Error, "iteration:") || !strings.Contains(e.Error, "not localhost or allowlisted") {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestRecordAudit_WarningNamesTheCommand(t *testing.T) {
+	// An audit path that cannot be written: a directory.
+	cfg := &runConfig{AuditLogPath: t.TempDir(), Trigger: "cli"}
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	recordAudit("validate", cfg, &report.Result{}, nil)
+	w.Close()
+	os.Stderr = old
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(r)
+	if !strings.HasPrefix(buf.String(), "vegaload validate: warning") {
+		t.Fatalf("stderr = %q", buf.String())
 	}
 }

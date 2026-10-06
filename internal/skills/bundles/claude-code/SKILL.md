@@ -60,15 +60,17 @@ couldn't also do.
 
 1. If the user names an OpenAPI spec, call **generate_from_spec** first to see
    what endpoints exist and get a starting command for each.
-2. Call **run_test** with the target/protocol (or scenario) and shape the user
+2. For a scenario you just wrote or edited, call **validate_scenario** first to
+   check that it works with one user. Fix it if `valid` is false.
+3. Call **run_test** with the target/protocol (or scenario) and shape the user
    asked for.
-3. Read the `report_path` it returns, or call **get_results** later to re-read
+4. Read the `report_path` it returns, or call **get_results** later to re-read
    it.
-4. If the run had failures or looks degraded, call **diagnose_failure** on
+5. If the run had failures or looks degraded, call **diagnose_failure** on
    the report for an explanation before guessing.
-5. Once a baseline run looks healthy, call **suggest_thresholds** to propose
+6. Once a baseline run looks healthy, call **suggest_thresholds** to propose
    gates for future runs. Keep that baseline JSON path.
-6. After a later run, call **compare_reports** with the baseline and candidate
+7. After a later run, call **compare_reports** with the baseline and candidate
    report paths to see whether error rate or p95 got worse.
 
 Report numbers back to the user plainly (total requests, failure rate, p95

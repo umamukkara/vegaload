@@ -36,6 +36,8 @@ type validateResult struct {
 	Error   string               `json:"error,omitempty"`
 	Elapsed string               `json:"elapsed"`
 	Checks  []report.CheckResult `json:"checks,omitempty"`
+
+	elapsed time.Duration // for the audit log
 }
 
 func cmdValidate(args []string) int {
@@ -78,11 +80,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	cfg.AllowTargets = []string(allowTargets)
 
 	res := validateScenario(cfg)
-	audited := &report.Result{Executor: "validate", Total: 1}
-	if !res.Valid {
-		audited.Failed = 1
-	}
-	recordAudit(cfg, audited, nil)
+	recordValidateAudit(cfg, res)
 
 	if *output == "json" {
 		if err := json.NewEncoder(stdout).Encode(res); err != nil {
@@ -106,7 +104,8 @@ func validateScenario(cfg *runConfig) *validateResult {
 
 	start := time.Now()
 	finish := func(stage string, err error) *validateResult {
-		res.Elapsed = time.Since(start).Round(time.Millisecond).String()
+		res.elapsed = time.Since(start)
+		res.Elapsed = res.elapsed.Round(time.Millisecond).String()
 		res.Checks = collector.Finish("validate", time.Since(start)).Checks
 		if err != nil {
 			res.Stage, res.Error = stage, err.Error()
@@ -128,6 +127,20 @@ func validateScenario(cfg *runConfig) *validateResult {
 		return finish("iteration", err)
 	}
 	return finish("", nil)
+}
+
+// recordValidateAudit writes validate's audit entry (FR-CLI-07). An
+// invalid scenario is an "error" outcome with its message and no totals,
+// the same as a failed run. A valid one ran exactly one iteration.
+func recordValidateAudit(cfg *runConfig, res *validateResult) {
+	cfg.Executor = "validate"
+	cfg.Duration = res.elapsed
+	audited := &report.Result{Executor: "validate", Total: 1}
+	var runErr error
+	if !res.Valid {
+		runErr = fmt.Errorf("%s: %s", res.Stage, res.Error)
+	}
+	recordAudit("validate", cfg, audited, runErr)
 }
 
 func printValidate(w io.Writer, r *validateResult) {
