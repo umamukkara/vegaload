@@ -110,6 +110,9 @@ func TestProjectArtifactsOrderMatchesInit(t *testing.T) {
 		if a.RelPath != want[i] {
 			t.Errorf("artifact %d = %s, want %s", i, a.RelPath, want[i])
 		}
+		if a.Host != "claude-code" && a.Host != "cursor" {
+			t.Errorf("artifact %s has host %q", a.RelPath, a.Host)
+		}
 		if a.Kind == "rules" && a.Content == "" {
 			t.Errorf("rules artifact %s has no content", a.RelPath)
 		}

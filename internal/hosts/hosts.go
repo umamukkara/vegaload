@@ -326,6 +326,7 @@ func claudeDesktop() Host {
 // Artifact is one file `vegaload init` writes into a project.
 type Artifact struct {
 	Kind    string // "rules" or "mcp"
+	Host    string // the host ID that reads this file: "claude-code" or "cursor"
 	RelPath string
 	Content string // rules content; empty for MCP configs
 }
@@ -334,11 +335,55 @@ type Artifact struct {
 // writes for dir. doctor's --fix repairs the same files.
 func ProjectArtifacts() []Artifact {
 	return []Artifact{
-		{Kind: "rules", RelPath: filepath.Join(".claude", "skills", "vegaload", "SKILL.md"), Content: skills.ClaudeCode},
-		{Kind: "rules", RelPath: filepath.Join(".cursor", "rules", "vegaload.mdc"), Content: skills.Cursor},
-		{Kind: "mcp", RelPath: ".mcp.json"},
-		{Kind: "mcp", RelPath: filepath.Join(".cursor", "mcp.json")},
+		{Kind: "rules", Host: "claude-code", RelPath: filepath.Join(".claude", "skills", "vegaload", "SKILL.md"), Content: skills.ClaudeCode},
+		{Kind: "rules", Host: "cursor", RelPath: filepath.Join(".cursor", "rules", "vegaload.mdc"), Content: skills.Cursor},
+		{Kind: "mcp", Host: "claude-code", RelPath: ".mcp.json"},
+		{Kind: "mcp", Host: "cursor", RelPath: filepath.Join(".cursor", "mcp.json")},
 	}
+}
+
+// ProjectEditors lists the host IDs `vegaload init` can set up in a project.
+func ProjectEditors() []string { return []string{"claude-code", "cursor"} }
+
+// Artifact status values, as ArtifactStatus returns them.
+const (
+	StatusOK       = "ok"
+	StatusMissing  = "missing"
+	StatusOutdated = "outdated" // a rules file that differs from this version's
+	StatusOtherExe = "other binary"
+	StatusInvalid  = "invalid"
+)
+
+// ArtifactStatus checks one project artifact under dir without changing
+// anything. exePath is the binary an MCP entry should point at. The
+// second result is a short note, or empty.
+func ArtifactStatus(dir string, a Artifact, exePath string) (string, string) {
+	path := filepath.Join(dir, a.RelPath)
+	if a.Kind == "rules" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return StatusMissing, ""
+			}
+			return StatusInvalid, err.Error()
+		}
+		if string(data) != a.Content {
+			return StatusOutdated, "differs from the version this binary ships; run init -force to update"
+		}
+		return StatusOK, ""
+	}
+	st := Inspect(MCPConfig{Path: path})
+	switch {
+	case st.Err != nil:
+		return StatusInvalid, st.Err.Error()
+	case !st.Exists:
+		return StatusMissing, ""
+	case st.Entry == nil:
+		return StatusMissing, "no \"vegaload\" server in the file"
+	case st.Entry.Command != exePath:
+		return StatusOtherExe, st.Entry.Command
+	}
+	return StatusOK, ""
 }
 
 // WriteResult records what a write did, for text and JSON reporting.
