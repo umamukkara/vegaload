@@ -391,6 +391,17 @@ func TestSchemeTable(t *testing.T) {
 			t.Errorf("scheme %q is probed over HTTP but names no protocol", name)
 		}
 	}
+	for _, in := range []string{"tcp://h", "udp://h"} {
+		if _, err := parseTarget(in); err == nil {
+			t.Errorf("%s has no default port and should be refused", in)
+		}
+	}
+	if got, err := parseTarget("tcp://h:7"); err != nil || got.protocol() != "tcp" {
+		t.Errorf("tcp://h:7 = %+v, %v", got, err)
+	}
+	if got, err := parseTarget("udp://h:7"); err != nil || got.protocol() != "udp" {
+		t.Errorf("udp://h:7 = %+v, %v", got, err)
+	}
 	got, err := parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)
@@ -400,10 +411,7 @@ func TestSchemeTable(t *testing.T) {
 // A UDP target has no connection to open, so the connect check is
 // skipped, not failed.
 func TestTargetConnectSkippedForUDP(t *testing.T) {
-	schemes["udptest"] = scheme{udp: true}
-	defer delete(schemes, "udptest")
-
-	rep := run(t, testEnv(t), Options{Hosts: []string{"none"}, Only: []string{"target.connect"}, Target: "udptest://127.0.0.1:9"})
+	rep := run(t, testEnv(t), Options{Hosts: []string{"none"}, Only: []string{"target.connect"}, Target: "udp://127.0.0.1:9"})
 	if r := byID(t, rep, "target.connect"); r.Status != Skip {
 		t.Errorf("target.connect for UDP = %+v, want Skip", r)
 	}

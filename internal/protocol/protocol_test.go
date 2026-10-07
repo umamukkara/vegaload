@@ -77,3 +77,19 @@ func TestRejectUnknownOptions_NoneAllowed(t *testing.T) {
 		t.Fatalf("err = %v, want \"takes no options\"", err)
 	}
 }
+
+func TestOptionBool(t *testing.T) {
+	tg := Target{Options: map[string]string{"a": "true", "b": "false", "c": "maybe"}}
+	if v, err := tg.OptionBool("a", false); err != nil || !v {
+		t.Errorf("a = %v, %v", v, err)
+	}
+	if v, err := tg.OptionBool("b", true); err != nil || v {
+		t.Errorf("b = %v, %v", v, err)
+	}
+	if v, err := tg.OptionBool("missing", true); err != nil || !v {
+		t.Errorf("missing = %v, %v", v, err)
+	}
+	if _, err := tg.OptionBool("c", false); err == nil {
+		t.Error("c: want an error")
+	}
+}

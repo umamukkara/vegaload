@@ -111,6 +111,27 @@ func wireTestTarget(name string) protocol.Target {
 		return protocol.Target{URL: "localhost:1", Method: "/p.S/M"}
 	case "websocket":
 		return protocol.Target{URL: "ws://localhost:1/"}
+	case "tcp":
+		return protocol.Target{URL: "tcp://localhost:1"}
+	case "udp":
+		return protocol.Target{URL: "udp://localhost:1", Body: []byte("x")}
 	}
 	return protocol.Target{URL: "http://localhost:1/"}
+}
+
+// A real option of a driver is accepted by the command's check.
+func TestProtocolIteration_KnownOptionIsAccepted(t *testing.T) {
+	tg := wireTestTarget("tcp")
+	tg.Options = map[string]string{"read": "4", "expect": "ok"}
+	if _, closeFn, err := protocolIteration("tcp", tg, 0); err != nil {
+		t.Fatalf("known tcp options refused: %v", err)
+	} else {
+		_ = closeFn()
+	}
+
+	tg = wireTestTarget("udp")
+	tg.Options = map[string]string{"read": "4"}
+	if _, _, err := protocolIteration("udp", tg, 0); err == nil {
+		t.Error("read is a tcp option and must be refused for udp")
+	}
 }

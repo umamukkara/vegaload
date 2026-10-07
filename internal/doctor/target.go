@@ -35,6 +35,8 @@ var schemes = map[string]scheme{
 	"wss":   {port: "443", protocol: "websocket", http: true},
 	"grpc":  {protocol: "grpc"},
 	"grpcs": {port: "443", protocol: "grpc"},
+	"tcp":   {protocol: "tcp"},
+	"udp":   {protocol: "udp", udp: true},
 }
 
 // parseTarget accepts the same forms as `vegaload run -target`: a full
