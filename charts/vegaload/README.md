@@ -4,11 +4,12 @@ Runs one VegaLoad load test as a Kubernetes Job. The chart creates a Job (and a
 ConfigMap when you give a scenario file). It creates no CRD, no Role and no
 cluster-wide object, so a user with access to one namespace can install it.
 
-**Image.** The project does not publish a container image yet, so the default
-`ghcr.io/vegaload/vegaload` will not pull. Build one from the repository's
-`Dockerfile`, push it to a registry your cluster can use, and add
-`--set image.repository=<your registry>/vegaload --set image.tag=<tag>` to the
-commands below.
+**Image.** The chart pulls `ghcr.io/vegaload/vegaload`, tagged with the
+chart's `appVersion` (the VegaLoad version, without the `v`). The image is
+published from release v0.5.0 on, for `linux/amd64` and `linux/arm64`. If your
+cluster cannot reach ghcr.io, or you want an earlier version, build the image
+from the repository's `Dockerfile`, push it to your own registry, and add
+`--set image.repository=<your registry>/vegaload --set image.tag=<tag>`.
 
 ```
 # Protocol-direct: just a target

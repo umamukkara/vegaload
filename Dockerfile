@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # ---- build stage ----
-FROM golang:1.22-alpine AS build
+# The build stage always runs on the build machine and cross-compiles, so a
+# multi-architecture image build does not have to emulate the Go compiler.
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS build
 WORKDIR /src
+ARG TARGETOS
+ARG TARGETARCH
 
 # Cache module downloads separately from source changes.
 COPY go.mod go.sum ./
@@ -10,7 +14,7 @@ RUN go mod download
 
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags "-s -w -X main.version=${VERSION}" \
     -o /out/vegaload \
     ./cmd/vegaload

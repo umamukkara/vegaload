@@ -1,8 +1,9 @@
 name: Release
 
 # Runs when a version tag such as v0.1.0 is pushed. Builds the binaries,
-# creates the GitHub release, and updates the Homebrew formula in
-# vegaload/homebrew-tap.
+# creates the GitHub release, updates the Homebrew formula in
+# vegaload/homebrew-tap, and publishes the container image to
+# ghcr.io/vegaload/vegaload (linux/amd64 and linux/arm64).
 on:
   push:
     tags:
@@ -30,3 +31,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # The tag v0.5.0 becomes the image tags 0.5.0 and latest. The chart's
+      # default image tag is the version without the "v".
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/vegaload/vegaload
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
