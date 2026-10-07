@@ -408,6 +408,12 @@ func TestSchemeTable(t *testing.T) {
 			t.Errorf("%s = %+v, %v; want port %s and protocol mqtt", in, got, err, want)
 		}
 	}
+	for in, want := range map[string]string{"kafka://h": "9092", "kafkas://h": "9093"} {
+		got, err := parseTarget(in)
+		if err != nil || got.Port != want || got.protocol() != "kafka" {
+			t.Errorf("%s = %+v, %v; want port %s and protocol kafka", in, got, err, want)
+		}
+	}
 	got, err := parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)

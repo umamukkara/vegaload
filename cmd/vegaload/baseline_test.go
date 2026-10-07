@@ -26,7 +26,16 @@ func writeBaseline(t *testing.T, r *report.Result) string {
 // server, with extra flags, and returns the exit code and written summary.
 func baselineRun(t *testing.T, extra ...string) (int, report.Result, string) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	return baselineRunAgainst(t, func(w http.ResponseWriter, r *http.Request) {}, extra...)
+}
+
+// baselineRunAgainst is baselineRun with a chosen server. A server that
+// answers 500 gives a run whose error rate is 100%, which is worse than a
+// clean baseline on every machine. A latency check cannot do that: on
+// Windows the clock is coarse, and a fast local call can measure 0s.
+func baselineRunAgainst(t *testing.T, h http.HandlerFunc, extra ...string) (int, report.Result, string) {
+	t.Helper()
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
 	out := filepath.Join(dir, "summary.json")
@@ -56,13 +65,12 @@ func TestCmdRun_Baseline_WithinTheLimitExitsZero(t *testing.T) {
 }
 
 func TestCmdRun_Baseline_WorseExitsThree(t *testing.T) {
-	b := goodBaseline()
-	b.Latency.P95 = time.Nanosecond // any real run is far worse than this
-	code, res, auditPath := baselineRun(t, "-baseline", writeBaseline(t, b), "-max-regression", "10")
+	// The baseline had no errors. This run fails every request.
+	code, res, auditPath := baselineRunAgainst(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }, "-baseline", writeBaseline(t, goodBaseline()), "-max-regression", "10")
 	if code != 3 || res.Baseline == nil || res.Baseline.Passed {
 		t.Fatalf("code=%d baseline=%+v", code, res.Baseline)
 	}
-	if len(res.Baseline.Notes) == 0 || !strings.Contains(res.Baseline.Notes[0], "p95") {
+	if len(res.Baseline.Notes) == 0 || !strings.Contains(res.Baseline.Notes[0], "error rate") {
 		t.Errorf("notes = %v", res.Baseline.Notes)
 	}
 	entries := readAudit(t, auditPath)
@@ -144,9 +152,7 @@ func TestGateFailures_ListsBothWhenBothFail(t *testing.T) {
 }
 
 func TestCmdRun_Baseline_BothGatesFailExitsThreeWithBothVerdicts(t *testing.T) {
-	b := goodBaseline()
-	b.Latency.P95 = time.Nanosecond
-	code, res, _ := baselineRun(t, "-baseline", writeBaseline(t, b), "-threshold", "p50 < 0s")
+	code, res, _ := baselineRunAgainst(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }, "-baseline", writeBaseline(t, goodBaseline()), "-threshold", "p50 < 0s")
 	if code != 3 || res.ThresholdsPassed == nil || *res.ThresholdsPassed || res.Baseline == nil || res.Baseline.Passed {
 		t.Fatalf("code=%d thresholds=%v baseline=%+v", code, res.ThresholdsPassed, res.Baseline)
 	}
