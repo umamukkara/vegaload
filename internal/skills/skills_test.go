@@ -99,3 +99,31 @@ func TestMergeMCPServerConfig_InvalidExistingJSON(t *testing.T) {
 		t.Error("expected an error for invalid existing JSON")
 	}
 }
+
+func TestSmokeBundlesStaySmall(t *testing.T) {
+	for name, body := range map[string]string{"claude": ClaudeCodeSmoke, "cursor": CursorSmoke} {
+		if !strings.Contains(body, "vegaload-smoke") && !strings.Contains(body, "smoke test") {
+			t.Errorf("%s: not a smoke bundle", name)
+		}
+		for _, want := range []string{"vus: 5", `"10s"`, "validate_scenario", "`vegaload`"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: missing %q", name, want)
+			}
+		}
+		// A smoke bundle must not teach the load-only features.
+		for _, banned := range []string{"abort_on_breach", "suggest_thresholds", "compare_reports", "constant-arrival-rate"} {
+			if strings.Contains(body, banned) {
+				t.Errorf("%s: smoke bundle mentions %q", name, banned)
+			}
+		}
+	}
+}
+
+func TestLoadBundlesPointToSmoke(t *testing.T) {
+	if !strings.Contains(ClaudeCode, "vegaload-smoke") || !strings.Contains(Cursor, "vegaload-smoke") {
+		t.Error("the load bundles should point to the smoke bundles")
+	}
+	if !strings.Contains(ClaudeCodeSmoke, "name: vegaload-smoke") {
+		t.Error("smoke skill needs its frontmatter name")
+	}
+}

@@ -1,12 +1,14 @@
 // init.go implements `vegaload init`: FR-MCP-04's one-command setup for
-// an agent-native project. It writes four things, each independently
+// an agent-native project. It writes these files, each independently
 // skippable if already present (so a second `vegaload init` is a no-op
 // unless -force is given):
 //
-//   - .claude/skills/vegaload/SKILL.md — the Claude Code skill bundle
-//   - .cursor/rules/vegaload.mdc        — the Cursor rules bundle
-//   - .mcp.json                         — Claude Code's MCP server config
-//   - .cursor/mcp.json                  — Cursor's MCP server config
+//   - .claude/skills/vegaload/SKILL.md       — Claude Code skill for real load tests
+//   - .claude/skills/vegaload-smoke/SKILL.md — Claude Code skill for quick smoke tests
+//   - .cursor/rules/vegaload.mdc             — Cursor rules for real load tests
+//   - .cursor/rules/vegaload-smoke.mdc       — Cursor rules for quick smoke tests
+//   - .mcp.json                              — Claude Code's MCP server config
+//   - .cursor/mcp.json                       — Cursor's MCP server config
 //
 // Both MCP config files point at this same compiled binary (via
 // os.Executable()) running `mcp serve`, merged into whatever config
@@ -39,7 +41,7 @@ func cmdInit(args []string) int {
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload init [flags]")
 		fmt.Fprintln(fs.Output(), "Registers VegaLoad's MCP server and skill bundles for this project")
-		fmt.Fprintln(fs.Output(), "(Claude Code: .claude/skills/vegaload, .mcp.json; Cursor: .cursor/rules, .cursor/mcp.json).")
+		fmt.Fprintln(fs.Output(), "(Claude Code: .claude/skills/vegaload and vegaload-smoke, .mcp.json; Cursor: .cursor/rules, .cursor/mcp.json).")
 		fmt.Fprintln(fs.Output(), "Use -editor to set up only one editor, and -status to see what is set up.")
 		fmt.Fprintln(fs.Output(), "Run \"vegaload doctor\" afterwards to check that everything is wired up.")
 		fs.PrintDefaults()

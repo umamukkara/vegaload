@@ -257,7 +257,10 @@ func cursor() Host {
 			}
 		},
 		Rules: func(e Env) []RulesFile {
-			return []RulesFile{{Path: filepath.Join(e.Dir, ".cursor", "rules", "vegaload.mdc"), Content: skills.Cursor}}
+			return []RulesFile{
+				{Path: filepath.Join(e.Dir, ".cursor", "rules", "vegaload.mdc"), Content: skills.Cursor},
+				{Path: filepath.Join(e.Dir, ".cursor", "rules", "vegaload-smoke.mdc"), Content: skills.CursorSmoke},
+			}
 		},
 	}
 }
@@ -284,7 +287,10 @@ func claudeCode() Host {
 			}
 		},
 		Rules: func(e Env) []RulesFile {
-			return []RulesFile{{Path: filepath.Join(e.Dir, ".claude", "skills", "vegaload", "SKILL.md"), Content: skills.ClaudeCode}}
+			return []RulesFile{
+				{Path: filepath.Join(e.Dir, ".claude", "skills", "vegaload", "SKILL.md"), Content: skills.ClaudeCode},
+				{Path: filepath.Join(e.Dir, ".claude", "skills", "vegaload-smoke", "SKILL.md"), Content: skills.ClaudeCodeSmoke},
+			}
 		},
 	}
 }
@@ -336,7 +342,9 @@ type Artifact struct {
 func ProjectArtifacts() []Artifact {
 	return []Artifact{
 		{Kind: "rules", Host: "claude-code", RelPath: filepath.Join(".claude", "skills", "vegaload", "SKILL.md"), Content: skills.ClaudeCode},
+		{Kind: "rules", Host: "claude-code", RelPath: filepath.Join(".claude", "skills", "vegaload-smoke", "SKILL.md"), Content: skills.ClaudeCodeSmoke},
 		{Kind: "rules", Host: "cursor", RelPath: filepath.Join(".cursor", "rules", "vegaload.mdc"), Content: skills.Cursor},
+		{Kind: "rules", Host: "cursor", RelPath: filepath.Join(".cursor", "rules", "vegaload-smoke.mdc"), Content: skills.CursorSmoke},
 		{Kind: "mcp", Host: "claude-code", RelPath: ".mcp.json"},
 		{Kind: "mcp", Host: "cursor", RelPath: filepath.Join(".cursor", "mcp.json")},
 	}

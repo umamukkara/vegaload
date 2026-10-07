@@ -98,7 +98,9 @@ func TestHostsPaths(t *testing.T) {
 func TestProjectArtifactsOrderMatchesInit(t *testing.T) {
 	want := []string{
 		filepath.Join(".claude", "skills", "vegaload", "SKILL.md"),
+		filepath.Join(".claude", "skills", "vegaload-smoke", "SKILL.md"),
 		filepath.Join(".cursor", "rules", "vegaload.mdc"),
+		filepath.Join(".cursor", "rules", "vegaload-smoke.mdc"),
 		".mcp.json",
 		filepath.Join(".cursor", "mcp.json"),
 	}

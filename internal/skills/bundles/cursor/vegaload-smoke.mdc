@@ -1,0 +1,36 @@
+---
+description: VegaLoad smoke test via its MCP server — a quick check that an API works and answers fast under a few users (about ten seconds). Use for "does it work", "is it up", a sanity check, or before a bigger load test.
+alwaysApply: false
+---
+
+# VegaLoad smoke test
+
+A smoke test is small and fast. It answers one question: does this API work,
+and does it answer in a sensible time with a few users? It is not a load test.
+For real load, ramps, soak, thresholds or baselines, use the `vegaload` rule.
+
+`vegaload init` registered VegaLoad's MCP server for this project (see
+`.cursor/mcp.json`). You need these tools:
+
+- `generate_from_spec` — write a scenario from a JSON OpenAPI spec (JSON only,
+  not YAML). The order is a guess, so validate it.
+- `create_scenario` — scaffold a scenario file when there is no spec.
+- `validate_scenario` — run the scenario once with one user. Call it first. If
+  `valid` is false, read `stage` and `error`, fix it, and try again. It makes
+  real calls.
+- `run_test` — run a short test, within the limits below.
+- `get_results` and `diagnose_failure` — read a report back, and explain
+  failures before you guess.
+
+Limits:
+
+- Use at most `vus: 5` and `duration: "10s"` with the `fixed-vus` executor.
+  If the user wants more, use the `vegaload` rule.
+- A target that is not localhost needs `allow_targets` or `yes: true`. There
+  is no terminal here to ask a person, so confirm with the user before you
+  send even a small test to a server that is not localhost or not named by them.
+- Put tokens and passwords in `secret_env`; VegaLoad removes them from output.
+
+Flow: generate_from_spec or create_scenario → validate_scenario → run_test →
+say in plain words whether it worked (total requests, failures, p95 latency)
+and give the HTML report path. If there were failures, call diagnose_failure.
