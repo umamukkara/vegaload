@@ -67,3 +67,13 @@ func TestGate_AgreesWithCompare(t *testing.T) {
 		t.Errorf("want only the two gated metrics")
 	}
 }
+
+func TestGate_IgnoresChecks(t *testing.T) {
+	base := baseResult()
+	base.Checks = []report.CheckResult{{Name: "ok", Passes: 100}}
+	cand := baseResult()
+	cand.Checks = []report.CheckResult{{Name: "ok", Passes: 10, Fails: 90}}
+	if g := Gate(base, cand, "b.json", 10); !g.Passed {
+		t.Errorf("-baseline judges p95 and the error rate, not checks; notes=%v", g.Notes)
+	}
+}

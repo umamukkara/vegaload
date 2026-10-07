@@ -116,3 +116,91 @@ func metric(r Result, name string) *Metric {
 	}
 	return nil
 }
+
+func withChecks(r *report.Result, checks ...report.CheckResult) *report.Result {
+	r.Checks = checks
+	return r
+}
+
+func chk(name string, pass, fail int64) report.CheckResult {
+	return report.CheckResult{Name: name, Passes: pass, Fails: fail}
+}
+
+func TestCompare_CheckPassRateDropIsARegression(t *testing.T) {
+	base := withChecks(baseResult(), chk("ok", 100, 0), chk("id", 99, 1))
+	cand := withChecks(baseResult(), chk("ok", 90, 10), chk("id", 99, 1))
+	got := Compare(base, cand, Options{})
+	if !got.Regressed {
+		t.Fatalf("a check that fell from 100%% to 90%% should regress; notes=%v", got.Notes)
+	}
+	if len(got.Checks) != 2 || !got.Checks[0].Regressed || got.Checks[1].Regressed {
+		t.Errorf("checks = %+v, want only the first regressed", got.Checks)
+	}
+	if m := metric(got, "check_rate"); m == nil || !m.Regressed {
+		t.Errorf("overall check_rate = %+v, want regressed", m)
+	}
+}
+
+func TestCompare_CheckSlackAllowsASmallDrop(t *testing.T) {
+	base := withChecks(baseResult(), chk("ok", 100, 0))
+	cand := withChecks(baseResult(), chk("ok", 98, 2))
+	if got := Compare(base, cand, Options{}); !got.Regressed {
+		t.Error("strict compare should fail a 2 point drop")
+	}
+	if got := Compare(base, cand, Options{CheckRateDelta: 0.05}); got.Regressed {
+		t.Errorf("a 5 point slack should allow a 2 point drop; notes=%v", got.Notes)
+	}
+}
+
+func TestCompare_ImprovedChecksAreFine(t *testing.T) {
+	base := withChecks(baseResult(), chk("ok", 90, 10))
+	cand := withChecks(baseResult(), chk("ok", 100, 0))
+	if got := Compare(base, cand, Options{}); got.Regressed {
+		t.Errorf("a better pass rate must not regress; notes=%v", got.Notes)
+	}
+}
+
+func TestCompare_NewAndRemovedChecksAreNotRegressions(t *testing.T) {
+	base := withChecks(baseResult(), chk("old", 100, 0), chk("same", 100, 0))
+	cand := withChecks(baseResult(), chk("same", 100, 0), chk("fresh", 50, 50))
+	got := Compare(base, cand, Options{})
+	if got.Regressed {
+		t.Fatalf("new or removed checks must not regress; notes=%v", got.Notes)
+	}
+	if m := metric(got, "check_rate"); m == nil || m.Baseline != 1 || m.Candidate != 1 {
+		t.Errorf("the overall rate should cover only the shared check: %+v", m)
+	}
+	status := map[string]string{}
+	for _, c := range got.Checks {
+		status[c.Name] = c.Status
+	}
+	if status["old"] != "removed" || status["fresh"] != "new" || status["same"] != "both" {
+		t.Errorf("statuses = %v", status)
+	}
+}
+
+func TestCompare_NoChecksLeavesTheResultAsBefore(t *testing.T) {
+	got := Compare(baseResult(), baseResult(), Options{})
+	if len(got.Checks) != 0 || metric(got, "check_rate") != nil {
+		t.Errorf("runs without checks should add nothing: %+v", got.Checks)
+	}
+}
+
+func TestCompare_ChecksOnOneSideOnlyHasNoOverallRate(t *testing.T) {
+	got := Compare(baseResult(), withChecks(baseResult(), chk("ok", 1, 0)), Options{})
+	if metric(got, "check_rate") != nil {
+		t.Error("an overall rate needs checks in both runs")
+	}
+	if got.Regressed {
+		t.Error("a check that is only in the candidate must not regress")
+	}
+}
+
+func TestCompare_SkipChecksIgnoresThem(t *testing.T) {
+	base := withChecks(baseResult(), chk("ok", 100, 0))
+	cand := withChecks(baseResult(), chk("ok", 10, 90))
+	got := Compare(base, cand, Options{SkipChecks: true})
+	if got.Regressed || len(got.Checks) != 0 {
+		t.Errorf("SkipChecks should leave checks out: %+v", got)
+	}
+}

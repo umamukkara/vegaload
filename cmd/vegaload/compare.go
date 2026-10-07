@@ -21,6 +21,7 @@ func cmdCompare(args []string) int {
 	output := fs.String("output", "text", "output mode: text or json")
 	errorRateDelta := fs.Float64("error-rate-delta", 0, "absolute error-rate slack (0.01 = one percentage point) before counting as a regression")
 	p95Ratio := fs.Float64("p95-ratio", 1, "max allowed candidate/baseline p95 ratio (1.2 allows 20% headroom)")
+	checkRateDelta := fs.Float64("check-rate-delta", 0, "absolute slack on each check's pass rate (0.01 = one percentage point) before counting as a regression")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload compare [flags] <baseline.json> <candidate.json>")
 		fmt.Fprintln(fs.Output(), "")
@@ -28,6 +29,7 @@ func cmdCompare(args []string) int {
 		fmt.Fprintln(fs.Output(), "error rate, latency percentiles, totals, and overall RPS. Exits")
 		fmt.Fprintln(fs.Output(), "non-zero when error rate or p95 latency regresses beyond the")
 		fmt.Fprintln(fs.Output(), "optional slack flags (defaults are strict: any increase fails).")
+		fmt.Fprintln(fs.Output(), "Checks are compared too: a check whose pass rate falls is a regression.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -61,6 +63,7 @@ func cmdCompare(args []string) int {
 	result := compare.Compare(baseline, candidate, compare.Options{
 		ErrorRateDelta: *errorRateDelta,
 		P95Ratio:       *p95Ratio,
+		CheckRateDelta: *checkRateDelta,
 	})
 	result.BaselinePath = baselinePath
 	result.CandidatePath = candidatePath
@@ -109,6 +112,24 @@ func printCompare(w *os.File, r compare.Result) {
 		}
 		fmt.Fprintf(w, "%-14s %14s %14s %14s%s\n",
 			m.Name, formatMetric(m.Baseline, m.Unit), formatMetric(m.Candidate, m.Unit), formatDelta(m), mark)
+	}
+	if len(r.Checks) > 0 {
+		fmt.Fprintln(w, "")
+		fmt.Fprintf(w, "%-30s %10s %10s %10s\n", "check", "baseline", "candidate", "delta")
+		for _, c := range r.Checks {
+			mark := ""
+			if c.Regressed {
+				mark = " *"
+			}
+			switch c.Status {
+			case "removed":
+				fmt.Fprintf(w, "%-30s %9.2f%% %10s %10s\n", c.Name, c.BaselineRate*100, "-", "removed")
+			case "new":
+				fmt.Fprintf(w, "%-30s %10s %9.2f%% %10s\n", c.Name, "-", c.CandidateRate*100, "new")
+			default:
+				fmt.Fprintf(w, "%-30s %9.2f%% %9.2f%% %+9.2fpp%s\n", c.Name, c.BaselineRate*100, c.CandidateRate*100, c.Delta*100, mark)
+			}
+		}
 	}
 	fmt.Fprintln(w, "notes:")
 	for _, n := range r.Notes {

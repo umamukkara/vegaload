@@ -55,3 +55,18 @@ func TestCmdCompare_UsageErrors(t *testing.T) {
 		t.Errorf("missing files exited %d, want 1", code)
 	}
 }
+
+func TestCmdCompare_ChecksFixtures(t *testing.T) {
+	dir := filepath.Join("..", "..", "examples", "scenarios", "compare")
+	base := filepath.Join(dir, "checks-baseline.json")
+	if code := cmdCompare([]string{base, filepath.Join(dir, "checks-ok.json")}); code != 0 {
+		t.Errorf("same checks exited %d, want 0", code)
+	}
+	bad := filepath.Join(dir, "checks-regressed.json")
+	if code := cmdCompare([]string{base, bad}); code != 1 {
+		t.Errorf("a check that fell exited %d, want 1", code)
+	}
+	if code := cmdCompare([]string{"-check-rate-delta", "0.2", base, bad}); code != 0 {
+		t.Errorf("with 20 points of slack exited %d, want 0", code)
+	}
+}

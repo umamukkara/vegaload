@@ -39,7 +39,8 @@ baselines. For a quick check that an API works under a few users, use the
   long tail, whether failures were transient), plus an LLM narrative if
   `VEGALOAD_LLM_PROVIDER` is configured for this MCP server.
 - `compare_reports` — diff a candidate JSON report against a baseline
-  (`vegaload compare`); reports whether error rate or p95 latency regressed.
+  (`vegaload compare`); reports whether error rate, p95 latency or a check's
+  pass rate regressed.
 - `generate_from_spec` — write a runnable scenario (every operation as a named
   step) and a runbook of `vegaload run` commands from a JSON OpenAPI spec (JSON
   only, not YAML). The order is a guess: validate it and edit it.

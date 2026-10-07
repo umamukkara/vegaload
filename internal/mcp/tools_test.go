@@ -262,6 +262,7 @@ func TestCompareReportsTool_BuildsArgs(t *testing.T) {
 		"candidate_path":   "c.json",
 		"error_rate_delta": 0.01,
 		"p95_ratio":        1.2,
+		"check_rate_delta": 0.02,
 	})
 	if err != nil {
 		t.Fatalf("compare_reports returned error: %v", err)
@@ -273,6 +274,9 @@ func TestCompareReportsTool_BuildsArgs(t *testing.T) {
 	args := readArgs(t, argsFile)
 	if args[0] != "compare" || !containsArg(args, "-output") || !containsArg(args, "b.json") || !containsArg(args, "c.json") {
 		t.Errorf("args = %v, want compare -output json ... b.json c.json", args)
+	}
+	if !containsArg(args, "-check-rate-delta") {
+		t.Errorf("expected -check-rate-delta in args: %v", args)
 	}
 	if !containsArg(args, "-error-rate-delta") || !containsArg(args, "-p95-ratio") {
 		t.Errorf("expected slack flags in args: %v", args)
