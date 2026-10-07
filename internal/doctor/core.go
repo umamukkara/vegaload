@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/vegaload/vegaload/internal/pyfind"
 )
 
 func coreChecks(env Env) []Check {
@@ -23,11 +25,13 @@ func coreChecks(env Env) []Check {
 		}},
 		{ID: "core.dirs", Category: "core", Name: "Writable folders", Run: func(ctx context.Context) Result { return checkDirs(env) }},
 		{ID: "core.python", Category: "core", Name: "Python (optional)", Run: func(ctx context.Context) Result {
-			p, err := env.LookPath("python3")
-			if err != nil {
-				return result(Skip, "python3 not found. JavaScript and TypeScript scenarios work without it; Python scenarios need it.")
+			names := pyfind.Names(env.OS)
+			for _, name := range names {
+				if p, err := env.LookPath(name); err == nil {
+					return result(Pass, name+" at "+p)
+				}
 			}
-			return result(Pass, "python3 at "+p)
+			return result(Skip, strings.Join(names, ", ")+" not found. JavaScript and TypeScript scenarios work without it; Python scenarios need it.")
 		}},
 	}
 }

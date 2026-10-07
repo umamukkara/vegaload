@@ -70,5 +70,13 @@ func DefaultEnv(version string) (Env, error) {
 }
 
 func (e Env) hostEnv() hosts.Env {
-	return hosts.Env{OS: e.OS, Home: e.Home, Dir: e.Dir, LookPath: e.LookPath, DirExists: e.DirExists}
+	return hosts.Env{OS: e.OS, Home: e.Home, AppData: e.appData(), Dir: e.Dir, LookPath: e.LookPath, DirExists: e.DirExists}
+}
+
+// appData returns the Windows %APPDATA% folder, or "" off Windows.
+func (e Env) appData() string {
+	if e.OS != "windows" || e.Getenv == nil {
+		return ""
+	}
+	return e.Getenv("APPDATA")
 }

@@ -1,0 +1,5 @@
+# Keep line endings as LF on every OS, so Windows checkouts match the
+# embedded files and the gofmt check.
+* text=auto eol=lf
+*.png binary
+*.ico binary

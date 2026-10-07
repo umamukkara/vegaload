@@ -19,6 +19,34 @@ A release is a version tag. Pushing the tag runs
 The default `GITHUB_TOKEN` cannot push to another repo, so the extra token is
 required.
 
+## Windows packages
+
+Every release already carries a Windows zip (`vegaload_<version>_windows_amd64.zip`
+and `_arm64.zip`). Two more install paths are set up by hand, once.
+
+**Scoop.**
+
+1. Create a public repo `vegaload/scoop-bucket` with a `README.md`.
+2. Give the token in `HOMEBREW_TAP_TOKEN` **Contents: read and write** on that
+   repo as well as on `vegaload/homebrew-tap`.
+3. In `.goreleaser.yaml`, remove the `#` at the start of each line of the
+   `scoops:` block. Do this only after steps 1 and 2, or the release job fails
+   at its last step.
+
+Users then run:
+
+```
+scoop bucket add vegaload https://github.com/vegaload/scoop-bucket
+scoop install vegaload
+```
+
+**winget.** Winget takes a pull request to `microsoft/winget-pkgs` for each
+version. After a release, run
+`wingetcreate update VegaLoad.VegaLoad --version X.Y.Z --urls <the two zip URLs> --submit`
+(install `wingetcreate` with `winget install wingetcreate`). The first
+version is created with `wingetcreate new <zip URL>`. Users then run
+`winget install VegaLoad.VegaLoad`.
+
 ## Cutting a release
 
 ```
