@@ -8,10 +8,15 @@
 //   - It drops what a load test should not repeat: images, fonts, style
 //     sheets and scripts; requests to other sites (analytics, ads, CDNs);
 //     CORS preflight requests; and requests that failed in the browser.
-//   - It never writes a secret into the scenario. A Cookie or Authorization
-//     header, and any header, query parameter or body field whose name looks
-//     secret, is read from the environment at run time (env.VL_NAME) and
-//     the scenario lists the variables to pass with -secret-env.
+//   - It keeps the secrets it can recognise out of the scenario. A Cookie or
+//     Authorization header, any header, query parameter or body field whose
+//     name looks secret, and any value that is a JWT, is read from the
+//     environment at run time (env.VL_NAME). The scenario lists the
+//     variables to pass with -secret-env. The check works on names and on
+//     the shape of a JWT. A secret with an ordinary name stays in the file
+//     as it was recorded: a token in a path such as /reset/<token>, a query
+//     parameter named code, or a field named key. Read the file before you
+//     share it, and do not commit the HAR file itself.
 //   - It drops headers that a client sets by itself (User-Agent, Host,
 //     Content-Length, Accept-Encoding and similar), and the headers that
 //     tie a request to the recorded page (Origin, Referer, Sec-*).
@@ -41,8 +46,8 @@ import (
 // Options controls what Convert keeps.
 type Options struct {
 	// Hosts keeps only requests to these hosts (a name, or name:port).
-	// When empty, Convert finds the main host of the recording and keeps
-	// it and the hosts of the same site.
+	// When empty, Convert keeps the site of the first page that the
+	// recording opened (its first document request).
 	Hosts []string
 	// IncludeStatic keeps images, fonts, style sheets and scripts.
 	IncludeStatic bool

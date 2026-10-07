@@ -131,6 +131,13 @@ func dynamicKind(v string) string {
 	return ""
 }
 
+// isJWT reports whether a JSON value is a string that is a JWT. A JWT is a
+// credential whatever the name of the field that holds it.
+func isJWT(v any) bool {
+	s, ok := v.(string)
+	return ok && reJWT.MatchString(s)
+}
+
 func hasLetterAndDigit(s string) bool {
 	var l, d bool
 	for _, r := range s {
@@ -189,7 +196,7 @@ func (b *builder) pairs(prs [][2]string) []part {
 			sep = "&"
 		}
 		name := unesc(p[0])
-		if isSecretName(name) {
+		if isSecretName(name) || reJWT.MatchString(unesc(p[1])) {
 			out = append(out, part{lit: sep + p[0] + "="})
 			e := b.secret(name)
 			e.expr = "encodeURIComponent(" + e.expr + ")"
@@ -306,7 +313,7 @@ func (b *builder) redactJSON(v any) any {
 			case jObj, jArr:
 				out[i] = jKV{kv.key, b.redactJSON(kv.val)}
 			default:
-				if isSecretName(kv.key) && kv.val != nil {
+				if kv.val != nil && (isSecretName(kv.key) || isJWT(kv.val)) {
 					out[i] = jKV{kv.key, jsExpr(b.secret(kv.key).expr)}
 				} else {
 					out[i] = jKV{kv.key, b.redactJSON(kv.val)}
@@ -343,7 +350,7 @@ func (b *builder) headers(in []nameValue) []header {
 			continue
 		}
 		seen[n] = true
-		if alwaysSecretHeaders[n] || isSecretName(n) {
+		if alwaysSecretHeaders[n] || isSecretName(n) || reJWT.MatchString(h.Value) {
 			out = append(out, header{h.Name, []part{b.secret(h.Name)}})
 			continue
 		}
@@ -383,7 +390,6 @@ func Convert(r io.Reader, source string, opt Options) (*Result, error) {
 		u *url.URL
 	}
 	var cands []cand
-	hostCount := map[string]int{}
 	for i := range f.Log.Entries {
 		e := &f.Log.Entries[i]
 		u, err := url.Parse(e.Request.URL)
@@ -404,7 +410,6 @@ func Convert(r io.Reader, source string, opt Options) (*Result, error) {
 			continue
 		}
 		cands = append(cands, cand{e, u})
-		hostCount[u.Host]++
 	}
 
 	keepHost := func(host string) (bool, string) {
@@ -418,17 +423,20 @@ func Convert(r io.Reader, source string, opt Options) (*Result, error) {
 		}
 		return true, ""
 	}
+	// The main site is the one of the first page the person opened: the
+	// first document in the recording, or the first request if the
+	// recording has no resource types. Counting requests would pick an
+	// analytics host that is called more often than the app.
 	mainSite := ""
-	if len(opt.Hosts) == 0 && !opt.IncludeThirdParty {
-		best := ""
-		for h, n := range hostCount {
-			if n > hostCount[best] || (n == hostCount[best] && h < best) {
-				best = h
+	if len(opt.Hosts) == 0 && !opt.IncludeThirdParty && len(cands) > 0 {
+		first := cands[0]
+		for _, c := range cands {
+			if strings.EqualFold(c.e.ResourceType, "document") {
+				first = c
+				break
 			}
 		}
-		if best != "" {
-			mainSite = site(best)
-		}
+		mainSite = site(first.u.Host)
 	}
 
 	b := &builder{env: map[string]bool{}}
@@ -518,7 +526,7 @@ func (b *builder) body(q *request, e *entry) {
 	case pd.Text == "" && len(pd.Params) > 0 && isFormType(mime):
 		var prs [][2]string
 		for _, p := range pd.Params {
-			prs = append(prs, [2]string{url.QueryEscape(p.Name), p.Value})
+			prs = append(prs, [2]string{url.QueryEscape(p.Name), url.QueryEscape(p.Value)})
 		}
 		q.text = merge(b.pairs(prs))
 		q.hasBody = true

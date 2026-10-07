@@ -232,3 +232,81 @@ func TestDynamicKind(t *testing.T) {
 		}
 	}
 }
+
+// harOf builds a small recording from entries given as method, url,
+// resource type, status and an optional form or json body.
+func harOf(t *testing.T, entries ...[5]string) string {
+	t.Helper()
+	var parts []string
+	for _, e := range entries {
+		post := ""
+		if e[4] != "" {
+			post = `,"postData":{"mimeType":"application/json","text":` + jsString(e[4]) + `}`
+		}
+		parts = append(parts, `{"_resourceType":"`+e[2]+`","request":{"method":"`+e[0]+`","url":"`+e[1]+`","headers":[]`+post+`},"response":{"status":`+e[3]+`,"content":{"mimeType":"application/json"}}}`)
+	}
+	return `{"log":{"entries":[` + strings.Join(parts, ",") + `]}}`
+}
+
+func TestConvert_MainSiteIsTheFirstPageNotTheBusiestHost(t *testing.T) {
+	// Analytics are called more often than the app. The app must stay.
+	in := harOf(t,
+		[5]string{"GET", "https://app.example.com/", "document", "200", ""},
+		[5]string{"POST", "https://metrics.other.net/a", "xhr", "200", ""},
+		[5]string{"POST", "https://metrics.other.net/b", "xhr", "200", ""},
+		[5]string{"POST", "https://metrics.other.net/c", "xhr", "200", ""},
+		[5]string{"GET", "https://api.example.com/items", "xhr", "200", ""},
+	)
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Requests != 2 || strings.Join(res.Hosts, ",") != "api.example.com,app.example.com" {
+		t.Errorf("Requests = %d, Hosts = %v", res.Requests, res.Hosts)
+	}
+}
+
+func TestConvert_FormParamValueWithAmpersandStaysOneField(t *testing.T) {
+	in := `{"log":{"entries":[{"request":{"method":"POST","url":"https://a.example.com/f","headers":[],` +
+		`"postData":{"mimeType":"application/x-www-form-urlencoded","text":"","params":[{"name":"q","value":"a&b=c d"},{"name":"n","value":"1"}]}},` +
+		`"response":{"status":200,"content":{"mimeType":"text/plain"}}}]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Script, `body: "q=a%26b%3Dc+d&n=1"`) {
+		t.Errorf("the value was not escaped:\n%s", res.Script)
+	}
+}
+
+func TestConvert_AJWTIsASecretWhateverItIsCalled(t *testing.T) {
+	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+	in := harOf(t,
+		[5]string{"GET", "https://a.example.com/x?code=" + jwt, "xhr", "200", ""},
+		[5]string{"POST", "https://a.example.com/y", "xhr", "200", `{"data":"` + jwt + `","keep":"hello"}`},
+	)
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Script, "eyJhbGci") {
+		t.Errorf("a JWT is in the file:\n%s", res.Script)
+	}
+	for _, want := range []string{"encodeURIComponent(env.VL_CODE)", `"data": env.VL_DATA`, `"keep": "hello"`} {
+		if !strings.Contains(res.Script, want) {
+			t.Errorf("missing %q in\n%s", want, res.Script)
+		}
+	}
+}
+
+func TestConvert_NamesThatDoNotLookSecretStayAsRecorded(t *testing.T) {
+	// This is the limit, and the package comment says so.
+	in := harOf(t, [5]string{"GET", "https://a.example.com/reset/abc?code=xyz", "xhr", "200", ""})
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Script, "/reset/abc?code=xyz") {
+		t.Errorf("an ordinary name should stay as recorded:\n%s", res.Script)
+	}
+}

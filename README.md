@@ -270,15 +270,20 @@ The importer makes a first draft, and you edit it. It keeps the real calls,
 in the order they were recorded, one `http` call each, with a check on the
 status the browser got. It leaves out images, fonts, style sheets and
 scripts, requests to other sites (analytics, ads, CDNs), CORS preflight
-requests, and requests that failed. Use `-include-static`,
+requests, and requests that failed. "Other sites" means sites other than the
+one of the first page you opened in the recording. Use `-include-static`,
 `-include-third-party` or `-host` to change that, and `-max N` to stop after
 N requests.
 
-Secrets are never written into the file. A `Cookie` or `Authorization`
-header, and any header, query parameter or body field whose name looks
-secret (password, token, api key, session, csrf and similar), is read from
-the environment as `env.VL_NAME`. The file lists the variables, and you pass
-each one by name with `-secret-env`. The importer also drops headers a client
+The importer keeps the secrets it can recognise out of the file. A `Cookie`
+or `Authorization` header, any header, query parameter or body field whose
+name looks secret (password, token, api key, session, csrf and similar), and
+any value that is a JWT, is read from the environment as `env.VL_NAME`. The
+file lists the variables, and you pass each one by name with `-secret-env`.
+It works on names and on the shape of a JWT, so a secret with an ordinary
+name stays as it was recorded: a token in a path such as `/reset/<token>`, a
+query parameter named `code`, or a field named `key`. Read the file before
+you share it, and do not commit the HAR file. The importer also drops headers a client
 sets by itself (`User-Agent`, `Content-Length`, `Referer`, `Origin`, `Sec-*`
 and similar).
 
