@@ -30,6 +30,11 @@ tags `0.5.0` and `latest`. A pre-release tag such as `v0.5.0-rc.1` gives only
 without the `v`, so the two match. It needs no extra secret: the job uses the
 workflow's own `GITHUB_TOKEN` with `packages: write`.
 
+Before the first image release, check that the organization allows public
+packages: **Organization settings → Packages → Package creation → Public**.
+If it is off, GitHub greys out "Public" in the next step, and only an
+organization owner can turn it on.
+
 Do this once, after the first release that publishes an image:
 
 1. Open the package at `https://github.com/orgs/vegaload/packages/container/package/vegaload`.
@@ -41,7 +46,7 @@ Do this once, after the first release that publishes an image:
 Check the image:
 
 ```
-docker run --rm ghcr.io/vegaload/vegaload:0.5.0 version
+docker run --rm ghcr.io/vegaload/vegaload:<version> version
 ```
 
 CI builds both architectures on every pull request (the `docker-image` job),
@@ -93,6 +98,9 @@ brew update
 brew install vegaload/tap/vegaload
 vegaload version        # prints: vegaload 0.1.0
 ```
+
+If `brew upgrade` still shows the old version, run `brew update` first. Brew
+keeps a local copy of the tap, and it can be stale for a while.
 
 ## Testing the release config locally
 
