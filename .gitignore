@@ -19,3 +19,10 @@ vegaload-mcp-report-*.html
 .DS_Store
 .idea/
 *.swp
+
+# Local files made by `vegaload init` and by working on this repo.
+# They hold machine-specific paths and must not be committed.
+/.cursor/
+/.claude/
+/_to_delete/
+/.mcp.json
