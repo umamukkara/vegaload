@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,5 +224,77 @@ func TestIsLoopbackHost(t *testing.T) {
 		if got := IsLoopbackHost(host); got != want {
 			t.Errorf("IsLoopbackHost(%q) = %v, want %v", host, got, want)
 		}
+	}
+}
+
+// A request that is running when the server's base context ends (SIGTERM in
+// `vegaload mcp serve -http`) must be cancelled, so the child process of the
+// tool call is killed and no load test keeps running.
+func TestHTTP_BaseContextCancelStopsRunningTool(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	s := NewServer()
+	s.Register(Tool{Name: "block", Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return nil, ctx.Err()
+	}})
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ts := httptest.NewUnstartedServer(s.HTTPHandler("", ""))
+	ts.Config.BaseContext = func(net.Listener) context.Context { return base }
+	ts.Start()
+	defer ts.Close()
+
+	go func() {
+		resp, err := http.Post(ts.URL+"/mcp", "application/json",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"block"}}`))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-started
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the running tool was not cancelled when the base context ended")
+	}
+}
+
+// The same for a tool started through the SSE stream: ending the base context
+// ends the stream, and that cancels the tool.
+func TestHTTP_BaseContextCancelStopsSSETool(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	s := NewServer()
+	s.Register(Tool{Name: "block", Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return nil, ctx.Err()
+	}})
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ts := httptest.NewUnstartedServer(s.HTTPHandler("", ""))
+	ts.Config.BaseContext = func(net.Listener) context.Context { return base }
+	ts.Start()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	_, endpoint := readEvent(t, bufio.NewReader(resp.Body))
+	post1 := post(t, ts.URL+endpoint, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"block"}}`, nil)
+	post1.Body.Close()
+	<-started
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the SSE tool was not cancelled when the base context ended")
 	}
 }

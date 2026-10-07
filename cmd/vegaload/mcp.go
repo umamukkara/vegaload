@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -103,7 +104,7 @@ func serveMCPHTTP(server *mcp.Server, addr, tokenEnv, allowOrigin string) int {
 	}
 	token := ""
 	if tokenEnv != "" {
-		token = os.Getenv(tokenEnv)
+		token = cleanToken(os.Getenv(tokenEnv))
 		if token == "" {
 			fmt.Fprintf(os.Stderr, "vegaload mcp serve: environment variable %s is empty or not set\n", tokenEnv)
 			return 2
@@ -119,14 +120,21 @@ func serveMCPHTTP(server *mcp.Server, addr, tokenEnv, allowOrigin string) int {
 		fmt.Fprintf(os.Stderr, "vegaload mcp serve: %v\n", err)
 		return 1
 	}
-	httpSrv := &http.Server{Handler: server.HTTPHandler(token, allowOrigin), ReadHeaderTimeout: 10 * time.Second}
+	// Every request context comes from ctx, so SIGINT or SIGTERM cancels the
+	// requests that are running. That stops the `vegaload run` a tool call
+	// started: the process must not exit and leave a load test running.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	httpSrv := &http.Server{
+		Handler:           server.HTTPHandler(token, allowOrigin),
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
 	fmt.Fprintf(os.Stderr, "vegaload mcp serve: listening on http://%s (POST /mcp, GET /sse)\n", ln.Addr())
 	if token == "" {
 		fmt.Fprintln(os.Stderr, "vegaload mcp serve: no token set; only local processes can reach this address")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	errc := make(chan error, 1)
 	go func() { errc <- httpSrv.Serve(ln) }()
 	select {
@@ -138,7 +146,16 @@ func serveMCPHTTP(server *mcp.Server, addr, tokenEnv, allowOrigin string) int {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = httpSrv.Shutdown(shutdownCtx)
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			_ = httpSrv.Close() // something is still running: stop waiting for it
+		}
 	}
 	return 0
+}
+
+// cleanToken trims spaces and line breaks from a token. A token read from a
+// Kubernetes secret or a file often ends with a newline, which an HTTP header
+// cannot carry: a client could then never send a matching value.
+func cleanToken(s string) string {
+	return strings.TrimSpace(s)
 }

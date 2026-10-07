@@ -47,3 +47,20 @@ func TestCmdMCPServe_TokenFlagsNeedHTTP(t *testing.T) {
 		t.Errorf("exit code = %d, want 2", code)
 	}
 }
+
+func TestCleanToken(t *testing.T) {
+	for in, want := range map[string]string{
+		"abc": "abc", "abc\n": "abc", "  abc\r\n": "abc", "\n": "", "   ": "", "": "",
+	} {
+		if got := cleanToken(in); got != want {
+			t.Errorf("cleanToken(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCmdMCPServe_TokenOfOnlyWhitespaceIsTreatedAsUnset(t *testing.T) {
+	t.Setenv("VEGALOAD_TEST_NEWLINE_TOKEN", "\n")
+	if code := cmdMCPServe([]string{"-http", "0.0.0.0:0", "-token-env", "VEGALOAD_TEST_NEWLINE_TOKEN"}); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
