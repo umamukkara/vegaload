@@ -439,6 +439,24 @@ Every command supports `-output text` (default), `json`, or (`run` only)
 `jsonl`. Run `vegaload <command> -h` for its full flag list, or `vegaload
 help` for the top-level summary.
 
+## Use in Kubernetes
+
+A Helm chart in [`charts/vegaload`](./charts/vegaload) runs a load test as a
+Kubernetes Job, close to the service you are testing. It needs no CRD and no
+cluster-wide permissions, only access to one namespace:
+
+```
+helm install smoke ./charts/vegaload --namespace perf \
+  --set run.target=http://orders.shop.svc:8080/health --set run.protocol=http1 \
+  --set run.vus=5 --set run.duration=30s --set 'run.thresholds={p95 < 300ms}' \
+  --wait --wait-for-jobs
+kubectl logs -n perf job/smoke-vegaload-1
+```
+
+A scenario file works too: `--set-file scenario=./checkout.vl.js`. A broken
+threshold fails the Job. See the chart's README. For plain `kubectl`, use
+[`examples/k8s/job.yaml`](./examples/k8s/job.yaml).
+
 ## Use in GitHub Actions
 
 This repository is also a GitHub Action. It installs a released VegaLoad

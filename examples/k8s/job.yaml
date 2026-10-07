@@ -1,0 +1,63 @@
+# A load test as a plain Kubernetes Job, with no Helm. It needs only access to
+# one namespace. Change the target and the image tag, then:
+#
+#   kubectl apply -f job.yaml
+#   kubectl wait --for=condition=complete --timeout=10m job/vegaload-smoke
+#   kubectl logs job/vegaload-smoke
+#
+# A broken threshold exits with code 3, so the Job is marked Failed. Delete the
+# Job to run it again: kubectl delete job vegaload-smoke
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vegaload-smoke
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vegaload
+          image: ghcr.io/vegaload/vegaload:0.4.0
+          args:
+            - run
+            - -no-open
+            - -no-report
+            - -audit-log
+            - /tmp/vegaload-audit.log
+            - -vus
+            - "5"
+            - -duration
+            - 30s
+            - -threshold
+            - p95 < 300ms
+            - -threshold
+            - error_rate < 1%
+            # The target's host must be allowed, or the run asks for confirmation.
+            - -allow-target
+            - orders.shop.svc.cluster.local
+            - -target
+            - http://orders.shop.svc.cluster.local:8080/health
+            - -protocol
+            - http1
+          env:
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

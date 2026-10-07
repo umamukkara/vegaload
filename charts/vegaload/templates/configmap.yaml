@@ -1,0 +1,12 @@
+{{- if .Values.scenario }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vegaload.fullname" . }}-scenario
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vegaload.labels" . | nindent 4 }}
+data:
+  {{ .Values.scenarioFileName | quote }}: |
+    {{- .Values.scenario | nindent 4 }}
+{{- end }}

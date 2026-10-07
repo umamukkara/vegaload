@@ -1,0 +1,16 @@
+A VegaLoad load test was started as the Job {{ include "vegaload.fullname" . }}-{{ .Release.Revision }} in namespace {{ .Release.Namespace }}.
+
+Watch it:
+
+  kubectl get job {{ include "vegaload.fullname" . }}-{{ .Release.Revision }} -n {{ .Release.Namespace }} -w
+
+Read the result (the same summary as a local run):
+
+  kubectl logs -n {{ .Release.Namespace }} job/{{ include "vegaload.fullname" . }}-{{ .Release.Revision }}
+
+The Job fails when a threshold is broken (exit code 3). To make Helm wait for
+the run and return an error in CI, install with:
+
+  helm install {{ .Release.Name }} <chart> --wait --wait-for-jobs --timeout 15m
+
+To run again, use `helm upgrade`. Each revision starts a new Job.

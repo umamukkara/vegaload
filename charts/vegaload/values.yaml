@@ -1,0 +1,49 @@
+# One `helm install` (or `helm upgrade`) runs one load test, as a Kubernetes
+# Job in the release's namespace. The chart creates no CRD, no Role and no
+# cluster-wide object, so a user with access to one namespace can install it.
+
+# The VegaLoad image. The tag defaults to the chart's appVersion.
+image:
+  repository: ghcr.io/vegaload/vegaload
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# What to run. Set either `target` and `protocol` (protocol-direct mode), or
+# give a scenario file with --set-file scenario=./checkout.vl.js.
+run:
+  target: ""        # URL or host:port, for example http://orders.shop.svc:8080/health
+  protocol: ""      # http1, http2, grpc or websocket
+  executor: ""      # fixed-vus (default), ramp, step or constant-arrival-rate
+  vus: 0            # 0 means the vegaload default
+  duration: ""      # for example 30s or 5m
+  stages: ""        # target:duration pairs, for example "10:30s,0:10s"
+  rate: 0           # requests per second, for constant-arrival-rate
+  maxVUs: 0
+  thresholds: []    # for example ["p95 < 300ms", "error_rate < 1%"]
+  # Extra hosts the run may call. The target's own host is always allowed.
+  # A scenario file usually needs the hosts it calls listed here.
+  allowTargets: []
+
+# The text of a scenario file (.vl.js or .vl.ts). Use --set-file to read it
+# from a file. Python scenarios need a different image, because the default
+# image has no Python.
+scenario: ""
+scenarioFileName: scenario.vl.js
+
+# Stop the Job after this many seconds.
+activeDeadlineSeconds: 3600
+# Delete the finished Job (and its logs) after this many seconds.
+ttlSecondsAfterFinished: 86400
+
+serviceAccountName: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+
+nameOverride: ""
+fullnameOverride: ""
