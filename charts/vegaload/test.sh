@@ -4,6 +4,9 @@
 set -euo pipefail
 chart="$(cd "$(dirname "$0")" && pwd)"
 fail=0
+# The chart's own appVersion, so a release bump does not break the test.
+app_version=$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}.*/\1/p' "$chart/Chart.yaml")
+if [ -z "$app_version" ]; then echo "FAIL no appVersion in Chart.yaml"; exit 1; fi
 
 render() { helm template t "$chart" --namespace perf "$@"; }
 ok() { echo "ok   $1"; }
@@ -38,7 +41,7 @@ expect_has   "the job name has the revision"        'name: t-vegaload-1' -- "${d
 expect_has   "the job runs once"                    'backoffLimit: 0' -- "${direct[@]}"
 expect_has   "runs as non-root"                     'runAsNonRoot: true' -- "${direct[@]}"
 expect_has   "read-only root file system"           'readOnlyRootFilesystem: true' -- "${direct[@]}"
-expect_has   "image tag defaults to appVersion"     'vegaload:0.5.1' -- "${direct[@]}"
+expect_has   "image tag defaults to appVersion"     "vegaload:$app_version" -- "${direct[@]}"
 expect_has   "image tag can be set"                 'vegaload:9.9.9' -- "${direct[@]}" --set image.tag=9.9.9
 expect_has   "pod fsGroup makes /tmp writable"      'fsGroup: 65532' -- "${direct[@]}"
 expect_has   "the job is kept on upgrade"           'helm.sh/resource-policy": keep' -- "${direct[@]}"
