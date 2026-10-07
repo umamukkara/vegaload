@@ -2,6 +2,7 @@ package netapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/kafka"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
@@ -21,7 +23,7 @@ import (
 // defaultProtoTimeout is used when the caller gives no timeout at all.
 const defaultProtoTimeout = 10 * time.Second
 
-// ProtoCall is one call a script makes to a tcp, udp or mqtt target.
+// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka or grpc target.
 type ProtoCall struct {
 	// URL is the target. tcp and udp accept a bare host:port too.
 	URL string
@@ -36,6 +38,8 @@ type ProtoCall struct {
 	// Password is the MQTT password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
+	// Headers are the gRPC metadata of a grpc.call.
+	Headers map[string]string
 }
 
 // ProtoFunctions lists the calls a script can make, by namespace: tcp.send,
@@ -47,6 +51,7 @@ func ProtoFunctions() map[string][]string {
 		"udp":   {"send"},
 		"mqtt":  {"publish", "subscribe", "roundtrip"},
 		"kafka": {"produce", "consume", "roundtrip", "admin"},
+		"grpc":  {"call"},
 	}
 }
 
@@ -62,6 +67,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.MQTT(ctx, fn, call)
 	case "kafka":
 		return c.Kafka(ctx, fn, call)
+	case "grpc":
+		return c.GRPC(ctx, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -75,6 +82,7 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, error) {
 	pc := ProtoCall{URL: rawURL}
 	valueIsBody := strings.HasPrefix(name, "kafka.")
+	isGRPC := strings.HasPrefix(name, "grpc.")
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)
@@ -94,11 +102,41 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 			if pc.Body != nil {
 				return pc, errors.New("give body or value, not both")
 			}
-			s, err := optionText(key, val)
-			if err != nil {
-				return pc, err
+			var s string
+			switch val.(type) {
+			case map[string]any, []any:
+				// A gRPC body may be a JSON object. It is sent as its JSON text.
+				if !isGRPC {
+					return pc, fmt.Errorf("option %s must be a string, number or boolean", key)
+				}
+				b, err := json.Marshal(val)
+				if err != nil {
+					return pc, fmt.Errorf("option body: %w", err)
+				}
+				s = string(b)
+			default:
+				var err error
+				if s, err = optionText(key, val); err != nil {
+					return pc, err
+				}
 			}
 			pc.Body = []byte(s)
+		case "headers":
+			if !isGRPC {
+				return pc, errors.New("unknown option headers (only grpc.call takes headers)")
+			}
+			m, ok := val.(map[string]any)
+			if !ok {
+				return pc, errors.New("option headers must be an object of names and values")
+			}
+			pc.Headers = make(map[string]string, len(m))
+			for hk, hv := range m {
+				hs, err := optionText("headers."+hk, hv)
+				if err != nil {
+					return pc, err
+				}
+				pc.Headers[hk] = hs
+			}
 		case "insecure":
 			b, ok := val.(bool)
 			if !ok {
@@ -177,7 +215,8 @@ func optionTimeout(val any) (time.Duration, error) {
 }
 
 // Fields is the reply as plain data: the shape a script sees. body is the
-// reply of tcp and udp. messages is for mqtt, each {topic, body}. kafka adds
+// reply of tcp and udp (and of grpc, as JSON text, with json holding it parsed,
+// and status and statusName for the gRPC code). messages is for mqtt, each {topic, body}. kafka adds
 // records (each {topic, partition, offset, key, value}) and text. error is
 // "" when the call worked.
 func (r *ProtoReply) Fields() map[string]any {
@@ -192,6 +231,11 @@ func (r *ProtoReply) Fields() map[string]any {
 		"bytesReceived": r.BytesReceived,
 		"body":          string(r.Body),
 		"messages":      msgs,
+	}
+	if r.IsGRPC {
+		f["status"] = r.GRPCStatus
+		f["statusName"] = r.GRPCStatusName
+		f["json"] = r.JSON
 	}
 	if r.IsKafka {
 		recs := make([]any, 0, len(r.Records))
@@ -243,6 +287,13 @@ type ProtoReply struct {
 	Records []KafkaRecord
 	// Text is the answer of a kafka admin action.
 	Text string
+	// IsGRPC is true for a gRPC reply. Body is then the reply as JSON text
+	// (or base64), JSON is that text parsed, and GRPCStatus is the status
+	// code, 0 when the call worked.
+	IsGRPC         bool
+	GRPCStatus     int
+	GRPCStatusName string
+	JSON           any
 }
 
 // ProtoClient makes tcp, udp and mqtt calls for one VU. Each call opens
@@ -257,6 +308,7 @@ type ProtoClient struct {
 	// keeps its client. The other protocols hold nothing.
 	mu         sync.Mutex
 	kafkaConns map[string]*kafka.Driver
+	grpcConns  map[string]*grpc.Conn
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -388,10 +440,74 @@ func (c *ProtoClient) kafkaConn(call ProtoCall, opts map[string]string) (*kafka.
 	return d, nil
 }
 
-// Close closes the Kafka clients. Safe to call more than once.
+// GRPC makes one unary gRPC call. Its connection is kept for the next call
+// to the same target, as a real client keeps its channel.
+func (c *ProtoClient) GRPC(ctx context.Context, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "grpc"); err != nil {
+		return nil, err
+	}
+	gc := grpc.Call{Body: call.Body, Headers: call.Headers, Timeout: c.timeoutFor(call)}
+	for k, v := range call.Options {
+		switch k {
+		case "method":
+			gc.Method = v
+		case "encoding":
+			gc.Encoding = v
+		default:
+			return nil, fmt.Errorf("grpc: unknown option %s (want method, body, headers, encoding, timeout, insecure)", k)
+		}
+	}
+	if gc.Method == "" {
+		return nil, errors.New("grpc: option method is required, such as method: \"/package.Service/Method\"")
+	}
+	conn, err := c.grpcConn(call)
+	if err != nil {
+		return nil, err
+	}
+	rep, err := conn.Do(ctx, gc)
+	if err != nil {
+		return nil, err
+	}
+	r := fromResult(grpc.ResultOf(rep))
+	r.IsGRPC = true
+	r.GRPCStatus = int(rep.Code)
+	r.GRPCStatusName = rep.Code.String()
+	r.Body = rep.Body
+	if len(rep.Body) > 0 && (gc.Encoding == "" || gc.Encoding == grpc.EncodingJSON) {
+		var parsed any
+		if json.Unmarshal(rep.Body, &parsed) == nil {
+			r.JSON = parsed
+		}
+	}
+	return r, nil
+}
+
+func (c *ProtoClient) grpcConn(call ProtoCall) (*grpc.Conn, error) {
+	key := fmt.Sprintf("%s|insecure=%t", call.URL, call.Insecure)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if g, ok := c.grpcConns[key]; ok {
+		return g, nil
+	}
+	g, err := grpc.NewConn(call.URL, call.Insecure)
+	if err != nil {
+		return nil, err
+	}
+	if c.grpcConns == nil {
+		c.grpcConns = map[string]*grpc.Conn{}
+	}
+	c.grpcConns[key] = g
+	return g, nil
+}
+
+// Close closes the Kafka and gRPC clients. Safe to call more than once.
 func (c *ProtoClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for k, g := range c.grpcConns {
+		_ = g.Close()
+		delete(c.grpcConns, k)
+	}
 	for k, d := range c.kafkaConns {
 		_ = d.Close()
 		delete(c.kafkaConns, k)

@@ -198,7 +198,7 @@ http = HTTP()
 ws = WS()
 
 class _Reply(dict):
-    """The answer of a tcp, udp, mqtt or kafka call. r.ok and r["ok"] mean
+    """The answer of a tcp, udp, mqtt, kafka or grpc call. r.ok and r["ok"] mean
     the same. Nested messages and records are _Reply too, so
     r.messages[0].body works."""
     def __getattr__(self, name):
@@ -215,9 +215,10 @@ def _wrap(value):
     return value
 
 class _Proto:
-    """tcp, udp, mqtt and kafka: one call per action, such as
-    tcp.send(url, body="PING\\r\\n", until="\\r\\n") or
-    kafka.produce(url, topic="t", value="v"). Options are keyword arguments.
+    """tcp, udp, mqtt, kafka and grpc: one call per action, such as
+    tcp.send(url, body="PING\\r\\n", until="\\r\\n"),
+    kafka.produce(url, topic="t", value="v") or
+    grpc.call(url, method="/pkg.Svc/Method", body={"name": "x"}). Options are keyword arguments.
     A word Python reserves gets a trailing underscore: from_="end". A call
     that fails on the network does not raise. It returns a reply with
     ok False and error set. A call that is set up wrongly raises
@@ -235,7 +236,7 @@ class _Proto:
 
 _PROTO_FUNCS = __PROTO_FUNCS__
 _PROTOS = {ns: _Proto(ns, funcs) for ns, funcs in _PROTO_FUNCS.items()}
-tcp, udp, mqtt, kafka = _PROTOS["tcp"], _PROTOS["udp"], _PROTOS["mqtt"], _PROTOS["kafka"]
+tcp, udp, mqtt, kafka, grpc = _PROTOS["tcp"], _PROTOS["udp"], _PROTOS["mqtt"], _PROTOS["kafka"], _PROTOS["grpc"]
 
 class _Env:
     """env.NAME, env["NAME"] or env.get("NAME", default): an environment
@@ -375,7 +376,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "check": check, "step": step, "env": env, "data": data},
+            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "grpc": grpc, "check": check, "step": step, "env": env, "data": data},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:

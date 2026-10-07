@@ -256,9 +256,9 @@ protocol-direct commands from an OpenAPI spec:
 writes `sample-app.vegaload-plan.md`: one ready-to-run `vegaload run`
 command per endpoint the spec declares.
 
-### Call TCP, UDP, MQTT and Kafka from a scenario
+### Call TCP, UDP, MQTT, Kafka and gRPC from a scenario
 
-A JavaScript scenario can also use the `tcp`, `udp`, `mqtt` and `kafka` globals. Each
+A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka` and `grpc` globals. Each
 function is one call that does one job and returns what it read:
 
 ```js
@@ -306,7 +306,7 @@ export default function () {
   For `mqtt.subscribe`, the message must arrive during the call, so run it
   when something else publishes.
 
-Python scenarios have the same four globals, with the same options and the
+Python scenarios have the same globals, with the same options and the
 same reply. The options are keyword arguments, the reply works as
 `r.ok` and as `r["ok"]`, and a word that Python reserves gets a trailing
 underscore (`from_="end"`):
@@ -317,6 +317,8 @@ def iteration():
     check(r, {"got PONG": lambda x: x.ok and x.body == "+PONG\r\n"})
     k = kafka.produce("kafka://localhost", topic="orders", key="k1", value="v")
     print(k.records[0].partition, k.records[0].offset)
+    g = grpc.call("localhost:50051", method="/pkg.Greeter/SayHello", body={"name": "x"})
+    check(g, {"greeted": lambda x: x.ok and x.json.message == "Hello x"})
 ```
 
 A call set up wrongly raises `VegaloadError`.
@@ -325,7 +327,10 @@ A call set up wrongly raises `VegaloadError`.
 (and its Python twin, [`mqtt_tcp.py`](./examples/scenarios/mqtt_tcp.py))
 is a small example, and
 [`examples/scenarios/kafka-orders.vl.js`](./examples/scenarios/kafka-orders.vl.js)
-shows Kafka.
+shows Kafka, and
+[`examples/scenarios/mixed-protocols.vl.js`](./examples/scenarios/mixed-protocols.vl.js)
+(Python: [`mixed_protocols.py`](./examples/scenarios/mixed_protocols.py)) mixes
+HTTP, gRPC and WebSocket in one flow.
 
 ### Start from a browser recording
 
