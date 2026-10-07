@@ -80,6 +80,22 @@ func (h headerFlags) Set(v string) error {
 	return nil
 }
 
+// optionFlags accumulates repeated -opt key=value flags into a map. The
+// keys are driver specific; see protocol.Target.Options.
+type optionFlags map[string]string
+
+func (o optionFlags) String() string { return "" }
+
+func (o optionFlags) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	k = strings.TrimSpace(k)
+	if !ok || k == "" {
+		return fmt.Errorf("-opt %q must be in key=value form", v)
+	}
+	o[k] = val
+	return nil
+}
+
 // repeatedFlags accumulates repeated occurrences of a flag (e.g.
 // -allow-target) into a slice.
 type repeatedFlags []string
@@ -161,6 +177,7 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	cfg := &runConfig{}
 	headers := headerFlags{}
+	options := optionFlags{}
 
 	var stagesRaw string
 	var bodyRaw string
@@ -177,13 +194,14 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.Float64Var(&cfg.Rate, "rate", 0, "iterations per second (constant-arrival-rate)")
 	fs.IntVar(&cfg.MaxVUs, "max-vus", 0, "max concurrent VUs (constant-arrival-rate)")
 	fs.StringVar(&cfg.Target.URL, "target", "", "target URL or host:port (protocol-direct mode; omit if a scenario file is given)")
-	fs.StringVar(&cfg.Protocol, "protocol", "", "http1, http2, grpc, or websocket (protocol-direct mode)")
+	fs.StringVar(&cfg.Protocol, "protocol", "", protocolList()+" (protocol-direct mode)")
 	fs.StringVar(&method, "method", "", "HTTP verb, or the full gRPC method (e.g. /package.Service/Method)")
 	fs.StringVar(&bodyRaw, "body", "", "request body")
 	fs.BoolVar(&insecure, "insecure", false, "skip TLS certificate verification")
 	fs.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "per-iteration timeout")
 	fs.StringVar(&cfg.OutPath, "out", "", "also write a JSON summary to this path")
 	fs.Var(headers, "header", "request header \"Key: Value\" (repeatable)")
+	fs.Var(options, "opt", "driver option key=value, e.g. -opt read=64 (repeatable; each protocol lists its own keys)")
 
 	// FR-CLI-06: target allowlist and hard caps, on by default.
 	fs.Var(&allowTargets, "allow-target", "additional host (or host:port) allowed without confirmation, besides localhost (repeatable)")
@@ -242,6 +260,9 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	cfg.Target.Method = method
 	cfg.Target.Body = []byte(bodyRaw)
 	cfg.Target.Headers = headers
+	if len(options) > 0 {
+		cfg.Target.Options = options
+	}
 	cfg.Target.InsecureSkipVerify = insecure
 
 	if stagesRaw != "" {
@@ -440,7 +461,7 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 	case "websocket":
 		driver, err = websocket.New(target, timeout)
 	default:
-		return nil, nil, fmt.Errorf("unknown -protocol %q (want http1, http2, grpc, or websocket)", name)
+		return nil, nil, fmt.Errorf("unknown -protocol %q (want %s)", name, protocolList())
 	}
 	if err != nil {
 		return nil, nil, err

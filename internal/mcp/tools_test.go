@@ -133,6 +133,26 @@ func TestRunTestTool_BuildsArgsAndParsesResult(t *testing.T) {
 	}
 }
 
+func TestRunTestTool_PassesOptions(t *testing.T) {
+	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
+	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)
+	tools := NewTools(bin)
+
+	_, err := callTool(t, tools, "run_test", map[string]any{
+		"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true,
+		"options": []string{"read=64", "expect=ok"},
+	})
+	if err != nil {
+		t.Fatalf("run_test returned error: %v", err)
+	}
+	args := readArgs(t, argsFile)
+	for _, want := range []string{"-opt", "read=64", "expect=ok"} {
+		if !containsArg(args, want) {
+			t.Errorf("args %v missing %q", args, want)
+		}
+	}
+}
+
 func TestRunTestTool_NoReportSkipsReportFlag(t *testing.T) {
 	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
 	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)

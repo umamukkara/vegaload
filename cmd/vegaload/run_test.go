@@ -83,6 +83,40 @@ func TestParseRunArgs_ProtocolDirectMode(t *testing.T) {
 	}
 }
 
+func TestParseRunArgs_OptFlag(t *testing.T) {
+	cfg, err := parseRunArgs([]string{
+		"-target", "tcp://localhost:9000", "-protocol", "http1",
+		"-opt", "read=64", "-opt", "expect=hello world", "-opt", "a=b=c",
+	})
+	if err != nil {
+		t.Fatalf("parseRunArgs returned error: %v", err)
+	}
+	want := map[string]string{"read": "64", "expect": "hello world", "a": "b=c"}
+	for k, v := range want {
+		if got := cfg.Target.Options[k]; got != v {
+			t.Errorf("option %s = %q, want %q", k, got, v)
+		}
+	}
+}
+
+func TestParseRunArgs_OptFlagRejectsBadForm(t *testing.T) {
+	for _, bad := range []string{"novalue", "=x", ""} {
+		if _, err := parseRunArgs([]string{"-target", "http://x", "-protocol", "http1", "-opt", bad}); err == nil {
+			t.Errorf("-opt %q: want an error", bad)
+		}
+	}
+}
+
+func TestParseRunArgs_NoOptLeavesOptionsNil(t *testing.T) {
+	cfg, err := parseRunArgs([]string{"-target", "http://x", "-protocol", "http1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Target.Options != nil {
+		t.Errorf("Options = %v, want nil", cfg.Target.Options)
+	}
+}
+
 func TestBuildExecutor_Validation(t *testing.T) {
 	cases := []struct {
 		name    string

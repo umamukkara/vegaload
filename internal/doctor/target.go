@@ -19,7 +19,23 @@ type target struct {
 	Port   string
 }
 
-var defaultPorts = map[string]string{"http": "80", "https": "443", "ws": "80", "wss": "443", "grpcs": "443"}
+// scheme describes a URL scheme a -target may use. To teach doctor a new
+// protocol, add one line to schemes.
+type scheme struct {
+	port     string // default port, "" if the URL must give one
+	protocol string // the -protocol name that drives this scheme, "" if none
+	udp      bool   // true if the target is reached over UDP, which has no connection to test
+	http     bool   // true if doctor can probe it with an HTTP request
+}
+
+var schemes = map[string]scheme{
+	"http":  {port: "80", protocol: "http1", http: true},
+	"https": {port: "443", protocol: "http1", http: true},
+	"ws":    {port: "80", protocol: "websocket", http: true},
+	"wss":   {port: "443", protocol: "websocket", http: true},
+	"grpc":  {protocol: "grpc"},
+	"grpcs": {port: "443", protocol: "grpc"},
+}
 
 // parseTarget accepts the same forms as `vegaload run -target`: a full
 // URL, or a bare host:port.
@@ -40,7 +56,7 @@ func parseTarget(raw string) (target, error) {
 	}
 	t := target{Scheme: strings.ToLower(u.Scheme), Host: u.Hostname(), Port: u.Port()}
 	if t.Port == "" {
-		t.Port = defaultPorts[t.Scheme]
+		t.Port = schemes[t.Scheme].port
 	}
 	if t.Port == "" {
 		return target{}, fmt.Errorf("%q has no port and %q has no default", raw, t.Scheme)
@@ -49,15 +65,7 @@ func parseTarget(raw string) (target, error) {
 }
 
 func (t target) protocol() string {
-	switch t.Scheme {
-	case "http", "https":
-		return "http1"
-	case "ws", "wss":
-		return "websocket"
-	case "grpc", "grpcs":
-		return "grpc"
-	}
-	return ""
+	return schemes[t.Scheme].protocol
 }
 
 func targetChecks(env Env, opt Options) []Check {
@@ -116,6 +124,9 @@ func targetChecks(env Env, opt Options) []Check {
 			return result(Pass, fmt.Sprintf("%s resolves to %s", tgt.Host, strings.Join(addrs, ", ")))
 		})},
 		{ID: "target.connect", Category: "target", Name: "TCP connection", Run: skipIfBad(func(ctx context.Context) Result {
+			if schemes[tgt.Scheme].udp {
+				return result(Skip, "UDP has no connection to test. Doctor can check the name lookup only.")
+			}
 			conn, err := env.DialContext(ctx, "tcp", addr)
 			if err != nil {
 				r := result(Fail, "cannot connect to "+addr+": "+err.Error())
@@ -132,10 +143,8 @@ func targetChecks(env Env, opt Options) []Check {
 }
 
 func probeTarget(ctx context.Context, env Env, t target, raw string) Result {
-	switch t.Scheme {
-	case "http", "https", "ws", "wss":
-	default:
-		return result(Skip, "TCP connect is the only check for this kind of target. gRPC and bare host:port targets are not probed further.")
+	if !schemes[t.Scheme].http {
+		return result(Skip, "TCP connect is the only check for this kind of target. Only HTTP and WebSocket targets are probed further.")
 	}
 	u, _ := url.Parse(raw)
 	switch u.Scheme {
