@@ -39,6 +39,10 @@ func renderHTML(res *Result) string {
 	fmt.Fprintf(&b, "<div class=\"stat\"><span class=\"n\">%.2f%%</span><span class=\"l\">error rate</span></div>\n", errPct)
 	fmt.Fprintf(&b, "</section>\n")
 
+	if a := res.Aborted; a != nil {
+		fmt.Fprintf(&b, "<p class=\"aborted\"><span class=\"badge fail\">ABORTED</span> The run was stopped at %s because <b>%s</b> was broken (observed %s).</p>\n",
+			a.At.Round(1e6), html.EscapeString(a.Threshold), html.EscapeString(a.Observed))
+	}
 	b.WriteString(thresholdsSection(res))
 	b.WriteString(baselineSection(res))
 	b.WriteString(checksSection(res))

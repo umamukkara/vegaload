@@ -504,6 +504,20 @@ func TestRunTestTool_PassesBaselineFlags(t *testing.T) {
 	}
 }
 
+func TestRunTestTool_PassesAbortFlags(t *testing.T) {
+	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
+	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)
+	if _, err := callTool(t, NewTools(bin), "run_test", map[string]any{
+		"target": "https://example.com", "protocol": "http1", "yes": true, "no_report": true,
+		"thresholds": []any{"failed < 5"}, "abort_on_breach": true, "abort_grace": "3s",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(readArgs(t, argsFile), " "); !strings.Contains(args, "-abort-on-breach") || !strings.Contains(args, "-abort-grace 3s") {
+		t.Errorf("args = %s", args)
+	}
+}
+
 func TestRunTestTool_PassesJUnitFlag(t *testing.T) {
 	resultJSON, _ := json.Marshal(report.Result{Executor: "fixed-vus"})
 	bin, argsFile := argRecordingBinary(t, string(resultJSON), 0)

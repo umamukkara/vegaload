@@ -536,6 +536,35 @@ show each threshold's verdict. The exit code tells a script what happened:
 | 2         | Bad usage, such as a threshold that cannot be parsed     |
 | 3         | The run finished but broke at least one threshold        |
 
+#### Stop early on a breach
+
+Add `-abort-on-breach` and the run stops as soon as a threshold is broken
+beyond recovery. It exits 3, like any breach, and saves the time and load
+of a run that has already failed. The summary, JSON, HTML report and GitHub
+job summary say that the run was aborted, at what time, and by which
+threshold.
+
+```
+vegaload run -vus 50 -duration 10m -abort-on-breach \
+  -threshold "failed < 20" -threshold "p95 < 300ms" -threshold "error_rate < 1%" scenario.vl.js
+```
+
+Two kinds of threshold are judged while the run goes on:
+
+- A threshold that cannot recover, such as `failed < 20`, `max < 2s` or
+  `total < 5000`, stops the run at once.
+- A statistic that moves up and down, such as `p95`, `error_rate`, `mean`
+  or `check_rate` (also for one step), stops the run only if it stays
+  broken for three seconds in a row. It is not judged during a warm-up (5
+  seconds, or a quarter of the run if that is shorter; change it with
+  `-abort-grace`), and not until it has at least 20 samples.
+
+A threshold that needs the whole run, such as `rps >= 100` or
+`total >= 1000`, is judged at the end, on what ran before the stop. The run
+tells you which ones before it starts. `-abort-on-breach` needs at least
+one threshold. From an agent, `run_test` takes `abort_on_breach` and
+`abort_grace`.
+
 #### Checks
 
 In a scenario script, `check(value, {name: test})` counts named assertions

@@ -30,7 +30,9 @@ couldn't also do.
   that jump), or `constant-arrival-rate` (fixed throughput via `rate`).
   Returns a `report.Result` (total/failed/error_rate/latency percentiles/a
   per-second time series) and, unless `no_report` is set, a path to a
-  self-contained HTML report you can open or point the user at.
+  self-contained HTML report you can open or point the user at. For a long
+  run with `thresholds`, set `abort_on_breach: true` to stop it early once a
+  threshold is broken beyond recovery; the result then has `aborted`.
   **Safety gate**: a target that isn't localhost and isn't in `allow_targets`
   is refused unless `yes: true` is set — there's no terminal here to prompt a
   human for confirmation, so a deliberate `yes` (or an explicit allowlist) is
