@@ -23,7 +23,11 @@ func buildVegaload(t *testing.T) string {
 	}
 	pkgDir := filepath.Dir(thisFile)
 
-	out := filepath.Join(t.TempDir(), "vegaload")
+	name := "vegaload"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	out := filepath.Join(t.TempDir(), name)
 	cmd := exec.Command("go", "build", "-o", out, ".")
 	cmd.Dir = pkgDir
 	if output, err := cmd.CombinedOutput(); err != nil {
