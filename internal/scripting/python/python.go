@@ -633,6 +633,10 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 	case "check":
 		if v.checks != nil {
 			for _, r := range msg.Results {
+				if !r.OK && netapi.RunEnded(v.ctx) {
+					// Cut off by the end of the run, not a real failure.
+					continue
+				}
 				v.checks.RecordCheck(r.Name, r.OK)
 			}
 		}

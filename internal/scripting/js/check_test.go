@@ -154,3 +154,65 @@ func TestCheck_InterruptedByRunEnd_IsNotCounted(t *testing.T) {
 		t.Errorf("recorded %v, want nothing for an interrupted check", rec.got)
 	}
 }
+
+// laggingCtx is a context whose deadline has passed but whose timer has
+// not fired yet: Err is nil and Done never closes.
+type laggingCtx struct {
+	context.Context
+	dl time.Time
+}
+
+func (c laggingCtx) Deadline() (time.Time, bool) { return c.dl, true }
+func (c laggingCtx) Done() <-chan struct{}       { return nil }
+func (c laggingCtx) Err() error                  { return nil }
+
+const mixedChecks = `
+	export default function () {
+		check(1, {
+			"returns false": () => false,
+			"throws": () => { throw new Error("late"); },
+			"a plain false": false,
+			"passes": () => true,
+		});
+	}
+`
+
+func TestCheck_FailuresAfterDeadlineAreNotCounted_EvenBeforeTheTimerFires(t *testing.T) {
+	script, err := Load(writeScript(t, "scenario.js", mixedChecks))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	vu, err := script.NewVU(nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewVU: %v", err)
+	}
+	rec := &fakeRecorder{}
+	vu.SetCheckRecorder(rec)
+	ctx := laggingCtx{Context: context.Background(), dl: time.Now().Add(-time.Millisecond)}
+	if err := vu.Iteration(ctx); err != nil {
+		t.Fatalf("Iteration: %v", err)
+	}
+	if len(rec.got) != 1 || rec.got[0] != "passes=pass" {
+		t.Errorf("recorded %v, want only the passing check", rec.got)
+	}
+}
+
+func TestCheck_FailuresBeforeDeadlineAreStillCounted(t *testing.T) {
+	script, err := Load(writeScript(t, "scenario.js", mixedChecks))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	vu, err := script.NewVU(nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewVU: %v", err)
+	}
+	rec := &fakeRecorder{}
+	vu.SetCheckRecorder(rec)
+	ctx := laggingCtx{Context: context.Background(), dl: time.Now().Add(time.Hour)}
+	if err := vu.Iteration(ctx); err != nil {
+		t.Fatalf("Iteration: %v", err)
+	}
+	if len(rec.got) != 4 {
+		t.Errorf("recorded %v, want all 4 checks", rec.got)
+	}
+}

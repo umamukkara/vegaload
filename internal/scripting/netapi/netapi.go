@@ -32,6 +32,22 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// RunEnded reports whether the run is over: ctx is done, or its deadline
+// has passed. The timer that cancels a ctx at its deadline can fire a few
+// milliseconds late, and ctx.Err() stays nil until it does. Scripts use
+// this to tell a call that was cut off by the end of the run from a real
+// failure, in that gap too.
+func RunEnded(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	dl, ok := ctx.Deadline()
+	return ok && !time.Now().Before(dl)
+}
+
 // CheckRecorder receives the outcome of every check a scenario script
 // makes (FR-CLI-12): the check's name and whether it passed. The report
 // Collector implements it. A nil recorder is allowed everywhere it is

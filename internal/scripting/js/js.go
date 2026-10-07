@@ -338,23 +338,25 @@ func (v *VU) newCheckFunc(vm *goja.Runtime) func(goja.FunctionCall) goja.Value {
 			passed := false
 			if fn, isFn := goja.AssertFunction(tv); isFn {
 				res, err := fn(goja.Undefined(), val)
-				if err != nil && v.ctx != nil && v.ctx.Err() != nil {
-					// The run ended and interrupted this test. It did not
-					// fail; it was cut off. Counting it would add one false
-					// failed check for each VU that was busy at the end.
-					return vm.ToValue(false)
-				}
 				passed = err == nil && res.ToBoolean()
 			} else if b, isBool := tv.Export().(bool); isBool {
 				passed = b
 			} else {
 				throw(vm, fmt.Errorf("check: %q must be a function or a boolean", name))
 			}
-			if v.checks != nil {
-				v.checks.RecordCheck(name, passed)
-			}
 			if !passed {
 				allPassed = false
+				if netapi.RunEnded(v.ctx) {
+					// The run ended while this test ran, or just before.
+					// A test that fails now was cut off. It did not fail.
+					// Counting it would add false failed checks, one for
+					// each VU that was busy at the end. A test that
+					// passed is still counted.
+					continue
+				}
+			}
+			if v.checks != nil {
+				v.checks.RecordCheck(name, passed)
 			}
 		}
 		return vm.ToValue(allPassed)
