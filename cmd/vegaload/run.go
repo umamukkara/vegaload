@@ -151,9 +151,12 @@ type runConfig struct {
 
 	// FR-CLI-13: stop the run as soon as a threshold is broken beyond
 	// recovery. AbortGrace is the warm-up in which statistics are not
-	// judged; zero means the automatic value (see autoGrace).
+	// judged. It counts only when AbortGraceSet is true (-abort-grace was
+	// given), and then zero means no warm-up. Otherwise the warm-up is
+	// automatic (see autoGrace).
 	AbortOnBreach bool
 	AbortGrace    time.Duration
+	AbortGraceSet bool
 
 	// FR-CLI-14: judge the finished run against a baseline report the
 	// user supplies. Baseline is loaded when the flags are parsed, so a
@@ -228,7 +231,7 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	// FR-CLI-11: pass/fail thresholds.
 	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\" or \"fast: error_rate < 1%\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
 	fs.BoolVar(&cfg.AbortOnBreach, "abort-on-breach", false, "stop the run as soon as a threshold is broken beyond recovery, and exit 3. Needs -threshold or -thresholds. Thresholds like \"failed < 5\" stop it at once; statistics like p95 or error_rate must stay broken for three seconds, after a warm-up. Thresholds that need the whole run (rps, total >=) wait for the end")
-	fs.DurationVar(&cfg.AbortGrace, "abort-grace", 0, "with -abort-on-breach: the warm-up in which p95, error_rate and other statistics are not judged (default: 5s, or a quarter of the run if shorter)")
+	fs.DurationVar(&cfg.AbortGrace, "abort-grace", 0, "with -abort-on-breach: the warm-up in which p95, error_rate and other statistics are not judged (default: 5s, or a quarter of the run if shorter; 0 means no warm-up)")
 	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, or the output of `vegaload diagnose -output json`)")
 
 	// FR-CLI-14: baseline gate.
@@ -300,13 +303,12 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	if cfg.AbortGrace < 0 {
 		return nil, fmt.Errorf("-abort-grace %s: want zero or more", cfg.AbortGrace)
 	}
-	abortGraceSet := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "abort-grace" {
-			abortGraceSet = true
+			cfg.AbortGraceSet = true
 		}
 	})
-	if abortGraceSet && !cfg.AbortOnBreach {
+	if cfg.AbortGraceSet && !cfg.AbortOnBreach {
 		return nil, fmt.Errorf("-abort-grace needs -abort-on-breach")
 	}
 
@@ -596,7 +598,7 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	stopWatcher := func() {}
 	if cfg.AbortOnBreach {
 		grace := cfg.AbortGrace
-		if grace == 0 {
+		if !cfg.AbortGraceSet {
 			grace = autoGrace(ex.Duration())
 		}
 		w := newBreachWatcher(cfg.Thresholds, collector, ex.Name(), start, grace)

@@ -38,8 +38,17 @@ func TestParseRunArgs_AbortFlags(t *testing.T) {
 		t.Error("negative grace should fail")
 	}
 	cfg, err := parseRunArgs(append(base, "-abort-on-breach", "-abort-grace", "2s", "-threshold", "failed < 1"))
-	if err != nil || !cfg.AbortOnBreach || cfg.AbortGrace != 2*time.Second {
+	if err != nil || !cfg.AbortOnBreach || !cfg.AbortGraceSet || cfg.AbortGrace != 2*time.Second {
 		t.Errorf("cfg = %+v, err = %v", cfg, err)
+	}
+	// 0 is a real value: no warm-up. Not giving the flag means automatic.
+	cfg, err = parseRunArgs(append(base, "-abort-on-breach", "-abort-grace", "0", "-threshold", "failed < 1"))
+	if err != nil || !cfg.AbortGraceSet || cfg.AbortGrace != 0 {
+		t.Errorf("grace 0: cfg = %+v, err = %v", cfg, err)
+	}
+	cfg, err = parseRunArgs(append(base, "-abort-on-breach", "-threshold", "failed < 1"))
+	if err != nil || cfg.AbortGraceSet {
+		t.Errorf("no grace flag: cfg = %+v, err = %v", cfg, err)
 	}
 }
 
@@ -211,5 +220,28 @@ func TestCmdRun_AbortOnBreach_WorksForEveryShape(t *testing.T) {
 				t.Fatalf("took %s, should have stopped early", took)
 			}
 		})
+	}
+}
+
+func TestCmdRun_AbortGraceZero_JudgesStatisticsFromTheStart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "summary.json")
+	began := time.Now()
+	code := cmdRun([]string{
+		"-target", srv.URL, "-protocol", "http1", "-vus", "2", "-duration", "60s", "-no-report",
+		"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+		"-abort-on-breach", "-abort-grace", "0", "-threshold", "error_rate < 1%",
+	})
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3", code)
+	}
+	// With no warm-up, three looks one second apart are enough. With the
+	// automatic warm-up of 5 seconds this run would last longer.
+	if took := time.Since(began); took > 4800*time.Millisecond {
+		t.Errorf("took %s; with -abort-grace 0 it should stop after about 3s", took)
 	}
 }

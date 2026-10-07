@@ -557,7 +557,7 @@ Two kinds of threshold are judged while the run goes on:
   or `check_rate` (also for one step), stops the run only if it stays
   broken for three seconds in a row. It is not judged during a warm-up (5
   seconds, or a quarter of the run if that is shorter; change it with
-  `-abort-grace`), and not until it has at least 20 samples.
+  `-abort-grace`; `-abort-grace 0` turns it off), and not until it has at least 20 samples.
 
 A threshold that needs the whole run, such as `rps >= 100` or
 `total >= 1000`, is judged at the end, on what ran before the stop. The run
