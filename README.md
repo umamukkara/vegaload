@@ -20,6 +20,10 @@ eval suite for the MCP tools) is also done — this README's walkthrough
 covers all three. Since then, v0.3.0 and v0.4.0 added thresholds, checks,
 `vegaload validate`, a baseline gate (`run -baseline`), JUnit output and a CI
 job summary, and data files and env vars (`-data`, `-env`, `-secret-env`).
+The main branch, which becomes v0.5.0, adds MCP over HTTP and SSE
+(`mcp serve -http`), a second eval suite (`mcp eval -suite v2`), Windows
+support, a Helm chart that runs a test as a Kubernetes Job with no CRD, and a
+container image published to `ghcr.io/vegaload/vegaload`.
 A Harness RT bridge (`--move-to-harness`) is intentionally out of scope for now.
 
 ## Install
