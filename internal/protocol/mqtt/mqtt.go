@@ -275,7 +275,7 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 	msgs := make(chan []byte, d.count)
 	handler := func(_ paho.Client, m paho.Message) {
 		p := m.Payload()
-		if d.mode == modeRoundtrip && !bytes.Contains(p, idb) {
+		if d.mode == modeRoundtrip && !bytes.Equal(p, payload) {
 			return
 		}
 		select {

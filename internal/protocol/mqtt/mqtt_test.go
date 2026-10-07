@@ -227,6 +227,17 @@ func TestRoundtrip_OtherUsersMessageDoesNotCount(t *testing.T) {
 	}
 }
 
+func TestRoundtrip_LongerIDDoesNotMatch(t *testing.T) {
+	// Ids are counted, so x-1 is the start of x-10. A message that only
+	// starts with our id is someone else's and must not count.
+	b := startBroker(t)
+	b.suffix = []byte("0")
+	res := do(t, target(b.url(), "msg {id}", map[string]string{"mode": "roundtrip", "topic": "shared"}), 400*time.Millisecond)
+	if res.Success {
+		t.Fatal("a message that only starts with our id must not count")
+	}
+}
+
 func TestConnectRefused(t *testing.T) {
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := l.Addr().String()

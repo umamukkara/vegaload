@@ -26,6 +26,10 @@ type fakeBroker struct {
 	// one. It stands for another user's message on the same topic.
 	decoy []byte
 
+	// Optional. When set, this is added to the end of every payload. With
+	// ids like x-1 and x-10, the message x-10 starts with x-1.
+	suffix []byte
+
 	mu        sync.Mutex
 	clientIDs []string
 	published []pubRecord
@@ -269,6 +273,9 @@ func (b *fakeBroker) route(topic string, payload []byte, qos byte, retain bool) 
 	b.mu.Unlock()
 	if b.decoy != nil {
 		payload = b.decoy
+	}
+	if b.suffix != nil {
+		payload = append(append([]byte(nil), payload...), b.suffix...)
 	}
 	for _, c := range targets {
 		c.write(publishPacket(topic, payload, false))
