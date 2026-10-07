@@ -8,6 +8,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/http1"
 	"github.com/vegaload/vegaload/internal/protocol/http2"
+	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/websocket"
 )
 
@@ -41,6 +42,20 @@ var drivers = []driverSpec{
 	}},
 	{name: "websocket", build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := websocket.New(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}},
+	{name: "tcp", options: socket.TCPOptions, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := socket.NewTCP(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}},
+	{name: "udp", options: socket.UDPOptions, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := socket.NewUDP(t, to)
 		if err != nil {
 			return nil, err
 		}

@@ -155,3 +155,17 @@ func (t Target) RejectUnknownOptions(allowed ...string) error {
 	return fmt.Errorf("unknown option %s (this protocol accepts: %s)",
 		strings.Join(unknown, ", "), strings.Join(known, ", "))
 }
+
+// OptionBool returns an option as a boolean ("true" or "false"), or def
+// if it was not set.
+func (t Target) OptionBool(key string, def bool) (bool, error) {
+	v, ok := t.Options[key]
+	if !ok {
+		return def, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("option %s=%q: want true or false", key, v)
+	}
+	return b, nil
+}
