@@ -516,6 +516,8 @@ exits non-zero if error rate or p95 latency got worse. If the scenario makes
 `check()` calls, it also lists each check's pass rate in both runs, and a
 check whose pass rate fell counts as a regression too. A check that only one
 run made is shown as `new` or `removed`, and does not fail the comparison.
+The `check_rate` row is the plain average of the shared checks. It is for
+reading and never fails the comparison on its own.
 Optional slack:
 
 ```

@@ -136,8 +136,8 @@ func TestCompare_CheckPassRateDropIsARegression(t *testing.T) {
 	if len(got.Checks) != 2 || !got.Checks[0].Regressed || got.Checks[1].Regressed {
 		t.Errorf("checks = %+v, want only the first regressed", got.Checks)
 	}
-	if m := metric(got, "check_rate"); m == nil || !m.Regressed {
-		t.Errorf("overall check_rate = %+v, want regressed", m)
+	if m := metric(got, "check_rate"); m == nil || m.Regressed || m.Candidate >= m.Baseline {
+		t.Errorf("overall check_rate = %+v, want a lower rate that is not itself a verdict", m)
 	}
 }
 
@@ -202,5 +202,19 @@ func TestCompare_SkipChecksIgnoresThem(t *testing.T) {
 	got := Compare(base, cand, Options{SkipChecks: true})
 	if got.Regressed || len(got.Checks) != 0 {
 		t.Errorf("SkipChecks should leave checks out: %+v", got)
+	}
+}
+
+func TestCompare_ARunCountChangeAloneIsNotARegression(t *testing.T) {
+	// "ok" holds 100% but ran 100 times, then 10 times; "bad" stays at 0%.
+	// A rate weighted by run count would fall from about 91% to about 9%.
+	base := withChecks(baseResult(), chk("ok", 100, 0), chk("bad", 0, 10))
+	cand := withChecks(baseResult(), chk("ok", 10, 0), chk("bad", 0, 100))
+	got := Compare(base, cand, Options{})
+	if got.Regressed {
+		t.Fatalf("no check's own pass rate fell, so this must not regress; notes=%v", got.Notes)
+	}
+	if m := metric(got, "check_rate"); m == nil || m.Baseline != 0.5 || m.Candidate != 0.5 {
+		t.Errorf("overall rate should be the plain average: %+v", m)
 	}
 }

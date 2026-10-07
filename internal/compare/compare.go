@@ -230,25 +230,25 @@ func compareChecks(baseline, candidate *report.Result, opts Options, out *Result
 		out.Notes = append(out.Notes, fmt.Sprintf("check %q is new in the candidate (pass rate %.2f%%)", c.Name, passRate(c)*100))
 	}
 
-	// The overall rate covers only the checks both runs made. A check that
-	// was added or dropped would otherwise move it for no real reason.
-	var bPass, bTotal, cPass, cTotal int64
-	for _, b := range baseline.Checks {
-		if c, ok := cand[b.Name]; ok {
-			bPass, bTotal = bPass+b.Passes, bTotal+b.Passes+b.Fails
-			cPass, cTotal = cPass+c.Passes, cTotal+c.Passes+c.Fails
+	// The overall rate is the plain average of the pass rates of the checks
+	// both runs made. It is for reading only and never fails a comparison:
+	// each check is judged on its own above. Weighting by how often a check
+	// ran would let a scenario change (a check that runs less often) move it
+	// while no check's own pass rate fell.
+	var bSum, cSum float64
+	var shared int
+	for _, d := range out.Checks {
+		if d.Status == "both" && d.BaselineRuns > 0 && d.CandidateRuns > 0 {
+			bSum += d.BaselineRate
+			cSum += d.CandidateRate
+			shared++
 		}
 	}
-	if bTotal > 0 && cTotal > 0 {
-		baseRate, candRate := float64(bPass)/float64(bTotal), float64(cPass)/float64(cTotal)
-		m := Metric{
+	if shared > 0 {
+		baseRate, candRate := bSum/float64(shared), cSum/float64(shared)
+		out.Metrics = append(out.Metrics, Metric{
 			Name: "check_rate", Baseline: baseRate, Candidate: candRate, Delta: candRate - baseRate, Unit: "ratio",
-		}
-		if candRate < baseRate-opts.CheckRateDelta {
-			m.Regressed = true
-			out.Notes = append(out.Notes, fmt.Sprintf("overall check pass rate fell from %.2f%% to %.2f%%", baseRate*100, candRate*100))
-		}
-		out.Metrics = append(out.Metrics, m)
+		})
 	}
 }
 
