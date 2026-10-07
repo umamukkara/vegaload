@@ -73,7 +73,7 @@ func TestCmdRun_Baseline_WorseExitsThree(t *testing.T) {
 
 func TestCmdRun_Baseline_ComposesWithThresholds(t *testing.T) {
 	b := goodBaseline()
-	code, res, _ := baselineRun(t, "-baseline", writeBaseline(t, b), "-threshold", "p50 < 1ns")
+	code, res, _ := baselineRun(t, "-baseline", writeBaseline(t, b), "-threshold", "p50 < 0s")
 	if code != 3 || res.ThresholdsPassed == nil || *res.ThresholdsPassed || res.Baseline == nil || !res.Baseline.Passed {
 		t.Fatalf("code=%d thresholds=%v baseline=%+v", code, res.ThresholdsPassed, res.Baseline)
 	}
@@ -146,7 +146,7 @@ func TestGateFailures_ListsBothWhenBothFail(t *testing.T) {
 func TestCmdRun_Baseline_BothGatesFailExitsThreeWithBothVerdicts(t *testing.T) {
 	b := goodBaseline()
 	b.Latency.P95 = time.Nanosecond
-	code, res, _ := baselineRun(t, "-baseline", writeBaseline(t, b), "-threshold", "p50 < 1ns")
+	code, res, _ := baselineRun(t, "-baseline", writeBaseline(t, b), "-threshold", "p50 < 0s")
 	if code != 3 || res.ThresholdsPassed == nil || *res.ThresholdsPassed || res.Baseline == nil || res.Baseline.Passed {
 		t.Fatalf("code=%d thresholds=%v baseline=%+v", code, res.ThresholdsPassed, res.Baseline)
 	}

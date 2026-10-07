@@ -75,7 +75,9 @@ func cmdMCPEval(args []string) int {
 		return 1
 	}
 
-	suiteJSON := bytes.ReplaceAll(rawSuite, []byte("${WORKDIR}"), []byte(workdir))
+	// The path goes into JSON strings, so it is escaped: a Windows path has
+	// backslashes, which would otherwise break the JSON.
+	suiteJSON := bytes.ReplaceAll(rawSuite, []byte("${WORKDIR}"), []byte(jsonEscape(workdir)))
 	suite, err := eval.ParseSuite(suiteJSON)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload mcp eval: parsing the embedded suite: %v\n", err)
@@ -138,6 +140,13 @@ func toolCaller(tools []mcp.Tool) eval.Caller {
 		}
 		return t.Handler(ctx, arguments)
 	}
+}
+
+// jsonEscape returns s escaped for use inside a JSON string literal
+// (without the surrounding quotes).
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
 }
 
 func passCount(results []eval.CaseResult) int {

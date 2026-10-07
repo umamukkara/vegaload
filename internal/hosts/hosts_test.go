@@ -71,11 +71,11 @@ func TestHostsPaths(t *testing.T) {
 	env := Env{OS: "darwin", Home: "/h", Dir: "/p"}
 	cur, _ := Get("cursor")
 	cfgs := cur.Configs(env)
-	if cfgs[0].Path != "/p/.cursor/mcp.json" || cfgs[0].Scope != ScopeProject || cfgs[1].Path != "/h/.cursor/mcp.json" {
+	if cfgs[0].Path != filepath.FromSlash("/p/.cursor/mcp.json") || cfgs[0].Scope != ScopeProject || cfgs[1].Path != filepath.FromSlash("/h/.cursor/mcp.json") {
 		t.Errorf("cursor configs: %+v", cfgs)
 	}
 	cc, _ := Get("claude-code")
-	if got := cc.Configs(env)[0].Path; got != "/p/.mcp.json" {
+	if got := cc.Configs(env)[0].Path; got != filepath.FromSlash("/p/.mcp.json") {
 		t.Errorf("claude-code project config = %s", got)
 	}
 	for _, c := range cc.Configs(env)[1:] {
@@ -87,7 +87,7 @@ func TestHostsPaths(t *testing.T) {
 	if !cd.SupportedOn("darwin") || cd.SupportedOn("linux") {
 		t.Error("claude-desktop should be macOS only")
 	}
-	if got := cd.Configs(env)[0].Path; got != "/h/Library/Application Support/Claude/claude_desktop_config.json" {
+	if got := cd.Configs(env)[0].Path; got != filepath.FromSlash("/h/Library/Application Support/Claude/claude_desktop_config.json") {
 		t.Errorf("claude-desktop config = %s", got)
 	}
 	if _, ok := Get("nope"); ok {
@@ -140,4 +140,21 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestClaudeDesktopOnWindows(t *testing.T) {
+	cd, _ := Get("claude-desktop")
+	if !cd.SupportedOn("windows") {
+		t.Fatal("claude-desktop should be supported on Windows")
+	}
+	env := Env{OS: "windows", Home: filepath.Join("C:", "Users", "u"), AppData: filepath.Join("C:", "Users", "u", "AppData", "Roaming")}
+	want := filepath.Join(env.AppData, "Claude", "claude_desktop_config.json")
+	if got := cd.Configs(env)[0].Path; got != want {
+		t.Errorf("config = %s, want %s", got, want)
+	}
+	env.AppData = "" // APPDATA is not set: fall back to the usual place
+	want = filepath.Join(env.Home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+	if got := cd.Configs(env)[0].Path; got != want {
+		t.Errorf("fallback config = %s, want %s", got, want)
+	}
 }

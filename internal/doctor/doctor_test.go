@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -59,6 +60,13 @@ func testEnv(t *testing.T) Env {
 			return mcpprobe.Info{ServerName: "vegaload", Tools: append([]string(nil), mcp.CoreToolNames...)}, nil
 		},
 	}
+}
+
+// jsonString returns s as a JSON string literal, with the quotes. A Windows
+// path has backslashes, so it cannot be pasted into JSON as it is.
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func byID(t *testing.T, rep Report, id string) Result {
@@ -198,7 +206,7 @@ func TestStaleCommandIsFixedByRewritingEntry(t *testing.T) {
 func TestWrongArgsFail(t *testing.T) {
 	env := testEnv(t)
 	if err := os.WriteFile(filepath.Join(env.Dir, ".mcp.json"),
-		[]byte(`{"mcpServers":{"vegaload":{"command":"`+env.Exe+`","args":["run"]}}}`), 0o644); err != nil {
+		[]byte(`{"mcpServers":{"vegaload":{"command":`+jsonString(env.Exe)+`,"args":["run"]}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rep := run(t, env, Options{Hosts: []string{"claude-code"}, Only: []string{"host.claude-code.command"}})
@@ -300,7 +308,7 @@ func TestUserScopeFilesOnlyRepairedWhenHostNamed(t *testing.T) {
 
 func TestClaudeCodeUserEntryCountsAsRegistered(t *testing.T) {
 	env := testEnv(t)
-	body := `{"projects":{"` + env.Dir + `":{"mcpServers":{"vegaload":{"command":"` + env.Exe + `","args":["mcp","serve"]}}}}}`
+	body := `{"projects":{` + jsonString(env.Dir) + `:{"mcpServers":{"vegaload":{"command":` + jsonString(env.Exe) + `,"args":["mcp","serve"]}}}}}`
 	if err := os.WriteFile(filepath.Join(env.Home, ".claude.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +484,7 @@ func TestOutputsRedactHomeAndKeepContract(t *testing.T) {
 
 	var text bytes.Buffer
 	WriteText(&text, rep, env.Home, true)
-	if strings.Contains(text.String(), env.Home) || !strings.Contains(text.String(), "~/.vegaload") {
+	if strings.Contains(text.String(), env.Home) || !strings.Contains(text.String(), "~"+string(filepath.Separator)+".vegaload") {
 		t.Errorf("text output not redacted:\n%s", text.String())
 	}
 
@@ -537,5 +545,16 @@ func TestCheckTimeoutIsEnforced(t *testing.T) {
 	}
 	if time.Since(start) > 3*time.Second {
 		t.Error("the timeout did not cut the check short")
+	}
+}
+
+func TestIsPathCommand(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"vegaload": false, "vegaload.exe": false,
+		"/usr/local/bin/vegaload": true, `C:\bin\vegaload.exe`: true, `.\vegaload`: true, "bin/vegaload": true,
+	} {
+		if got := isPathCommand(cmd); got != want {
+			t.Errorf("isPathCommand(%q) = %v, want %v", cmd, got, want)
+		}
 	}
 }

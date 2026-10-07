@@ -99,3 +99,15 @@ func TestCmdMCPEval_V2AllCasesPass(t *testing.T) {
 		t.Errorf("got %+v, want version v2 and passed", got)
 	}
 }
+
+func TestJSONEscape(t *testing.T) {
+	got := jsonEscape(`C:\Users\a b\Temp\vegaload-eval-1`)
+	want := `C:\\Users\\a b\\Temp\\vegaload-eval-1`
+	if got != want {
+		t.Errorf("jsonEscape = %q, want %q", got, want)
+	}
+	var s string
+	if err := json.Unmarshal([]byte(`"`+got+`"`), &s); err != nil || s != `C:\Users\a b\Temp\vegaload-eval-1` {
+		t.Errorf("round trip = %q, %v", s, err)
+	}
+}

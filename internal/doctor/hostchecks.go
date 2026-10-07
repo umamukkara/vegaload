@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/vegaload/vegaload/internal/hosts"
@@ -290,12 +292,12 @@ func checkCommand(ctx context.Context, env Env, st *hosts.ConfigState, explicit 
 	if entry.Command == "" {
 		return bad(Fail, "the vegaload entry has no command", "Run `vegaload init -force` to rewrite it.")
 	}
-	if strings.Contains(entry.Command, "/") {
+	if isPathCommand(entry.Command) {
 		fi, err := os.Stat(entry.Command)
 		switch {
 		case err != nil:
 			return bad(Fail, "the configured command does not exist: "+entry.Command, "Run `vegaload init -force` to point it at the binary you are running now.")
-		case fi.IsDir() || fi.Mode()&0o111 == 0:
+		case fi.IsDir() || !isExecutable(fi):
 			return bad(Fail, "the configured command is not an executable file: "+entry.Command, "Run `vegaload init -force` to rewrite it.")
 		}
 	} else {
@@ -375,12 +377,12 @@ func checkRules(files []hosts.RulesFile) Result {
 func checkHandshake(ctx context.Context, env Env, st *hosts.ConfigState) Result {
 	entry := st.Entry.Expand(env.hostEnv(), env.Getenv)
 	cmdPath := entry.Command
-	if !strings.Contains(cmdPath, "/") {
+	if !isPathCommand(cmdPath) {
 		if p, err := env.LookPath(cmdPath); err == nil {
 			cmdPath = p
 		}
 	}
-	if strings.Contains(cmdPath, "/") {
+	if isPathCommand(cmdPath) {
 		if _, err := os.Stat(cmdPath); err != nil {
 			return result(Skip, "the configured command does not exist, see the command check")
 		}
@@ -402,4 +404,20 @@ func checkHandshake(ctx context.Context, env Env, st *hosts.ConfigState) Result 
 	r := result(Pass, fmt.Sprintf("handshake ok: %d tools (%s)", len(info.Tools), strings.Join(info.Tools, ", ")))
 	r.Detail = []string{"config: " + st.Config.Path}
 	return r
+}
+
+// isPathCommand reports whether a configured command is a file path (as
+// opposed to a bare name to look up on PATH). A Windows path uses backslashes
+// or has a drive letter, so a slash alone is not enough.
+func isPathCommand(cmd string) bool {
+	return strings.ContainsAny(cmd, `/\`) || filepath.VolumeName(cmd) != ""
+}
+
+// isExecutable reports whether fi can be run. Windows has no execute bit:
+// any file can be run there, so only a directory is ruled out.
+func isExecutable(fi os.FileInfo) bool {
+	if runtime.GOOS == "windows" {
+		return !fi.IsDir()
+	}
+	return fi.Mode()&0o111 != 0
 }

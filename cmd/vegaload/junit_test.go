@@ -13,7 +13,7 @@ func init() { os.Unsetenv("GITHUB_STEP_SUMMARY") }
 
 func TestCmdRun_JUnit_WritesCasesAndStillExitsThree(t *testing.T) {
 	junit := filepath.Join(t.TempDir(), "junit.xml")
-	code, _, _ := baselineRun(t, "-junit", junit, "-threshold", "fast: p50 < 1ns", "-threshold", "ok: error_rate < 1")
+	code, _, _ := baselineRun(t, "-junit", junit, "-threshold", "fast: p50 < 0s", "-threshold", "ok: error_rate < 1")
 	if code != 3 {
 		t.Fatalf("exit %d, want 3", code)
 	}
