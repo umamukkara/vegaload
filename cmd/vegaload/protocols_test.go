@@ -4,13 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vegaload/vegaload/internal/mcp"
 	"github.com/vegaload/vegaload/internal/protocol"
 )
 
-func TestProtocolList(t *testing.T) {
-	old := protocolNames
-	defer func() { protocolNames = old }()
-
+func TestJoinOr(t *testing.T) {
 	cases := []struct {
 		names []string
 		want  string
@@ -21,24 +19,86 @@ func TestProtocolList(t *testing.T) {
 		{[]string{"a", "b", "c"}, "a, b, or c"},
 	}
 	for _, c := range cases {
-		protocolNames = c.names
-		if got := protocolList(); got != c.want {
-			t.Errorf("protocolList(%v) = %q, want %q", c.names, got, c.want)
+		if got := joinOr(c.names); got != c.want {
+			t.Errorf("joinOr(%v) = %q, want %q", c.names, got, c.want)
 		}
 	}
 }
 
-// Every name in protocolNames must be wired into protocolIteration.
-// A name that is listed but not wired would be offered to users and then
-// refused as "unknown".
-func TestProtocolNames_AreAllWired(t *testing.T) {
-	for _, name := range protocolNames {
-		_, closeFn, err := protocolIteration(name, wireTestTarget(name), 0)
-		if err != nil && strings.Contains(err.Error(), "unknown -protocol") {
-			t.Errorf("protocol %q is listed but not wired: %v", name, err)
+// The drivers table is the only place a protocol is wired, so every entry
+// must build, and the help text must list exactly the table's names.
+func TestDrivers_EveryEntryBuilds(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range drivers {
+		if seen[d.name] {
+			t.Errorf("protocol %q is listed twice", d.name)
 		}
-		if closeFn != nil {
-			_ = closeFn()
+		seen[d.name] = true
+
+		iter, closeFn, err := protocolIteration(d.name, wireTestTarget(d.name), 0)
+		if err != nil {
+			t.Errorf("protocol %q does not build: %v", d.name, err)
+			continue
+		}
+		if iter == nil || closeFn == nil {
+			t.Errorf("protocol %q returned a nil iteration or close", d.name)
+			continue
+		}
+		_ = closeFn()
+	}
+	for _, name := range protocolNames() {
+		if !strings.Contains(protocolList(), name) {
+			t.Errorf("help text %q does not list %q", protocolList(), name)
+		}
+	}
+}
+
+func TestProtocolIteration_UnknownProtocol(t *testing.T) {
+	_, _, err := protocolIteration("nope", protocol.Target{URL: "x"}, 0)
+	if err == nil || !strings.Contains(err.Error(), "unknown -protocol") || !strings.Contains(err.Error(), "http1") {
+		t.Fatalf("err = %v, want it to name the choices", err)
+	}
+}
+
+// A typo in -opt is an error, not ignored. This holds for every driver:
+// a key it did not declare is refused.
+func TestProtocolIteration_UnknownOptionIsRefused(t *testing.T) {
+	for _, d := range drivers {
+		tg := wireTestTarget(d.name)
+		tg.Options = map[string]string{"definitely-not-a-key": "1"}
+		_, _, err := protocolIteration(d.name, tg, 0)
+		if err == nil || !strings.Contains(err.Error(), "unknown option definitely-not-a-key") {
+			t.Errorf("protocol %q: err = %v, want an unknown option error", d.name, err)
+		}
+	}
+}
+
+func TestProtocolIteration_DriverWithoutOptionsSaysSo(t *testing.T) {
+	tg := wireTestTarget("http1")
+	tg.Options = map[string]string{"read": "64"}
+	_, _, err := protocolIteration("http1", tg, 0)
+	if err == nil || !strings.Contains(err.Error(), "takes no options") {
+		t.Fatalf("err = %v, want \"takes no options\"", err)
+	}
+}
+
+// The MCP run_test tool describes the protocols in its schema. That text
+// lives in another package, so this test keeps it in step with the table.
+func TestMCPRunTestSchema_ListsEveryProtocol(t *testing.T) {
+	var desc string
+	for _, tool := range mcp.NewTools("vegaload") {
+		if tool.Name != "run_test" {
+			continue
+		}
+		props := tool.InputSchema["properties"].(map[string]any)
+		desc = props["protocol"].(map[string]any)["description"].(string)
+	}
+	if desc == "" {
+		t.Fatal("run_test has no protocol description")
+	}
+	for _, name := range protocolNames() {
+		if !strings.Contains(desc, name) {
+			t.Errorf("run_test protocol description %q does not mention %q", desc, name)
 		}
 	}
 }

@@ -107,6 +107,13 @@ func TestParseRunArgs_OptFlagRejectsBadForm(t *testing.T) {
 	}
 }
 
+func TestParseRunArgs_OptNeedsProtocolMode(t *testing.T) {
+	_, err := parseRunArgs([]string{"-opt", "read=64", "scenario.vl.js"})
+	if err == nil || !strings.Contains(err.Error(), "-opt") {
+		t.Fatalf("err = %v, want -opt to be refused with a scenario file", err)
+	}
+}
+
 func TestParseRunArgs_NoOptLeavesOptionsNil(t *testing.T) {
 	cfg, err := parseRunArgs([]string{"-target", "http://x", "-protocol", "http1"})
 	if err != nil {
