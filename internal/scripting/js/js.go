@@ -1,8 +1,7 @@
 // Package js runs a scenario written as a JavaScript or TypeScript file,
 // using the embedded Goja ECMAScript runtime — no Node.js, no network
 // fetch of a runtime, and no separate build step for the author. A
-// scenario file exports a default function the same way a k6 script
-// does:
+// scenario file exports a default function:
 //
 //	export default function () {
 //	  // one iteration's worth of work

@@ -7,8 +7,8 @@ import (
 
 // Ramp runs a variable number of virtual users, linearly interpolating
 // the target VU count between each Stage's start and end over that
-// stage's duration — the "ramping-vus" shape k6 and Gatling both call a
-// ramp. The VU count starts at 0 before the first stage.
+// stage's duration. This is the usual ramp shape. The VU count starts at 0
+// before the first stage.
 type Ramp struct {
 	Stages []Stage
 }

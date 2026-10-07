@@ -29,7 +29,7 @@ type ConstantArrivalRate struct {
 	// Dur is the total duration this executor runs for.
 	Dur time.Duration
 	// PreAllocatedVUs is accepted for forward compatibility with
-	// k6-style arrival-rate configuration. The current implementation
+	// arrival-rate configurations that pre-allocate a pool of VUs. The current implementation
 	// spawns goroutines on demand up to MaxVUs rather than pre-warming
 	// a fixed pool, since goroutines are cheap; this field is not yet
 	// used.
