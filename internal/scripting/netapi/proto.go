@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/kafka"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 )
@@ -39,6 +42,15 @@ type ProtoMessage struct {
 	Body  []byte
 }
 
+// KafkaRecord is one Kafka record a call produced or read.
+type KafkaRecord struct {
+	Topic     string
+	Partition int32
+	Offset    int64
+	Key       []byte
+	Value     []byte
+}
+
 // ProtoReply is what a call hands back. A call that fails on the network
 // (refused, timed out, no reply) is a reply with OK false and Error set,
 // not a Go error: a script is expected to look at it.
@@ -52,14 +64,28 @@ type ProtoReply struct {
 	Body []byte
 	// Messages are the messages an mqtt subscribe or roundtrip received.
 	Messages []ProtoMessage
+	// IsKafka is true for a Kafka reply, the only one with Records and Text.
+	IsKafka bool
+	// Records are the records a kafka produce, consume or roundtrip
+	// wrote or read. For produce, Partition and Offset say where the broker
+	// stored each one.
+	Records []KafkaRecord
+	// Text is the answer of a kafka admin action.
+	Text string
 }
 
 // ProtoClient makes tcp, udp and mqtt calls for one VU. Each call opens
 // its own connection, the same as the load-test drivers do, so the client
-// holds no connection and needs no Close.
+// holds no connection, except the Kafka clients that Close releases.
 type ProtoClient struct {
 	check   SafetyCheck
 	timeout time.Duration
+
+	// kafkaConns holds one Kafka client per connection setup, made on the
+	// first call that needs it and kept until Close, as a real producer
+	// keeps its client. The other protocols hold nothing.
+	mu         sync.Mutex
+	kafkaConns map[string]*kafka.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -111,6 +137,94 @@ func (c *ProtoClient) MQTT(ctx context.Context, mode string, call ProtoCall) (*P
 		r.Messages = append(r.Messages, ProtoMessage{Topic: m.Topic, Body: m.Payload})
 	}
 	return r, nil
+}
+
+// kafkaConnOptions are the options that make up a Kafka client. They are
+// the same for every call of one client. The rest of a call's options
+// describe the job.
+var kafkaConnOptions = []string{"client_id", "sasl", "username", "acks", "compression"}
+
+// Kafka does one Kafka job. mode is produce, consume, roundtrip or admin.
+// The client is kept for the next call with the same connection options.
+func (c *ProtoClient) Kafka(ctx context.Context, mode string, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "kafka"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["mode"]; ok {
+		return nil, errors.New("kafka: option mode is not allowed here, the function you called sets it")
+	}
+	opts["mode"] = mode
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("kafka: password_env is for the command line, pass password: env.NAME instead")
+	}
+
+	conn, err := c.kafkaConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	r.IsKafka = true
+	r.Text = rep.Text
+	for _, rec := range rep.Records {
+		r.Records = append(r.Records, KafkaRecord(rec))
+	}
+	return r, nil
+}
+
+// kafkaConn returns the client for call's connection options, making it
+// the first time.
+func (c *ProtoClient) kafkaConn(call ProtoCall, opts map[string]string) (*kafka.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range kafkaConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%q|", *call.Password)
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.kafkaConns[key]; ok {
+		return d, nil
+	}
+	d, err := kafka.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password)
+	if err != nil {
+		return nil, err
+	}
+	if c.kafkaConns == nil {
+		c.kafkaConns = map[string]*kafka.Driver{}
+	}
+	c.kafkaConns[key] = d
+	return d, nil
+}
+
+// Close closes the Kafka clients. Safe to call more than once.
+func (c *ProtoClient) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, d := range c.kafkaConns {
+		_ = d.Close()
+		delete(c.kafkaConns, k)
+	}
 }
 
 func (c *ProtoClient) socket(ctx context.Context, network string, call ProtoCall) (*ProtoReply, error) {

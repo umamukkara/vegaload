@@ -119,10 +119,14 @@ type Driver struct {
 	shared *kgo.Client
 	adm    *kadm.Client
 
-	problems problemLog // the client's own warnings, kept as a hint
+	problems *problemLog // the client's own warnings, kept as a hint
 
 	salt string // random, per Driver, so two runs never share ids
-	seq  atomic.Uint64
+	seq  *atomic.Uint64
+
+	// password is a SASL password given by a script. nil on the command
+	// line, where password_env names the variable that holds it.
+	password *string
 }
 
 // New returns a ready-to-use Driver for target. target.URL is
@@ -131,7 +135,43 @@ type Driver struct {
 // New returns an error only for a configuration problem, never for the
 // cluster being unreachable, which Do reports per call.
 func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
-	d := &Driver{target: target, timeout: timeout}
+	return build(target, timeout, nil, false)
+}
+
+// NewConn is New for a scenario script. It makes only the connection: the
+// client, its login and its producer settings (client_id, sasl, username,
+// acks, compression). It needs no topic and no mode. The job of each call
+// is then set with Call. password is the SASL password, which the script
+// already holds, so password_env is not used with it.
+func NewConn(target protocol.Target, timeout time.Duration, password *string) (*Driver, error) {
+	return build(target, timeout, password, true)
+}
+
+// Call returns a Driver for one call of a script: the same connection as d,
+// with the job that opts and body describe. opts must hold the same
+// connection options d was made with. The result shares d's client, so
+// closing it is d's job, not the caller's.
+func (d *Driver) Call(opts map[string]string, body []byte, timeout time.Duration) (*Driver, error) {
+	nd := *d
+	nd.timeout = timeout
+	nd.target.Body = body
+	nd.target.Options = opts
+	if err := nd.target.RejectUnknownOptions(Options...); err != nil {
+		return nil, fmt.Errorf("kafka: %w", err)
+	}
+	if err := nd.readOptions(); err != nil {
+		return nil, err
+	}
+	if nd.mode == modeProduce || nd.mode == modeRoundtrip {
+		if _, err := nd.producerOptions(); err != nil {
+			return nil, err
+		}
+	}
+	return &nd, nil
+}
+
+func build(target protocol.Target, timeout time.Duration, password *string, connOnly bool) (*Driver, error) {
+	d := &Driver{target: target, timeout: timeout, password: password, problems: &problemLog{}, seq: &atomic.Uint64{}}
 
 	u, err := url.Parse(target.URL)
 	if err != nil {
@@ -160,7 +200,13 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	if err := target.RejectUnknownOptions(Options...); err != nil {
 		return nil, fmt.Errorf("kafka: %w", err)
 	}
-	if err := d.readOptions(); err != nil {
+	if connOnly {
+		// Only the connection is made here. Every call sets its own job.
+		d.mode = modeProduce
+		if err := d.target.RejectUnknownOptions("client_id", "sasl", "username", "password_env", "acks", "compression"); err != nil {
+			return nil, fmt.Errorf("kafka: %w", err)
+		}
+	} else if err := d.readOptions(); err != nil {
 		return nil, err
 	}
 
@@ -172,6 +218,13 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	// The client refuses a timeout under 1s for its own limits. The real
 	// limit of each call is the context in Do, so this is only a backstop.
 	backstop := max(timeout, time.Second)
+	if connOnly {
+		// A script chooses a timeout for each call, and the client lives
+		// longer than one call. The call's context is the real limit.
+		backstop = max(timeout, time.Minute)
+		d.timeout = backstop
+		defer func() { d.timeout = timeout }()
+	}
 	clientID := target.Option("client_id", "vegaload")
 	d.base = []kgo.Opt{
 		kgo.SeedBrokers(seed),
@@ -180,7 +233,7 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 		kgo.RetryTimeout(backstop),
 		kgo.RequestTimeoutOverhead(backstop),
 		kgo.UnknownTopicRetries(0),
-		kgo.WithLogger(&d.problems),
+		kgo.WithLogger(d.problems),
 	}
 	if useTLS {
 		d.base = append(d.base, kgo.DialTLSConfig(&tls.Config{
@@ -365,20 +418,28 @@ func (d *Driver) saslMechanism() (sasl.Mechanism, error) {
 	user := t.Option("username", "")
 	pwEnv := t.Option("password_env", "")
 	if name == "" {
-		if user != "" || pwEnv != "" {
-			return nil, errors.New("kafka: username and password_env need -opt sasl=plain, scram-sha-256, or scram-sha-512")
+		if user != "" || pwEnv != "" || d.password != nil {
+			return nil, errors.New("kafka: username and password need -opt sasl=plain, scram-sha-256, or scram-sha-512")
 		}
 		return nil, nil
 	}
 	if user == "" {
 		return nil, errors.New("kafka: sasl needs -opt username=NAME")
 	}
-	if pwEnv == "" {
-		return nil, errors.New("kafka: sasl needs -opt password_env=NAME, the name of an environment variable that holds the password")
-	}
-	pw, ok := os.LookupEnv(pwEnv)
-	if !ok {
-		return nil, fmt.Errorf("kafka: environment variable %s (password_env) is not set", pwEnv)
+	var pw string
+	if d.password != nil {
+		if pwEnv != "" {
+			return nil, errors.New("kafka: give a password or password_env, not both")
+		}
+		pw = *d.password
+	} else {
+		if pwEnv == "" {
+			return nil, errors.New("kafka: sasl needs -opt password_env=NAME, the name of an environment variable that holds the password")
+		}
+		var ok bool
+		if pw, ok = os.LookupEnv(pwEnv); !ok {
+			return nil, fmt.Errorf("kafka: environment variable %s (password_env) is not set", pwEnv)
+		}
 	}
 	switch name {
 	case "plain":
@@ -406,8 +467,32 @@ func (d *Driver) newID() string {
 	return "vegaload-" + d.salt + "-" + strconv.FormatUint(d.seq.Add(1), 36)
 }
 
+// Record is one Kafka record: one that was produced (its partition and
+// offset are where the broker stored it) or one that was read.
+type Record struct {
+	Topic     string
+	Partition int32
+	Offset    int64
+	Key       []byte
+	Value     []byte
+}
+
+// Reply is what a call read or wrote, besides the result: the records of
+// produce, consume and roundtrip, and the text answer of an admin action.
+type Reply struct {
+	Records []Record
+	Text    string
+}
+
 // Do implements protocol.Protocol.
 func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
+	res, _ := d.Run(parent)
+	return res, nil
+}
+
+// Run is Do, and it also returns the records and text of the call. A load
+// test does not need them. A scenario script does.
+func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	ctx, cancel := context.WithTimeout(parent, d.timeout)
 	defer cancel()
 
@@ -415,25 +500,36 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 	var (
 		sent, got int64
 		err       error
+		rep       Reply
 	)
 	switch d.mode {
 	case modeProduce:
-		_, sent, err = d.produce(ctx, id)
+		var recs []*kgo.Record
+		recs, sent, err = d.produce(ctx, id)
+		rep.Records = toRecords(recs)
 	case modeConsume:
-		got, err = d.consume(ctx, d.replaceID(d.topic, id), nil)
+		got, rep.Records, err = d.consume(ctx, d.replaceID(d.topic, id), nil)
 	case modeRoundtrip:
 		var recs []*kgo.Record
 		recs, sent, err = d.produce(ctx, id)
 		if err == nil {
-			got, err = d.consume(ctx, recs[0].Topic, recs)
+			got, rep.Records, err = d.consume(ctx, recs[0].Topic, recs)
 		}
 	case modeAdmin:
-		got, err = d.adminCall(ctx, id)
+		got, rep.Text, err = d.adminCall(ctx, id)
 	}
 	if err != nil {
-		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err)}, nil
+		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err)}, rep
 	}
-	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, nil
+	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, rep
+}
+
+func toRecords(recs []*kgo.Record) []Record {
+	out := make([]Record, len(recs))
+	for i, r := range recs {
+		out[i] = Record{Topic: r.Topic, Partition: r.Partition, Offset: r.Offset, Key: r.Key, Value: r.Value}
+	}
+	return out
 }
 
 // explain gives an error from the client a clear text. The end of the
@@ -526,7 +622,7 @@ func (d *Driver) produce(ctx context.Context, id string) ([]*kgo.Record, int64, 
 // nil it reads count records from the start or the end of the topic.
 // With want set, it reads exactly those records, which are already
 // delivered, and checks that each one comes back the same.
-func (d *Driver) consume(ctx context.Context, topic string, want []*kgo.Record) (int64, error) {
+func (d *Driver) consume(ctx context.Context, topic string, want []*kgo.Record) (int64, []Record, error) {
 	opts := append([]kgo.Opt(nil), d.base...)
 	opts = append(opts, kgo.FetchMaxWait(min(d.timeout, time.Second)))
 
@@ -561,18 +657,19 @@ func (d *Driver) consume(ctx context.Context, topic string, want []*kgo.Record) 
 
 	cl, err := kgo.NewClient(opts...)
 	if err != nil {
-		return 0, fmt.Errorf("kafka: creating the client: %w", err)
+		return 0, nil, fmt.Errorf("kafka: creating the client: %w", err)
 	}
 	defer cl.Close()
 
 	var got int64
+	var read []Record
 	for n := 0; n < need; {
 		fetches := cl.PollFetches(ctx)
 		if fetches.IsClientClosed() {
-			return got, errors.New("kafka: the client closed")
+			return got, read, errors.New("kafka: the client closed")
 		}
 		if ctx.Err() != nil {
-			return got, ctx.Err()
+			return got, read, ctx.Err()
 		}
 		var firstErr error
 		fetches.EachError(func(t string, p int32, err error) {
@@ -581,7 +678,7 @@ func (d *Driver) consume(ctx context.Context, topic string, want []*kgo.Record) 
 			}
 		})
 		if firstErr != nil {
-			return got, firstErr
+			return got, read, firstErr
 		}
 		for it := fetches.RecordIter(); !it.Done(); {
 			r := it.Next()
@@ -591,19 +688,20 @@ func (d *Driver) consume(ctx context.Context, topic string, want []*kgo.Record) 
 					continue // another record in the same batch
 				}
 				if !bytes.Equal(v, r.Value) {
-					return got, fmt.Errorf("kafka: record %s[%d]@%d came back different from what was sent", topic, r.Partition, r.Offset)
+					return got, read, fmt.Errorf("kafka: record %s[%d]@%d came back different from what was sent", topic, r.Partition, r.Offset)
 				}
 				delete(pending, pos{r.Partition, r.Offset})
 			} else if len(d.expect) > 0 && !bytes.Contains(r.Value, d.expect) {
-				return got, fmt.Errorf("kafka: record %s[%d]@%d did not contain %q (it starts with %q)", topic, r.Partition, r.Offset, d.expect, clip(r.Value))
+				return got, read, fmt.Errorf("kafka: record %s[%d]@%d did not contain %q (it starts with %q)", topic, r.Partition, r.Offset, d.expect, clip(r.Value))
 			}
 			got += int64(len(r.Value))
+			read = append(read, Record{Topic: r.Topic, Partition: r.Partition, Offset: r.Offset, Key: r.Key, Value: r.Value})
 			if n++; n >= need {
 				break
 			}
 		}
 	}
-	return got, nil
+	return got, read, nil
 }
 
 // adminCall runs admin and stops waiting for it when ctx ends. The admin
@@ -611,41 +709,42 @@ func (d *Driver) consume(ctx context.Context, topic string, want []*kgo.Record) 
 // ctx, so a broker that never answers would hold the call for the whole
 // backstop time. The request is left to finish by itself, and it ends
 // within that backstop. It uses the shared client, which stays usable.
-func (d *Driver) adminCall(ctx context.Context, id string) (int64, error) {
+func (d *Driver) adminCall(ctx context.Context, id string) (int64, string, error) {
 	type out struct {
-		n   int64
-		err error
+		n    int64
+		text string
+		err  error
 	}
 	ch := make(chan out, 1)
 	go func() {
-		n, err := d.admin(ctx, id)
-		ch <- out{n, err}
+		n, text, err := d.admin(ctx, id)
+		ch <- out{n, text, err}
 	}()
 	select {
 	case o := <-ch:
-		return o.n, o.err
+		return o.n, o.text, o.err
 	case <-ctx.Done():
-		return 0, ctx.Err()
+		return 0, "", ctx.Err()
 	}
 }
 
 // admin does one admin action and returns the bytes of its answer.
-func (d *Driver) admin(ctx context.Context, id string) (int64, error) {
+func (d *Driver) admin(ctx context.Context, id string) (int64, string, error) {
 	topic := d.replaceID(d.topic, id)
 	switch d.action {
 	case actCreateTopic:
-		return 0, d.createTopic(ctx, topic)
+		return 0, "", d.createTopic(ctx, topic)
 	case actDeleteTopic:
-		return 0, d.deleteTopic(ctx, topic)
+		return 0, "", d.deleteTopic(ctx, topic)
 	case actTopicLifecycle:
 		if err := d.createTopic(ctx, topic); err != nil {
-			return 0, err
+			return 0, "", err
 		}
-		return 0, d.deleteTopic(ctx, topic)
+		return 0, "", d.deleteTopic(ctx, topic)
 	case actListTopics:
 		ts, err := d.adm.ListTopics(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("kafka: listing topics: %w", err)
+			return 0, "", fmt.Errorf("kafka: listing topics: %w", err)
 		}
 		names := ts.Names()
 		sort.Strings(names)
@@ -653,7 +752,7 @@ func (d *Driver) admin(ctx context.Context, id string) (int64, error) {
 	case actListGroups:
 		gs, err := d.adm.ListGroups(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("kafka: listing groups: %w", err)
+			return 0, "", fmt.Errorf("kafka: listing groups: %w", err)
 		}
 		names := make([]string, 0, len(gs))
 		for _, g := range gs.Sorted() {
@@ -663,19 +762,19 @@ func (d *Driver) admin(ctx context.Context, id string) (int64, error) {
 	case actDescribe:
 		m, err := d.adm.BrokerMetadata(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("kafka: describing the cluster: %w", err)
+			return 0, "", fmt.Errorf("kafka: describing the cluster: %w", err)
 		}
 		return d.listing(fmt.Sprintf("cluster %q, controller %d, %d brokers", m.Cluster, m.Controller, len(m.Brokers)))
 	}
-	return 0, fmt.Errorf("kafka: unknown action %q", d.action)
+	return 0, "", fmt.Errorf("kafka: unknown action %q", d.action)
 }
 
 // listing checks the optional expect text and returns the size of text.
-func (d *Driver) listing(text string) (int64, error) {
+func (d *Driver) listing(text string) (int64, string, error) {
 	if len(d.expect) > 0 && !strings.Contains(text, string(d.expect)) {
-		return int64(len(text)), fmt.Errorf("kafka: the answer did not contain %q", d.expect)
+		return int64(len(text)), text, fmt.Errorf("kafka: the answer did not contain %q", d.expect)
 	}
-	return int64(len(text)), nil
+	return int64(len(text)), text, nil
 }
 
 func (d *Driver) createTopic(ctx context.Context, topic string) error {

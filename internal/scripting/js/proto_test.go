@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/inputs"
+	"github.com/vegaload/vegaload/internal/protocol/kafka/kafkatest"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 )
 
@@ -525,5 +526,94 @@ func TestTCP_InsecureSkipsCertificateCheck(t *testing.T) {
 		const r = tcp.send("tcp://`+addr+`", {body: "hi\n", until: "\n", tls: true, insecure: true});
 		assert(r.ok, r.error);
 		assert(r.body === "echo:hi\n", r.body);
+	`)
+}
+
+func TestKafka_ProduceConsumeRoundtripAdmin(t *testing.T) {
+	b := kafkatest.Start(t)
+	b.AddTopic("orders", 2)
+	must(t, nil, assertFn+`
+		const url = "`+b.URL()+`";
+		const p = kafka.produce(url, {topic: "orders", key: "k1", value: "hello"});
+		assert(p.ok, p.error);
+		assert(p.records.length === 1, "one record");
+		const rec = p.records[0];
+		assert(rec.topic === "orders" && rec.key === "k1" && rec.value === "hello", JSON.stringify(rec));
+		assert(rec.offset >= 0 && rec.partition >= 0, "offset and partition are known");
+
+		const c = kafka.consume(url, {topic: "orders", expect: "hell"});
+		assert(c.ok, c.error);
+		assert(c.records.length === 1 && c.records[0].value === "hello", JSON.stringify(c.records));
+
+		const r = kafka.roundtrip(url, {topic: "orders", value: "ping {id}", count: 2});
+		assert(r.ok, r.error);
+		assert(r.records.length === 2 && r.records[0].value.indexOf("ping vegaload-") === 0, JSON.stringify(r.records));
+
+		const a = kafka.admin(url, {action: "list_topics"});
+		assert(a.ok && a.text.indexOf("orders") >= 0, a.error + a.text);
+		assert(a.records.length === 0, "admin has no records");
+	`)
+}
+
+func TestKafka_BodyIsAnAliasOfValue(t *testing.T) {
+	b := kafkatest.Start(t)
+	b.AddTopic("t", 1)
+	must(t, nil, assertFn+`
+		const p = kafka.produce("`+b.URL()+`", {topic: "t", body: "via body"});
+		assert(p.ok && p.records[0].value === "via body", p.error);
+	`)
+	if err := runScript(t, nil, `kafka.produce("kafka://127.0.0.1:9", {topic: "t", body: "a", value: "b"})`); err == nil {
+		t.Error("body and value together must throw")
+	}
+	if err := runScript(t, nil, `mqtt.publish("mqtt://127.0.0.1:9", {topic: "t", value: "b"})`); err == nil {
+		t.Error("value is only for kafka")
+	}
+}
+
+func TestKafka_PasswordFromEnv(t *testing.T) {
+	b := kafkatest.Start(t)
+	b.User, b.Pass = "alice", "s3cret"
+	b.AddTopic("t", 1)
+	in := inputs.New(map[string]string{"KPW": "s3cret"}, nil)
+	if err := runScript(t, nil, assertFn+`
+		const ok = kafka.produce("`+b.URL()+`", {topic: "t", value: "x", sasl: "plain", username: "alice", password: env.KPW});
+		assert(ok.ok, ok.error);
+		const bad = kafka.produce("`+b.URL()+`", {topic: "t", value: "x", sasl: "plain", username: "alice", password: "wrong", timeout: 1500});
+		assert(!bad.ok && bad.error.length > 0, "wrong password must fail");
+	`, WithInputs(in)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKafka_ConfigMistakesThrow(t *testing.T) {
+	cases := map[string]string{
+		"no topic":         `kafka.produce("kafka://127.0.0.1:9", {value: "x"})`,
+		"unknown option":   `kafka.produce("kafka://127.0.0.1:9", {topic: "t", bogus: 1})`,
+		"mode option":      `kafka.produce("kafka://127.0.0.1:9", {topic: "t", mode: "consume"})`,
+		"password_env":     `kafka.produce("kafka://127.0.0.1:9", {topic: "t", sasl: "plain", username: "u", password_env: "X"})`,
+		"password no sasl": `kafka.produce("kafka://127.0.0.1:9", {topic: "t", password: "p"})`,
+		"admin no action":  `kafka.admin("kafka://127.0.0.1:9", {})`,
+		"wrong scheme":     `kafka.produce("http://127.0.0.1:9", {topic: "t"})`,
+	}
+	for name, call := range cases {
+		if err := runScript(t, nil, call); err == nil {
+			t.Errorf("%s: want a thrown error", name)
+		}
+	}
+}
+
+func TestKafka_SafetyCheckAndFailure(t *testing.T) {
+	check := func(h string) error { return errors.New("refused " + h) }
+	err := runScript(t, check, `kafka.produce("kafka://example.invalid:9092", {topic: "t"})`)
+	if err == nil || !strings.Contains(err.Error(), "refused example.invalid") {
+		t.Fatalf("want the safety refusal, got %v", err)
+	}
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := ln.Addr().String()
+	ln.Close()
+	must(t, nil, assertFn+`
+		const r = kafka.produce("kafka://`+addr+`", {topic: "t", value: "x", timeout: 1500});
+		assert(!r.ok && r.error.length > 0, "refused broker is a reply");
+		assert(r.records.length === 0, "no records");
 	`)
 }

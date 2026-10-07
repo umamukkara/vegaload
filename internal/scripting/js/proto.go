@@ -22,6 +22,8 @@ import (
 //	if (r.ok) console.log(r.body);
 //
 //	mqtt.publish("mqtt://localhost", {topic: "t/1", body: "hi"});
+//	const k = kafka.produce("kafka://localhost", {topic: "orders", key: "k", value: "v"});
+//	k.records[0].partition, k.records[0].offset
 //	const m = mqtt.subscribe("mqtt://localhost", {topic: "t/#", count: 2});
 //	m.messages[0].topic, m.messages[0].body
 //
@@ -45,7 +47,14 @@ func (v *VU) newProtoGlobals(vm *goja.Runtime) map[string]*goja.Object {
 			return v.proto.MQTT(v.ctx, mode, call)
 		}))
 	}
-	return map[string]*goja.Object{"tcp": tcp, "udp": udp, "mqtt": mq}
+	kf := vm.NewObject()
+	for _, mode := range []string{"produce", "consume", "roundtrip", "admin"} {
+		mode := mode
+		_ = kf.Set(mode, v.protoFunc(vm, "kafka."+mode, func(call netapi.ProtoCall) (*netapi.ProtoReply, error) {
+			return v.proto.Kafka(v.ctx, mode, call)
+		}))
+	}
+	return map[string]*goja.Object{"tcp": tcp, "udp": udp, "mqtt": mq, "kafka": kf}
 }
 
 // protoFunc wraps one protocol call as a JS function f(url[, options]).
@@ -57,7 +66,7 @@ func (v *VU) protoFunc(vm *goja.Runtime, name string, run func(netapi.ProtoCall)
 		if len(call.Arguments) < 1 || goja.IsUndefined(call.Arguments[0]) || goja.IsNull(call.Arguments[0]) {
 			throw(vm, fmt.Errorf("js: %s(url[, options]) requires a url argument", name))
 		}
-		pc, err := parseProtoCall(vm, call)
+		pc, err := parseProtoCall(vm, call, strings.HasPrefix(name, "kafka."))
 		if err != nil {
 			throw(vm, fmt.Errorf("js: %s: %w", name, err))
 		}
@@ -72,7 +81,7 @@ func (v *VU) protoFunc(vm *goja.Runtime, name string, run func(netapi.ProtoCall)
 // parseProtoCall reads (url, options). body, insecure, timeout and
 // password are the script's own keys. Every other key is passed on to the
 // driver as an option, and the driver rejects the ones it does not know.
-func parseProtoCall(vm *goja.Runtime, call goja.FunctionCall) (netapi.ProtoCall, error) {
+func parseProtoCall(vm *goja.Runtime, call goja.FunctionCall, valueIsBody bool) (netapi.ProtoCall, error) {
 	pc := netapi.ProtoCall{URL: call.Arguments[0].String()}
 	if len(call.Arguments) < 2 || goja.IsUndefined(call.Arguments[1]) || goja.IsNull(call.Arguments[1]) {
 		return pc, nil
@@ -92,7 +101,13 @@ func parseProtoCall(vm *goja.Runtime, call goja.FunctionCall) (netapi.ProtoCall,
 			continue
 		}
 		switch k {
-		case "body":
+		case "body", "value":
+			if k == "value" && !valueIsBody {
+				return pc, errors.New("unknown option value (use body)")
+			}
+			if pc.Body != nil {
+				return pc, errors.New("give body or value, not both")
+			}
 			s, err := optionText(k, val)
 			if err != nil {
 				return pc, err
@@ -172,7 +187,7 @@ func optionTimeout(val any) (time.Duration, error) {
 }
 
 // wrapProtoReply builds {ok, error, bytesSent, bytesReceived, body,
-// messages}. body is the reply of tcp and udp. messages is for mqtt, each
+// messages}, and for kafka also {records, text}. body is the reply of tcp and udp. messages is for mqtt, each
 // {topic, body}. error is "" when the call worked.
 func wrapProtoReply(vm *goja.Runtime, r *netapi.ProtoReply) *goja.Object {
 	o := vm.NewObject()
@@ -189,5 +204,19 @@ func wrapProtoReply(vm *goja.Runtime, r *netapi.ProtoReply) *goja.Object {
 		msgs = append(msgs, mo)
 	}
 	_ = o.Set("messages", vm.NewArray(msgs...))
+	if r.IsKafka {
+		recs := make([]any, 0, len(r.Records))
+		for _, rec := range r.Records {
+			ro := vm.NewObject()
+			_ = ro.Set("topic", rec.Topic)
+			_ = ro.Set("partition", rec.Partition)
+			_ = ro.Set("offset", rec.Offset)
+			_ = ro.Set("key", string(rec.Key))
+			_ = ro.Set("value", string(rec.Value))
+			recs = append(recs, ro)
+		}
+		_ = o.Set("records", vm.NewArray(recs...))
+		_ = o.Set("text", r.Text)
+	}
 	return o
 }

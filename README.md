@@ -256,9 +256,9 @@ protocol-direct commands from an OpenAPI spec:
 writes `sample-app.vegaload-plan.md`: one ready-to-run `vegaload run`
 command per endpoint the spec declares.
 
-### Call TCP, UDP and MQTT from a scenario
+### Call TCP, UDP, MQTT and Kafka from a scenario
 
-A JavaScript scenario can also use the `tcp`, `udp` and `mqtt` globals. Each
+A JavaScript scenario can also use the `tcp`, `udp`, `mqtt` and `kafka` globals. Each
 function is one call that does one job and returns what it read:
 
 ```js
@@ -282,9 +282,21 @@ export default function () {
   messages that were read are in `r.messages`, each with `topic` and `body`.
   Give a password as `password: env.MQTT_PASSWORD` and run with
   `-secret-env MQTT_PASSWORD`, so it is removed from every output.
+- `kafka.produce`, `kafka.consume`, `kafka.roundtrip` and `kafka.admin` take
+  the Kafka `-opt` keys (`topic`, `key`, `count`, `expect`, `from`, `action`,
+  `sasl`, `username`, `acks`, and so on; not `mode`) plus `value` (the record
+  value, `body` means the same). The records are in `r.records`, each with
+  `topic`, `partition`, `offset`, `key` and `value`. For `produce`, the
+  partition and offset say where the broker stored the record. An admin
+  answer is in `r.text`. A Kafka client is made on the first call and kept
+  for the rest of that virtual user's run, so `produce` does not connect again
+  for every call. `consume` and `roundtrip` read with their own connection,
+  as in the load-test mode. A SASL password is `password: env.NAME`.
+  The safety allowlist checks the first broker you name, not the other
+  brokers the cluster announces.
 - Every function also accepts `insecure` (skip TLS checks) and `timeout`
   (milliseconds, or text such as `"2s"`).
-- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`.
+- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`.
   A network failure does not throw: `ok` is false and `error` says why. A
   call that is set up wrongly (an unknown option, a missing topic) does throw.
 - The safety allowlist is checked for the host of every call, like `http`.
@@ -293,8 +305,9 @@ export default function () {
   when something else publishes.
 
 [`examples/scenarios/mqtt-tcp.vl.js`](./examples/scenarios/mqtt-tcp.vl.js)
-is a small example. Python scenarios do not have these globals yet. Kafka
-will follow.
+is a small example, and
+[`examples/scenarios/kafka-orders.vl.js`](./examples/scenarios/kafka-orders.vl.js)
+shows Kafka. Python scenarios do not have these globals yet.
 
 ### Start from a browser recording
 
