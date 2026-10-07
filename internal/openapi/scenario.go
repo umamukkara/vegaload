@@ -117,7 +117,8 @@ func (s *Spec) plan() scenarioPlan {
 		}
 		for _, p := range ep.Params {
 			if p.In == "header" && p.Required && !strings.EqualFold(p.Name, "authorization") &&
-				!strings.EqualFold(p.Name, "content-type") && !strings.EqualFold(p.Name, "accept") {
+				!strings.EqualFold(p.Name, "content-type") && !strings.EqualFold(p.Name, "accept") &&
+				!(ep.Auth.Kind == AuthAPIKey && strings.EqualFold(p.Name, ep.Auth.Header)) {
 				st.Headers = append(st.Headers, [2]string{p.Name, p.Example})
 			}
 		}
@@ -263,6 +264,18 @@ func (st step) comment() string {
 	return c
 }
 
+// httpCall is the start of the call: http.get, http.post and the like. The
+// scripts' HTTP client has no helper for HEAD and OPTIONS, so those go through
+// http.request, with the method as its first argument.
+func (st step) httpCall() string {
+	switch st.Ep.Method {
+	case "GET", "POST", "PUT", "PATCH", "DELETE":
+		return "http." + strings.ToLower(st.Ep.Method) + "("
+	}
+	// The method is the first argument, and the url follows it.
+	return "http.request(" + q(st.Ep.Method) + ", "
+}
+
 func (st step) expected() int {
 	if st.Expected > 0 {
 		return st.Expected
@@ -324,7 +337,7 @@ function capture(ids, key, r, fields) {
 			fmt.Fprintf(&b, "  // TODO: %s.\n", n)
 		}
 		fmt.Fprintf(&b, "  step(%s, () => {\n", q(st.Name))
-		fmt.Fprintf(&b, "    const r = http.%s(%s", strings.ToLower(st.Ep.Method), st.jsURL())
+		fmt.Fprintf(&b, "    const r = %s%s", st.httpCall(), st.jsURL())
 		if opts := st.jsOptions(); opts != "" {
 			fmt.Fprintf(&b, ", %s", opts)
 		}
@@ -418,7 +431,7 @@ func (p scenarioPlan) python(s *Spec, name string) string {
 		b.WriteString("# Give it the credential with -secret-env, for example: -secret-env API_TOKEN\n")
 	}
 	b.WriteString("# Each operation is a named step, so the summary shows each one's latency and\n# errors, and a threshold can target one:\n#   -threshold 'p95{step=\"...\"} < 300ms'\n")
-	b.WriteString("import json\n")
+	b.WriteString("import json\nfrom urllib.parse import quote\n")
 	fmt.Fprintf(&b, "\nBASE = %s\n", q(s.base()))
 	if n := s.baseNote(); n != "" {
 		fmt.Fprintf(&b, "# TODO: %s\n", n)
@@ -428,7 +441,7 @@ func (p scenarioPlan) python(s *Spec, name string) string {
 def _path_id(ids, key, fallback):
     """The id a create returned for the collection at key, or the placeholder."""
     if key in ids:
-        return str(ids[key])
+        return quote(str(ids[key]), safe="")
     return fallback
 
 
@@ -461,9 +474,9 @@ def _capture(ids, key, r, fields):
 		}
 		fmt.Fprintf(&b, "    with step(%s):\n", q(st.Name))
 		if st.Ep.HasBody {
-			fmt.Fprintf(&b, "        r = http.%s(\n            %s,%s)\n", strings.ToLower(st.Ep.Method), st.pyURL(), st.pyOptions())
+			fmt.Fprintf(&b, "        r = %s\n            %s,%s)\n", st.httpCall(), st.pyURL(), st.pyOptions())
 		} else {
-			fmt.Fprintf(&b, "        r = http.%s(%s", strings.ToLower(st.Ep.Method), st.pyURL())
+			fmt.Fprintf(&b, "        r = %s%s", st.httpCall(), st.pyURL())
 			if opts := st.pyOptions(); opts != "" {
 				fmt.Fprintf(&b, ", %s", opts)
 			}

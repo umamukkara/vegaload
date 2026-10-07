@@ -204,3 +204,62 @@ func TestPlan_NoteWhenAWriteDeclaresNoBody(t *testing.T) {
 		t.Errorf("notes = %v", notes)
 	}
 }
+
+func TestRenderScenario_HeadAndOptionsUseRequest(t *testing.T) {
+	s, err := Parse([]byte(`{"servers":[{"url":"http://x.test"}],"paths":{"/p":{"head":{},"options":{},"get":{}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := s.RenderScenario("p.vl.js", JavaScript)
+	py := s.RenderScenario("p.py", Python)
+	for _, want := range []string{`http.request("HEAD", base + "/p"`, `http.request("OPTIONS", base + "/p"`, `http.get(base + "/p"`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("js: missing %q in:\n%s", want, js)
+		}
+	}
+	for _, want := range []string{`http.request("HEAD", BASE + "/p"`, `http.request("OPTIONS", BASE + "/p"`, `http.get(BASE + "/p"`} {
+		if !strings.Contains(py, want) {
+			t.Errorf("py: missing %q in:\n%s", want, py)
+		}
+	}
+	for _, bad := range []string{"http.head(", "http.options("} {
+		if strings.Contains(js, bad) || strings.Contains(py, bad) {
+			t.Errorf("the HTTP client has no %s", bad)
+		}
+	}
+}
+
+func TestPlan_APIKeyHeaderParameterDoesNotOverrideTheToken(t *testing.T) {
+	s, err := Parse([]byte(`{
+	  "components": {"securitySchemes": {"k": {"type": "apiKey", "in": "header", "name": "X-Api-Key"}}},
+	  "security": [{"k": []}],
+	  "paths": {"/p": {"get": {"parameters": [
+	    {"name": "x-api-key", "in": "header", "required": true, "schema": {"type": "string"}},
+	    {"name": "X-Region", "in": "header", "required": true, "schema": {"type": "string"}}]}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := s.plan().Steps[0]
+	if len(st.Headers) != 1 || st.Headers[0][0] != "X-Region" {
+		t.Errorf("headers = %v, want only X-Region", st.Headers)
+	}
+}
+
+func TestParse_JSONMediaTypeWithParameters(t *testing.T) {
+	s, err := Parse([]byte(`{"paths":{"/p":{"post":{"requestBody":{"content":{
+	  "application/json; charset=utf-8": {"example": {"a": 1}}}}}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := s.Endpoints[0]
+	if !ep.HasBody || ep.OtherBody != "" {
+		t.Errorf("a JSON media type with a parameter is still JSON: %+v", ep)
+	}
+}
+
+func TestRenderScenario_PythonQuotesTheId(t *testing.T) {
+	out := parseShop(t).RenderScenario("shop.py", Python)
+	if !strings.Contains(out, "from urllib.parse import quote") || !strings.Contains(out, `quote(str(ids[key]), safe="")`) {
+		t.Errorf("python should escape the id like JavaScript does:\n%s", out)
+	}
+}

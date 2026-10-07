@@ -87,7 +87,9 @@ func fillDetails(ep *Endpoint, doc *rawDocument, op *rawOp, pathParams []rawPara
 		}
 		sort.Strings(cts)
 		for _, ct := range cts {
-			lower := strings.ToLower(ct)
+			// The media type is what comes before any parameter, such as
+			// "; charset=utf-8".
+			lower := strings.TrimSpace(strings.SplitN(strings.ToLower(ct), ";", 2)[0])
 			if lower == "application/json" || strings.HasSuffix(lower, "+json") {
 				c := content[ct]
 				switch {
