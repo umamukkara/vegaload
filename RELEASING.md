@@ -25,7 +25,8 @@ required.
 
 The `image` job builds the `Dockerfile` for `linux/amd64` and `linux/arm64`
 and pushes it to `ghcr.io/vegaload/vegaload`. The tag `v0.5.0` gives the image
-tags `0.5.0` and `latest`. The Helm chart's default image tag is the version
+tags `0.5.0` and `latest`. A pre-release tag such as `v0.5.0-rc.1` gives only
+`0.5.0-rc.1`, and does not move `latest`. The Helm chart's default image tag is the version
 without the `v`, so the two match. It needs no extra secret: the job uses the
 workflow's own `GITHUB_TOKEN` with `packages: write`.
 

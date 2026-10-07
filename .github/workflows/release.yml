@@ -47,14 +47,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # The tag v0.5.0 becomes the image tags 0.5.0 and latest. The chart's
-      # default image tag is the version without the "v".
+      # default image tag is the version without the "v". A pre-release tag
+      # such as v0.5.0-rc.1 gets only its own tag: the action adds "latest"
+      # for stable versions only.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/vegaload/vegaload
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest
       - uses: docker/build-push-action@v6
         with:
           context: .

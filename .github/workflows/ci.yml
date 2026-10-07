@@ -167,6 +167,9 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+          # A multi-architecture result cannot be loaded into the local
+          # Docker engine, so build it and keep only the cache.
+          outputs: type=cacheonly
       - name: Run the amd64 image
         run: |
           docker buildx build --load --build-arg VERSION=ci -t vegaload:ci .
