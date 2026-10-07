@@ -127,3 +127,30 @@ func TestCheck_WithoutRecorderStillWorks(t *testing.T) {
 		t.Fatalf("Iteration with no recorder: %v", err)
 	}
 }
+
+// A test that the end of the run interrupts is cut off, not failed. It
+// must not be counted, or a slow machine shows a false failed check.
+func TestCheck_InterruptedByRunEnd_IsNotCounted(t *testing.T) {
+	script, err := Load(writeScript(t, "scenario.js", `
+		export default function () {
+			check(1, {"spins": () => { while (true) {} }});
+		}
+	`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	vu, err := script.NewVU(nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewVU: %v", err)
+	}
+	rec := &fakeRecorder{}
+	vu.SetCheckRecorder(rec)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := vu.Iteration(ctx); err == nil {
+		t.Fatal("the iteration should end with an error when the run ends")
+	}
+	if len(rec.got) != 0 {
+		t.Errorf("recorded %v, want nothing for an interrupted check", rec.got)
+	}
+}

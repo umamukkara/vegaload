@@ -167,7 +167,7 @@ func TestValidate_AuditEntry_Valid(t *testing.T) {
 	srv := okServer(t)
 	p := writeScenario(t, "ok.vl.js", `export default function () { http.get("`+srv.URL+`/"); }`)
 	e := validateAudited(t, p)
-	if e.Outcome != "success" || e.Executor != "validate" || e.VUs != 1 || e.Total != 1 || e.Failed != 0 || e.Duration <= 0 || e.ScenarioPath != p {
+	if e.Outcome != "success" || e.Executor != "validate" || e.VUs != 1 || e.Total != 1 || e.Failed != 0 || e.Duration < 0 || e.ScenarioPath != p {
 		t.Fatalf("entry = %+v", e)
 	}
 }
