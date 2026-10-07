@@ -73,6 +73,9 @@ comment.
 
 ## Getting started
 
+For short recipes by task (ramp, CI gate, baseline, steps, data, and more),
+see the [cookbook](./examples/cookbook).
+
 Everything below uses [`examples/sample-app`](./examples/sample-app), a
 small widgets service with injected latency and a ~3% failure rate on
 creates, served over HTTP/1.1, HTTP/2, WebSocket, and gRPC, built
