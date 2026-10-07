@@ -2,10 +2,10 @@
 # Job in the release's namespace. The chart creates no CRD, no Role and no
 # cluster-wide object, so a user with access to one namespace can install it.
 
-# The VegaLoad image. The tag defaults to the chart's appVersion.
-# The project does not publish this image yet. Until it does, build it from
-# the repository's Dockerfile, push it to a registry your cluster can pull
-# from, and set repository and tag below (see the README).
+# The VegaLoad image. The tag defaults to the chart's appVersion. The image is
+# published from release v0.5.0 on. For an earlier version, or to use your own
+# registry, build it from the repository's Dockerfile and set repository and
+# tag below.
 image:
   repository: ghcr.io/vegaload/vegaload
   tag: ""

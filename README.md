@@ -54,8 +54,15 @@ unpack it, and run `vegaload.exe`. Put its folder on your `PATH` to run
 all work. Python scenarios need Python 3 from python.org (VegaLoad finds
 `python3`, `python` or the `py` launcher). Scoop and winget packages are set
 up in [RELEASING.md](./RELEASING.md) and come after the first Windows release.
-A scratch-based Docker image builds from the
-included `Dockerfile` (`docker build .`); it carries nothing but the binary
+A scratch-based Docker image is published to `ghcr.io/vegaload/vegaload` with
+each release from v0.5.0 on (`linux/amd64` and `linux/arm64`):
+
+```
+docker run --rm ghcr.io/vegaload/vegaload:0.5.0 version
+```
+
+You can also build it yourself from the included `Dockerfile`
+(`docker build .`). The image carries nothing but the binary
 and CA certificates, so Python-scripted scenarios (which shell out to a
 local `python3`) need a different base image — see the `Dockerfile`'s
 comment.
@@ -443,9 +450,8 @@ help` for the top-level summary.
 
 A Helm chart in [`charts/vegaload`](./charts/vegaload) runs a load test as a
 Kubernetes Job, close to the service you are testing. It needs no CRD and no
-cluster-wide permissions, only access to one namespace. The project does not
-publish a container image yet, so build one from the `Dockerfile` (see
-[Install](#install)) and set `image.repository` and `image.tag`:
+cluster-wide permissions, only access to one namespace. It uses the published
+image `ghcr.io/vegaload/vegaload` (from v0.5.0):
 
 ```
 helm install smoke ./charts/vegaload --namespace perf \

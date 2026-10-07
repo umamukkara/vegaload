@@ -5,7 +5,9 @@ A release is a version tag. Pushing the tag runs
 
 1. build binaries for Linux, macOS and Windows (amd64 and arm64),
 2. create the GitHub release with archives and `checksums.txt`,
-3. update the Homebrew formula in `vegaload/homebrew-tap`.
+3. update the Homebrew formula in `vegaload/homebrew-tap`,
+4. publish the container image to `ghcr.io/vegaload/vegaload` (a second job,
+   `image`, in the same workflow).
 
 ## One-time setup
 
@@ -18,6 +20,32 @@ A release is a version tag. Pushing the tag runs
 
 The default `GITHUB_TOKEN` cannot push to another repo, so the extra token is
 required.
+
+## Container image
+
+The `image` job builds the `Dockerfile` for `linux/amd64` and `linux/arm64`
+and pushes it to `ghcr.io/vegaload/vegaload`. The tag `v0.5.0` gives the image
+tags `0.5.0` and `latest`. A pre-release tag such as `v0.5.0-rc.1` gives only
+`0.5.0-rc.1`, and does not move `latest`. The Helm chart's default image tag is the version
+without the `v`, so the two match. It needs no extra secret: the job uses the
+workflow's own `GITHUB_TOKEN` with `packages: write`.
+
+Do this once, after the first release that publishes an image:
+
+1. Open the package at `https://github.com/orgs/vegaload/packages/container/package/vegaload`.
+2. In **Package settings**, set the visibility to **Public**. A new package is
+   private, and a cluster cannot pull a private image without a pull secret.
+3. Check that the package is linked to the `vegaload/vegaload` repository (the
+   image carries the label that links it).
+
+Check the image:
+
+```
+docker run --rm ghcr.io/vegaload/vegaload:0.5.0 version
+```
+
+CI builds both architectures on every pull request (the `docker-image` job),
+so a broken `Dockerfile` fails in the pull request.
 
 ## Windows packages
 
