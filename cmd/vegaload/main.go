@@ -45,6 +45,8 @@ func run(args []string) int {
 		return cmdDoctor(args[1:])
 	case "validate":
 		return cmdValidate(args[1:])
+	case "import":
+		return cmdImport(args[1:])
 	case "version":
 		fmt.Printf("vegaload %s\n", version)
 		return 0
@@ -73,6 +75,7 @@ Commands:
   mcp eval   Run the versioned MCP tool-calling eval suite against this binary
   init       Register the MCP server and skill bundles for this project
   validate   Run a scenario once, with one user, to check that it works
+  import     Make a scenario from a recording (import har <file.har>)
   doctor     Check that VegaLoad is set up and working (CLI, agent hosts, target)
   version    Print the vegaload version
   help       Show this help text
