@@ -8,6 +8,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/http1"
 	"github.com/vegaload/vegaload/internal/protocol/http2"
+	"github.com/vegaload/vegaload/internal/protocol/mqtt"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/websocket"
 )
@@ -42,6 +43,13 @@ var drivers = []driverSpec{
 	}},
 	{name: "websocket", build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := websocket.New(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}},
+	{name: "mqtt", options: mqtt.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := mqtt.New(t, to)
 		if err != nil {
 			return nil, err
 		}
