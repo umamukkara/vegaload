@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vegaload/vegaload/internal/hosts"
 )
@@ -33,10 +34,13 @@ func cmdInit(args []string) int {
 	dir := fs.String("dir", ".", "project directory to initialize")
 	force := fs.Bool("force", false, "overwrite files that already exist")
 	output := fs.String("output", "text", "output mode: text or json")
+	editor := fs.String("editor", "all", "editors to set up: all, or a comma list of claude-code, cursor")
+	status := fs.Bool("status", false, "only report what is set up; change nothing; exit 1 if anything is missing")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload init [flags]")
 		fmt.Fprintln(fs.Output(), "Registers VegaLoad's MCP server and skill bundles for this project")
 		fmt.Fprintln(fs.Output(), "(Claude Code: .claude/skills/vegaload, .mcp.json; Cursor: .cursor/rules, .cursor/mcp.json).")
+		fmt.Fprintln(fs.Output(), "Use -editor to set up only one editor, and -status to see what is set up.")
 		fmt.Fprintln(fs.Output(), "Run \"vegaload doctor\" afterwards to check that everything is wired up.")
 		fs.PrintDefaults()
 	}
@@ -51,6 +55,12 @@ func cmdInit(args []string) int {
 		return 2
 	}
 
+	editors, err := parseEditors(*editor)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "vegaload init: -editor: %v\n", err)
+		return 2
+	}
+
 	exePath, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload init: locating the vegaload binary: %v\n", err)
@@ -62,7 +72,13 @@ func cmdInit(args []string) int {
 
 	// The files and their order come from internal/hosts, the same
 	// source `vegaload doctor` checks and repairs.
+	if *status {
+		return initStatus(*dir, exePath, editors, *output)
+	}
 	for _, a := range hosts.ProjectArtifacts() {
+		if !editors[a.Host] {
+			continue
+		}
 		path := filepath.Join(*dir, a.RelPath)
 		var res initResult
 		var err error
@@ -90,6 +106,77 @@ func cmdInit(args []string) int {
 		}
 	}
 	if failed {
+		return 1
+	}
+	return 0
+}
+
+// parseEditors turns the -editor value into a set of host IDs.
+func parseEditors(v string) (map[string]bool, error) {
+	set := map[string]bool{}
+	for _, part := range strings.Split(v, ",") {
+		id := strings.ToLower(strings.TrimSpace(part))
+		switch id {
+		case "":
+		case "all":
+			for _, e := range hosts.ProjectEditors() {
+				set[e] = true
+			}
+		case "claude-code", "cursor":
+			set[id] = true
+		default:
+			return nil, fmt.Errorf("%q is not an editor; want all, claude-code or cursor", part)
+		}
+	}
+	if len(set) == 0 {
+		return nil, fmt.Errorf("no editor given; want all, claude-code or cursor")
+	}
+	return set, nil
+}
+
+// statusRow is one line of `init -status`.
+type statusRow struct {
+	Editor string `json:"editor"`
+	Path   string `json:"path"`
+	Status string `json:"status"`
+	Note   string `json:"note,omitempty"`
+}
+
+// initStatus reports what init set up, without changing any file.
+// It returns 0 when every file is in place and 1 when something is not.
+func initStatus(dir, exePath string, editors map[string]bool, output string) int {
+	var rows []statusRow
+	allOK := true
+	for _, a := range hosts.ProjectArtifacts() {
+		if !editors[a.Host] {
+			continue
+		}
+		st, note := hosts.ArtifactStatus(dir, a, exePath)
+		if st != hosts.StatusOK {
+			allOK = false
+		}
+		rows = append(rows, statusRow{Editor: a.Host, Path: filepath.Join(dir, a.RelPath), Status: st, Note: note})
+	}
+	if output == "json" {
+		if err := json.NewEncoder(os.Stdout).Encode(rows); err != nil {
+			fmt.Fprintf(os.Stderr, "vegaload init: %v\n", err)
+			return 1
+		}
+	} else {
+		for _, r := range rows {
+			line := fmt.Sprintf("%-13s %-13s %s", r.Editor, r.Status, r.Path)
+			if r.Note != "" {
+				line += "  (" + r.Note + ")"
+			}
+			fmt.Println(line)
+		}
+		if allOK {
+			fmt.Println("Everything is set up.")
+		} else {
+			fmt.Println("Something is not set up. Run \"vegaload init -force\" to fix it.")
+		}
+	}
+	if !allOK {
 		return 1
 	}
 	return 0

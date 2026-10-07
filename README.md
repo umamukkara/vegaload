@@ -676,6 +676,25 @@ Cursor afterward and the agent has eight tools — `create_scenario`,
 command shown above and parsing its `-output json` result; there is no
 agent-only path that skips the CLI.
 
+To set up only one editor, use `-editor`:
+
+```
+./vegaload init -editor cursor
+./vegaload init -editor claude-code,cursor
+```
+
+To see what is set up, without changing anything, use `-status`:
+
+```
+./vegaload init -status
+```
+
+It lists each file as `ok`, `missing`, `outdated` (the rules file differs from
+the one this binary ships), `other binary` (the MCP entry points to another
+copy of `vegaload`), `wrong args` (the MCP entry does not run `mcp serve`) or
+`invalid` (the file cannot be read). It exits 1 if anything is not `ok`, so a script can check
+it. Run `vegaload init -force` to fix what it reports.
+
 By default the MCP server talks over stdio. To use it over the network (for
 example from a container), run it over HTTP:
 
@@ -749,7 +768,7 @@ this same walkthrough as a standalone, copy-pasteable script.
 | `vegaload diagnose`      | Print environment info, or explain a report's results                |
 | `vegaload mcp serve`     | Run an MCP server over stdio (or `-http addr`) for agent-native use   |
 | `vegaload mcp eval`      | Run the versioned MCP tool-calling eval suite against this binary     |
-| `vegaload init`          | Register the MCP server and skill bundles for the current project     |
+| `vegaload init`          | Register the MCP server and skill bundles (`-editor`, `-status`)      |
 | `vegaload doctor`        | Check the CLI, agent hosts, and a target; `-fix` repairs what it can   |
 
 Every command supports `-output text` (default), `json`, or (`run` only)

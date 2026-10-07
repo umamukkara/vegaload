@@ -110,6 +110,9 @@ func TestProjectArtifactsOrderMatchesInit(t *testing.T) {
 		if a.RelPath != want[i] {
 			t.Errorf("artifact %d = %s, want %s", i, a.RelPath, want[i])
 		}
+		if a.Host != "claude-code" && a.Host != "cursor" {
+			t.Errorf("artifact %s has host %q", a.RelPath, a.Host)
+		}
 		if a.Kind == "rules" && a.Content == "" {
 			t.Errorf("rules artifact %s has no content", a.RelPath)
 		}
@@ -156,5 +159,24 @@ func TestClaudeDesktopOnWindows(t *testing.T) {
 	want = filepath.Join(env.Home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
 	if got := cd.Configs(env)[0].Path; got != want {
 		t.Errorf("fallback config = %s, want %s", got, want)
+	}
+}
+
+func TestArtifactStatus_MCPArgsMustBeMCPServe(t *testing.T) {
+	dir := t.TempDir()
+	a := Artifact{Kind: "mcp", Host: "cursor", RelPath: "mcp.json"}
+	cases := []struct{ body, want string }{
+		{`{"mcpServers":{"vegaload":{"command":"/bin/vl","args":["mcp","serve"]}}}`, StatusOK},
+		{`{"mcpServers":{"vegaload":{"command":"/bin/vl","args":["run"]}}}`, StatusBadArgs},
+		{`{"mcpServers":{"vegaload":{"command":"/bin/vl"}}}`, StatusBadArgs},
+		{`{"mcpServers":{"vegaload":{"command":"/other","args":["mcp","serve"]}}}`, StatusOtherExe},
+		{`{"mcpServers":{}}`, StatusMissing},
+		{`{bad`, StatusInvalid},
+	}
+	for _, c := range cases {
+		write(t, filepath.Join(dir, "mcp.json"), c.body)
+		if got, _ := ArtifactStatus(dir, a, "/bin/vl"); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.body, got, c.want)
+		}
 	}
 }
