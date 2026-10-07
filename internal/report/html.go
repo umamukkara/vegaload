@@ -42,6 +42,7 @@ func renderHTML(res *Result) string {
 	b.WriteString(thresholdsSection(res))
 	b.WriteString(baselineSection(res))
 	b.WriteString(checksSection(res))
+	b.WriteString(stepsSection(res))
 
 	fmt.Fprintf(&b, "<section class=\"latency\">\n<h2>Latency</h2>\n<table>\n<tr><th>min</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>max</th><th>mean</th></tr>\n")
 	fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n</table>\n</section>\n",
@@ -143,6 +144,27 @@ func checksSection(res *Result) string {
 		}
 		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%.2f%%</td><td>%d</td><td>%d</td></tr>\n",
 			cls, word, html.EscapeString(c.Name), 100*float64(c.Passes)/float64(c.Passes+c.Fails), c.Passes, c.Fails)
+	}
+	b.WriteString("</table>\n</section>\n")
+	return b.String()
+}
+
+// stepsSection is the per-step table (FR-CLI-18).
+func stepsSection(res *Result) string {
+	if len(res.Steps) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<section class=\"steps\">\n<h2>Steps</h2>\n")
+	b.WriteString("<table>\n<tr><th>result</th><th>step</th><th>runs</th><th>failed</th><th>error rate</th><th>p50</th><th>p95</th><th>max</th></tr>\n")
+	for _, st := range res.Steps {
+		word, cls := "PASS", "pass"
+		if st.Failed > 0 {
+			word, cls = "FAIL", "fail"
+		}
+		fmt.Fprintf(&b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%d</td><td>%d</td><td>%.2f%%</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+			cls, word, html.EscapeString(st.Name), st.Total, st.Failed, st.ErrorRate*100,
+			st.Latency.P50.Round(1e3), st.Latency.P95.Round(1e3), st.Latency.Max.Round(1e3))
 	}
 	b.WriteString("</table>\n</section>\n")
 	return b.String()

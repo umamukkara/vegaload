@@ -141,7 +141,7 @@ func runTestTool(exePath string) Tool {
 				"yes":            map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
 				"report_path":    map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
 				"no_report":      map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
-				"thresholds":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed)"},
+				"thresholds":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed). To target one named step() of a scenario, add a selector, e.g. \"p95{step=\\\"login\\\"} < 300ms\""},
 				"baseline_path":  map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
 				"data_files":     dataFilesSchema,
 				"env":            envSchema,

@@ -39,6 +39,13 @@ type Result struct {
 	// when the run had no baseline.
 	Baseline *BaselineResult `json:"baseline,omitempty"`
 
+	// Steps is the latency and error rate of each named step the scenario
+	// ran with step() (FR-CLI-18), in the order each name was first seen.
+	// It is omitted when the scenario used no steps, so reports from
+	// before steps existed look exactly as before. A step that throws is a
+	// failed step, and it also fails its iteration.
+	Steps []StepResult `json:"steps,omitempty"`
+
 	// Checks is the pass and fail count of each named check the scenario
 	// made with check() (FR-CLI-12), in the order each name was first
 	// seen. It is omitted when the scenario made no checks. A failed
@@ -46,6 +53,26 @@ type Result struct {
 	// is its own measure, which a threshold can judge through the
 	// check_rate metric.
 	Checks []CheckResult `json:"checks,omitempty"`
+}
+
+// StepResult is one named step's totals across the whole run: how many
+// times it ran, how many of those failed, and its latency.
+type StepResult struct {
+	Name      string  `json:"name"`
+	Total     int64   `json:"total"`
+	Failed    int64   `json:"failed"`
+	ErrorRate float64 `json:"error_rate"`
+	Latency   Latency `json:"latency"`
+}
+
+// Step returns the step with the given name, if the run had one.
+func (r *Result) Step(name string) (StepResult, bool) {
+	for _, s := range r.Steps {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return StepResult{}, false
 }
 
 // CheckResult is one named check's totals across the whole run.
@@ -77,8 +104,11 @@ func (r *Result) CheckRate() (float64, bool) {
 // VegaLoad evaluated it. Value and Observed are strings so durations
 // ("300ms") and plain numbers share one field.
 type ThresholdResult struct {
-	Name     string `json:"name"`
-	Metric   string `json:"metric"`
+	Name   string `json:"name"`
+	Metric string `json:"metric"`
+	// Step is the step the threshold judges (FR-CLI-18). It is empty for a
+	// threshold on the whole run.
+	Step     string `json:"step,omitempty"`
 	Operator string `json:"operator"`
 	Value    string `json:"value"`
 	Observed string `json:"observed"`

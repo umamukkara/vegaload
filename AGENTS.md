@@ -58,6 +58,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - `vegaload new --from-openapi <spec>` — generate a starter scenario from an OpenAPI spec.
 - `vegaload run -threshold "p95 < 300ms" ...` — make a run pass or fail on its own numbers. A breach exits 3; `-thresholds <file>` loads them from JSON.
 - In scenarios, `check(value, {name: test})` counts named assertions without failing the iteration; gate with `-threshold "check_rate >= 99%"`.
+- In scenarios, `step(name, fn)` (Python: `with step(name):`) names a stage; the summary, JSON and HTML show latency and error rate per step, and `-threshold 'p95{step="login"} < 300ms'` gates one step.
 - `vegaload validate <file>` — run a scenario once, with one user, to check that it works before a real run. Exit 0 valid, 1 not valid.
 - `vegaload run -baseline <report.json> -max-regression <percent>` — compare the run with a baseline file you supply. Exit 3 if p95 or the error rate is worse by more than that percent. There is no baseline store.
 - `vegaload run -junit <file>` — also write JUnit XML: each threshold, check and the baseline gate is one test case. Inside GitHub Actions, `run` also appends a Markdown summary to the job page (`-no-step-summary` turns that off).

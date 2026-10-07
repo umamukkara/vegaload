@@ -20,7 +20,10 @@ couldn't also do.
   describes applies to every one of those calls, not just a `target`.
   Scripts can also call `check(value, {name: test})` to count named
   assertions without failing the iteration; `run_test`'s `thresholds` can
-  gate on them with the `check_rate` metric.
+  gate on them with the `check_rate` metric. They can also wrap stages in
+  `step(name, fn)` (Python: `with step(name):`) so results show latency and
+  error rate per stage, and a threshold can target one, e.g.
+  `p95{step="login"} < 300ms`.
 - **run_test** — run a load test, either a scenario file or a protocol-direct
   target (`target` + `protocol`, e.g. `http1`). Pick an `executor`: `fixed-vus`
   (steady concurrency), `ramp` (stages that climb then fall), `step` (stages

@@ -12,6 +12,7 @@ import (
 type fileEntry struct {
 	Name     string          `json:"name"`
 	Metric   string          `json:"metric"`
+	Step     string          `json:"step"`
 	Operator string          `json:"operator"`
 	Value    json.RawMessage `json:"value"`
 }
@@ -22,6 +23,7 @@ type fileEntry struct {
 // command's output:
 //
 //	[{"name": "fast", "metric": "p95", "operator": "<", "value": "300ms"}]
+//	[{"metric": "p95", "step": "login", "operator": "<", "value": "300ms"}]
 //	{"thresholds": [ ...same list... ]}
 //	{"latency_p95": "300ms", "error_rate": 0.015}
 //
@@ -82,7 +84,11 @@ func fromEntries(data []byte) ([]Threshold, error) {
 		if err != nil {
 			return nil, fmt.Errorf("threshold %d: value: %w", i+1, err)
 		}
-		expr := e.Metric + " " + e.Operator + " " + val
+		metric := e.Metric
+		if e.Step != "" {
+			metric += fmt.Sprintf("{step=%q}", e.Step)
+		}
+		expr := metric + " " + e.Operator + " " + val
 		if e.Name != "" {
 			expr = e.Name + ": " + expr
 		}
