@@ -350,9 +350,10 @@ func (v *VU) newCheckFunc(vm *goja.Runtime) func(goja.FunctionCall) goja.Value {
 					// The run ended while this test ran, or just before.
 					// A test that fails now was cut off. It did not fail.
 					// Counting it would add false failed checks, one for
-					// each VU that was busy at the end. A test that
-					// passed is still counted.
-					continue
+					// each VU that was busy at the end. Stop here, as
+					// before: the tests after it were cut off too. Tests
+					// before it that passed are already counted.
+					return vm.ToValue(false)
 				}
 			}
 			if v.checks != nil {

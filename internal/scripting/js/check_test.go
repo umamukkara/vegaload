@@ -177,8 +177,20 @@ const mixedChecks = `
 	}
 `
 
+// The first test fails after the deadline, so the run stops there. A test
+// that passed before it stays counted. Tests after it are not run.
+const orderedChecks = `
+	export default function () {
+		check(1, {
+			"passes first": () => true,
+			"fails late": () => false,
+			"never counted": () => true,
+		});
+	}
+`
+
 func TestCheck_FailuresAfterDeadlineAreNotCounted_EvenBeforeTheTimerFires(t *testing.T) {
-	script, err := Load(writeScript(t, "scenario.js", mixedChecks))
+	script, err := Load(writeScript(t, "scenario.js", orderedChecks))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -192,8 +204,8 @@ func TestCheck_FailuresAfterDeadlineAreNotCounted_EvenBeforeTheTimerFires(t *tes
 	if err := vu.Iteration(ctx); err != nil {
 		t.Fatalf("Iteration: %v", err)
 	}
-	if len(rec.got) != 1 || rec.got[0] != "passes=pass" {
-		t.Errorf("recorded %v, want only the passing check", rec.got)
+	if len(rec.got) != 1 || rec.got[0] != "passes first=pass" {
+		t.Errorf("recorded %v, want only the test that passed before the cut-off", rec.got)
 	}
 }
 
