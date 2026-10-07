@@ -36,6 +36,11 @@
 //	            break
 //	    conn.close()
 //
+// The tcp, udp, mqtt and kafka globals work the same way: a call such as
+// tcp.send(url, body="PING\r\n") or kafka.produce(url, topic="t", value="v")
+// is one "proto" request, performed on the Go side by netapi.ProtoClient, and
+// the reply comes back as plain data (a dict that also allows r.ok).
+//
 // A Python subprocess can't hold a Go value (an *http.Client, a websocket
 // connection), so http and ws don't talk to the network themselves —
 // every call is proxied back over the same stdin/stdout pipe as a small
@@ -75,6 +80,13 @@ var pythonBin = "python3"
 // another value, that exact command is used.
 const defaultPythonBin = "python3"
 
+// harnessSource is the harness with the list of tcp, udp, mqtt and kafka
+// functions filled in from netapi, so Python and JavaScript offer the same.
+var harnessSource = func() string {
+	list, _ := json.Marshal(netapi.ProtoFunctions())
+	return strings.Replace(harnessTemplate, "__PROTO_FUNCS__", string(list), 1)
+}()
+
 // findInterpreter returns the interpreter command to run.
 func findInterpreter() (pyfind.Interpreter, error) {
 	if pythonBin != defaultPythonBin {
@@ -91,7 +103,7 @@ func findInterpreter() (pyfind.Interpreter, error) {
 	return in, nil
 }
 
-// harnessSource is run as `python3 -c harnessSource <script path>`. It
+// harnessTemplate is run, once its protocol list is filled in, as `python3 -c harnessSource <script path>`. It
 // loads the scenario module once (with `http`/`ws` already present as
 // globals), validates it, then answers a "ready" message and loops,
 // running iteration() once per "iteration" command and answering a
@@ -99,7 +111,7 @@ func findInterpreter() (pyfind.Interpreter, error) {
 // iteration, back over the same pipe as a "call"/"call_result" exchange.
 // See the package doc comment for a worked example and VU.Iteration for
 // the Go side of this same protocol.
-const harnessSource = `
+const harnessTemplate = `
 import sys, json, runpy, itertools
 
 _next_id = itertools.count(1)
@@ -184,6 +196,46 @@ class WS:
 
 http = HTTP()
 ws = WS()
+
+class _Reply(dict):
+    """The answer of a tcp, udp, mqtt or kafka call. r.ok and r["ok"] mean
+    the same. Nested messages and records are _Reply too, so
+    r.messages[0].body works."""
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+def _wrap(value):
+    if isinstance(value, dict):
+        return _Reply({k: _wrap(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return [_wrap(v) for v in value]
+    return value
+
+class _Proto:
+    """tcp, udp, mqtt and kafka: one call per action, such as
+    tcp.send(url, body="PING\\r\\n", until="\\r\\n") or
+    kafka.produce(url, topic="t", value="v"). Options are keyword arguments.
+    A word Python reserves gets a trailing underscore: from_="end". A call
+    that fails on the network does not raise. It returns a reply with
+    ok False and error set. A call that is set up wrongly raises
+    VegaloadError."""
+    def __init__(self, ns, funcs):
+        for fn in funcs:
+            setattr(self, fn, self._make(ns + "." + fn))
+
+    @staticmethod
+    def _make(name):
+        def call(url, **options):
+            return _wrap(_call("proto", fn=name, url=url, args=options))
+        call.__name__ = name
+        return call
+
+_PROTO_FUNCS = __PROTO_FUNCS__
+_PROTOS = {ns: _Proto(ns, funcs) for ns, funcs in _PROTO_FUNCS.items()}
+tcp, udp, mqtt, kafka = _PROTOS["tcp"], _PROTOS["udp"], _PROTOS["mqtt"], _PROTOS["kafka"]
 
 class _Env:
     """env.NAME, env["NAME"] or env.get("NAME", default): an environment
@@ -293,7 +345,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws, "check": check, "env": env, "data": data},
+            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "check": check, "env": env, "data": data},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:
@@ -378,6 +430,10 @@ type message struct {
 	Handle   int               `json:"handle"`
 	Data     string            `json:"data"`
 	Text     bool              `json:"text"`
+	// Fn and Args are a "proto" call: the function (such as "tcp.send")
+	// and its keyword arguments.
+	Fn   string         `json:"fn"`
+	Args map[string]any `json:"args"`
 	// Results is the batch of outcomes on a "check" call.
 	Results []checkOutcome `json:"results"`
 	// Action is the operation on a "data" call: next, random or length.
@@ -408,6 +464,7 @@ type VU struct {
 	stderr  *bytes.Buffer
 
 	http        *netapi.HTTPClient
+	proto       *netapi.ProtoClient
 	safetyCheck netapi.SafetyCheck
 	timeout     time.Duration
 	ctx         context.Context //nolint:containedctx // set per-Iteration; dispatchCall reads it synchronously within that same iteration to build call/dial contexts.
@@ -471,6 +528,7 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...
 		scanner:     bufio.NewScanner(stdout),
 		stderr:      &stderr,
 		http:        netapi.NewHTTPClient(check, timeout),
+		proto:       netapi.NewProtoClient(check, timeout),
 		safetyCheck: check,
 		timeout:     timeout,
 		conns:       make(map[int]*netapi.WSConn),
@@ -646,6 +704,8 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 			}
 		}
 		return map[string]interface{}{}, nil
+	case "proto":
+		return v.callProto(msg)
 	case "env":
 		return v.callEnv(msg), nil
 	case "data":
@@ -661,6 +721,22 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unknown call op %q", msg.Op)
 	}
+}
+
+// callProto makes one tcp, udp, mqtt or kafka call and returns its reply as
+// plain data. A network failure is a reply with ok false. A call set up
+// wrongly, or refused by the safety check, is an error the script sees as
+// VegaloadError.
+func (v *VU) callProto(msg message) (interface{}, error) {
+	pc, err := netapi.ProtoCallFromArgs(msg.Fn, msg.URL, msg.Args)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", msg.Fn, err)
+	}
+	reply, err := v.proto.Call(v.ctx, msg.Fn, pc)
+	if err != nil {
+		return nil, err
+	}
+	return reply.Fields(), nil
 }
 
 // callEnv answers env.NAME: the variable's value if the run exposed it.
@@ -785,5 +861,6 @@ func (v *VU) Close() error {
 		_ = conn.Close()
 	}
 	v.http.Close()
+	v.proto.Close()
 	return v.cmd.Wait()
 }
