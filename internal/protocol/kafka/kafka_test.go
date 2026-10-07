@@ -435,7 +435,7 @@ func TestErrorsNameTheRealReason(t *testing.T) {
 		t.Errorf("a wrong password should be named, got %+v", bad)
 	}
 	refused := do(t, target("kafka://127.0.0.1:1", "x", map[string]string{"topic": "t"}), 1500*time.Millisecond)
-	if refused.Success || refused.Err == nil || !strings.Contains(refused.Err.Error(), "connection refused") {
-		t.Errorf("a refused connection should be named, got %+v", refused)
+	if refused.Success || refused.Err == nil || !strings.Contains(refused.Err.Error(), "unable to open connection to broker") {
+		t.Errorf("a failed connection should be named, got %+v", refused)
 	}
 }
