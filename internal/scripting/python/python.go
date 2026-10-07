@@ -112,7 +112,7 @@ func findInterpreter() (pyfind.Interpreter, error) {
 // See the package doc comment for a worked example and VU.Iteration for
 // the Go side of this same protocol.
 const harnessTemplate = `
-import sys, json, runpy, itertools
+import sys, json, runpy, itertools, time
 
 _next_id = itertools.count(1)
 
@@ -328,6 +328,36 @@ def check(value, tests):
         _call("check", results=outcomes)
     return all_passed
 
+class _Step(object):
+    """A named step: a context manager and a decorator-free callable form."""
+    def __init__(self, name):
+        if not isinstance(name, str) or name == "":
+            raise TypeError("step: want step(name) or step(name, fn)")
+        self._name = name
+        self._t0 = None
+
+    def __enter__(self):
+        self._t0 = time.monotonic()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        us = int((time.monotonic() - self._t0) * 1000000)
+        # A step that raises is a failed step. The error carries on, so the
+        # iteration fails too.
+        _call("step", name=self._name, duration_us=us, ok=exc_type is None)
+        return False
+
+def step(name, fn=None):
+    """step(name) is a context manager: "with step('login'):". step(name, fn)
+    runs fn and returns its value. Latency and errors are reported per name."""
+    s = _Step(name)
+    if fn is None:
+        return s
+    if not callable(fn):
+        raise TypeError("step: the second argument must be a function")
+    with s:
+        return fn()
+
 def _respond_ready(ok, error=None):
     msg = {"type": "ready", "ok": ok}
     if error is not None:
@@ -345,7 +375,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "check": check, "env": env, "data": data},
+            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "check": check, "step": step, "env": env, "data": data},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:
@@ -436,6 +466,9 @@ type message struct {
 	Args map[string]any `json:"args"`
 	// Results is the batch of outcomes on a "check" call.
 	Results []checkOutcome `json:"results"`
+	// DurationUs is how long a "step" call took, in microseconds. OK says
+	// whether the step finished without an error.
+	DurationUs int64 `json:"duration_us"`
 	// Action is the operation on a "data" call: next, random or length.
 	Action string `json:"action"`
 	// TimeoutMs is a pointer because Python's None (no timeout given)
@@ -474,6 +507,8 @@ type VU struct {
 
 	// checks receives every check() outcome (FR-CLI-12). It may be nil.
 	checks netapi.CheckRecorder
+	// steps receives every step() outcome (FR-CLI-18). It may be nil.
+	steps netapi.StepRecorder
 
 	// inputs is what the `env` and `data` globals read (FR-CLI-17). It
 	// may be nil, which exposes nothing.
@@ -483,6 +518,10 @@ type VU struct {
 // SetCheckRecorder sets where this VU reports the outcome of every
 // check() its script makes. Call it before the first Iteration.
 func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
+
+// SetStepRecorder sets where this VU reports the timing and outcome of
+// every step() its script runs. Call it before the first Iteration.
+func (v *VU) SetStepRecorder(rec netapi.StepRecorder) { v.steps = rec }
 
 // Option changes how NewVU builds a VU. An option is needed, rather than a
 // setter called afterwards, when the script's top-level code has to see it:
@@ -702,6 +741,12 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 				}
 				v.checks.RecordCheck(r.Name, r.OK)
 			}
+		}
+		return map[string]interface{}{}, nil
+	case "step":
+		if v.steps != nil && !(!msg.OK && netapi.RunEnded(v.ctx)) {
+			// A step cut off by the end of the run did not fail.
+			v.steps.RecordStep(msg.Name, time.Duration(msg.DurationUs)*time.Microsecond, !msg.OK)
 		}
 		return map[string]interface{}{}, nil
 	case "proto":

@@ -108,6 +108,7 @@ func validateScenario(cfg *runConfig) *validateResult {
 	res := &validateResult{Scenario: cfg.ScenarioPath}
 	collector := report.NewCollector()
 	cfg.checkRecorder = collector
+	cfg.stepRecorder = collector
 
 	start := time.Now()
 	finish := func(stage string, err error) *validateResult {

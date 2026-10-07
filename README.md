@@ -520,7 +520,9 @@ Each threshold is an optional `name:`, a metric, an operator (`<`, `<=`,
 `>`, `>=`) and a value. The metrics are `p50`, `p90`, `p95`, `p99`, `mean`,
 `min`, `max` (durations such as `300ms`), `error_rate` (a fraction like
 `0.01` or a percentage like `1%`), `rps`, `failed`, `total` and `check_rate` (the share of `check()` calls
-that passed; see below). Every
+that passed; see below). A threshold can
+target one named step: `p95{step="login"} < 300ms` (see Steps below;
+`check_rate` cannot). Every
 threshold is judged once, on the finished run. A run that completed no
 requests fails all of them.
 
@@ -550,6 +552,26 @@ fails. Gate on them with `-threshold "check_rate >= 99%"`. A run with no
 checks fails that threshold. Use fixed check names. A run keeps at most 100 distinct
 names; any more are counted together as `(other checks)`. See
 `examples/scenarios/checks.vl.js`.
+
+#### Steps
+
+Name the stages of a flow with `step(name, fn)` and the summary, the JSON
+output, the HTML report and the GitHub step summary show the latency and
+error rate of each one, so you can see which stage is slow.
+
+```js
+const token = step("login", () => http.post(base + "/login", { body }).json().token);
+step("checkout", () => { /* ... */ });
+```
+
+In Python, `with step("login"):` times a block, and `step("login", fn)` runs
+a function and returns its value. A step that throws (or raises) is a failed
+step, and the error carries on, so the iteration fails too. Steps can nest;
+each is counted on its own. Gate on one step with a selector:
+`-threshold 'p95{step="login"} < 300ms'`. A step that never ran fails its
+threshold. Step names with a quote mark in them cannot be targeted. A run
+keeps at most 100 distinct step names; any more are counted together as
+`(other steps)`. See `examples/scenarios/crud-flow.vl.js`.
 
 #### JUnit XML for CI
 

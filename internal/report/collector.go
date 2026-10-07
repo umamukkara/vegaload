@@ -49,6 +49,15 @@ type Collector struct {
 	checkMu    sync.Mutex
 	checkOrder []string
 	checks     map[string]*CheckResult
+
+	// steps holds every run of each named step (FR-CLI-18), guarded by
+	// stepMu for the same reason as checks. Each run is packed in one
+	// uint64 (duration in nanoseconds shifted left by one, with the lowest
+	// bit set when the step failed), so a million iterations of three
+	// steps stay near 24 MB.
+	stepMu    sync.Mutex
+	stepOrder []string
+	steps     map[string][]uint64
 }
 
 // NewCollector returns a Collector ready to record a run that is
@@ -112,6 +121,89 @@ func (c *Collector) RecordCheck(name string, passed bool) {
 	}
 }
 
+// MaxStepNames bounds how many distinct step names a run keeps. Further
+// names are counted together under OtherStepsName.
+const MaxStepNames = 100
+
+// OtherStepsName is the bucket for step names past MaxStepNames.
+const OtherStepsName = "(other steps)"
+
+// RecordStep counts one run of the named step (FR-CLI-18). It implements
+// netapi.StepRecorder and is safe for concurrent use.
+func (c *Collector) RecordStep(name string, d time.Duration, failed bool) {
+	// A step name is text the script chose, so it may carry a secret the
+	// script read (FR-CLI-17).
+	name = secrets.Redact(name)
+	if d < 0 {
+		d = 0
+	}
+	packed := uint64(d) << 1
+	if failed {
+		packed |= 1
+	}
+	c.stepMu.Lock()
+	defer c.stepMu.Unlock()
+	if c.steps == nil {
+		c.steps = map[string][]uint64{}
+	}
+	runs, known := c.steps[name]
+	if !known && len(c.steps) >= MaxStepNames {
+		// A name built from an id would grow this map with every
+		// iteration. Past the cap, new names share one bucket.
+		name = OtherStepsName
+		runs, known = c.steps[name]
+	}
+	if !known {
+		c.stepOrder = append(c.stepOrder, name)
+	}
+	c.steps[name] = append(runs, packed)
+}
+
+// snapshotSteps computes each step's totals and latency, in first-seen
+// order.
+func (c *Collector) snapshotSteps() []StepResult {
+	c.stepMu.Lock()
+	order := append([]string(nil), c.stepOrder...)
+	runs := make(map[string][]uint64, len(order))
+	for _, n := range order {
+		runs[n] = append([]uint64(nil), c.steps[n]...)
+	}
+	c.stepMu.Unlock()
+	if len(order) == 0 {
+		return nil
+	}
+	out := make([]StepResult, 0, len(order))
+	for _, n := range order {
+		packed := runs[n]
+		durations := make([]time.Duration, len(packed))
+		var sum time.Duration
+		var failed int64
+		for i, p := range packed {
+			durations[i] = time.Duration(p >> 1)
+			sum += durations[i]
+			if p&1 == 1 {
+				failed++
+			}
+		}
+		sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+		sr := StepResult{Name: n, Total: int64(len(durations)), Failed: failed}
+		if len(durations) > 0 {
+			sr.ErrorRate = float64(failed) / float64(len(durations))
+			sr.Latency = Latency{
+				Min:  durations[0],
+				Max:  durations[len(durations)-1],
+				Mean: sum / time.Duration(len(durations)),
+				P50:  percentile(durations, 50),
+				P90:  percentile(durations, 90),
+				P95:  percentile(durations, 95),
+				P99:  percentile(durations, 99),
+			}
+		}
+		out = append(out, sr)
+	}
+	return out
+}
+
 // snapshotChecks returns a copy of the check totals, in first-seen order.
 func (c *Collector) snapshotChecks() []CheckResult {
 	c.checkMu.Lock()
@@ -155,6 +247,7 @@ func (c *Collector) Finish(executor string, elapsed time.Duration) *Result {
 		Elapsed:   elapsed,
 		Total:     int64(len(samples)),
 		Checks:    c.snapshotChecks(),
+		Steps:     c.snapshotSteps(),
 	}
 	if len(samples) == 0 {
 		return res

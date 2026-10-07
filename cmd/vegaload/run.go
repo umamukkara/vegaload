@@ -113,6 +113,8 @@ type runConfig struct {
 	// (FR-CLI-12). runScenarioWithCollector sets it to the run's
 	// collector; it is not a flag.
 	checkRecorder netapi.CheckRecorder
+	// stepRecorder is where scripted VUs report step() timings (FR-CLI-18).
+	stepRecorder netapi.StepRecorder
 
 	Executor string // fixed-vus, ramp, step, constant-arrival-rate
 	VUs      int
@@ -500,6 +502,7 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 				return nil, err
 			}
 			vu.SetCheckRecorder(cfg.checkRecorder)
+			vu.SetStepRecorder(cfg.stepRecorder)
 			return vu, nil
 		})
 		// Validate the script once, up front, the same way
@@ -522,6 +525,7 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 			return nil, err
 		}
 		vu.SetCheckRecorder(cfg.checkRecorder)
+		vu.SetStepRecorder(cfg.stepRecorder)
 		return vu, nil
 	})
 	if _, err := pool.borrowAndRelease(); err != nil {
@@ -549,6 +553,7 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	// Scripts report their check() outcomes straight to the collector
 	// (FR-CLI-12).
 	cfg.checkRecorder = collector
+	cfg.stepRecorder = collector
 
 	iter, closeFn, err := buildIteration(cfg)
 	if err != nil {
@@ -866,6 +871,7 @@ func printResult(w io.Writer, r *report.Result) {
 	fmt.Fprintf(w, "  failed:   %d\n", r.Failed)
 	fmt.Fprintf(w, "  mean:     %s\n", r.Latency.Mean)
 	printChecks(w, r)
+	printSteps(w, r)
 	printThresholds(w, r)
 	printBaseline(w, r)
 }
@@ -909,6 +915,24 @@ func printChecks(w io.Writer, r *report.Result) {
 		}
 		pct := 100 * float64(c.Passes) / float64(c.Passes+c.Fails)
 		fmt.Fprintf(w, "  %s  %s  %.2f%%  (%d passed, %d failed)\n", status, c.Name, pct, c.Passes, c.Fails)
+	}
+}
+
+// printSteps writes the per-step block of the text summary, if the
+// scenario named any steps (FR-CLI-18).
+func printSteps(w io.Writer, r *report.Result) {
+	if len(r.Steps) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nsteps")
+	for _, st := range r.Steps {
+		status := "PASS"
+		if st.Failed > 0 {
+			status = "FAIL"
+		}
+		fmt.Fprintf(w, "  %s  %s  %d runs, %d failed (%.2f%%)  p50 %s  p95 %s  max %s\n",
+			status, st.Name, st.Total, st.Failed, st.ErrorRate*100,
+			st.Latency.P50.Round(time.Microsecond), st.Latency.P95.Round(time.Microsecond), st.Latency.Max.Round(time.Microsecond))
 	}
 }
 

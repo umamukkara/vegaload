@@ -41,6 +41,13 @@ func MarkdownSummary(res *Result) string {
 			fmt.Fprintf(&b, "| %s | %s | %d | %d |\n", passWord(c.Fails == 0), mdCell(c.Name), c.Passes, c.Fails)
 		}
 	}
+	if len(res.Steps) > 0 {
+		b.WriteString("\n### Steps\n\n| Result | Step | Runs | Failed | Error rate | p50 | p95 | Max |\n|---|---|---:|---:|---:|---:|---:|---:|\n")
+		for _, st := range res.Steps {
+			fmt.Fprintf(&b, "| %s | %s | %d | %d | %.2f%% | %s | %s | %s |\n", passWord(st.Failed == 0), mdCell(st.Name), st.Total, st.Failed,
+				st.ErrorRate*100, st.Latency.P50.Round(time.Microsecond), st.Latency.P95.Round(time.Microsecond), st.Latency.Max.Round(time.Microsecond))
+		}
+	}
 	if bl := res.Baseline; bl != nil {
 		verdict := "within the baseline"
 		if !bl.Passed {

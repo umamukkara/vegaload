@@ -171,7 +171,10 @@ vegaload run -vus 5 -duration 10s http_ws_chain.py   # same flow, Python
 `crud-flow.vl.js` (and its Python twin, `crud_flow.py`) is a session in one
 scenario: create a widget, read it back by the id the create returned, then
 list all widgets and check the new one is in the list. Each step uses what
-the one before it returned, which a single fixed `-target` cannot do:
+the one before it returned, which a single fixed `-target` cannot do. The
+three stages are named `step()`s, so the summary shows latency and error
+rate for create, read and list on their own, and you can gate one, for
+example `-threshold 'p95{step="list"} < 300ms'`:
 
 ```
 vegaload run -vus 5 -duration 10s crud-flow.vl.js

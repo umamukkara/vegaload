@@ -9,6 +9,11 @@
 // percentiles, error rate, request rate and counts VegaLoad itself
 // measured. It never looks outside the run, and it produces a verdict
 // (pass or fail) and nothing else.
+//
+// A threshold can judge one named step of a scenario (FR-CLI-18) instead of
+// the whole run, by adding a selector after the metric:
+//
+//	login-fast: p95{step="login"} < 300ms
 package threshold
 
 import (
@@ -57,8 +62,11 @@ func MetricNames() []string {
 
 // Threshold is one parsed pass/fail threshold.
 type Threshold struct {
-	Name     string
-	Metric   string
+	Name   string
+	Metric string
+	// Step is the named step this threshold judges (FR-CLI-18). It is empty
+	// for a threshold on the whole run.
+	Step     string
 	Operator string
 	// Value is the canonical text of the limit: a duration such as
 	// "300ms", or a plain number such as "0.01".
@@ -78,20 +86,37 @@ func Parse(expr string) (Threshold, error) {
 	}
 
 	name := ""
-	if n, rest, ok := strings.Cut(expr, ":"); ok {
-		name = strings.TrimSpace(n)
-		expr = strings.TrimSpace(rest)
+	// The name ends at the first ':' that comes before a step selector, so a
+	// step name such as "a:b" inside {step="a:b"} is not read as a name.
+	colon, brace := strings.Index(expr, ":"), strings.Index(expr, "{")
+	if colon >= 0 && (brace < 0 || colon < brace) {
+		name = strings.TrimSpace(expr[:colon])
+		expr = strings.TrimSpace(expr[colon+1:])
 		if name == "" {
 			return Threshold{}, fmt.Errorf("threshold %q: the name before ':' is empty", orig)
 		}
 	}
 
-	idx := strings.IndexAny(expr, "<>")
-	if idx < 0 {
-		return Threshold{}, fmt.Errorf("threshold %q: want metric, operator and value, e.g. \"p95 < 300ms\" (operators: <, <=, >, >=)", orig)
+	step := ""
+	var metric, rest string
+	if lb := strings.Index(expr, "{"); lb >= 0 {
+		var err error
+		if step, rest, err = parseSelector(expr[lb:]); err != nil {
+			return Threshold{}, fmt.Errorf("threshold %q: %w", orig, err)
+		}
+		metric = strings.ToLower(strings.TrimSpace(expr[:lb]))
+		rest = strings.TrimSpace(rest)
+		if !strings.HasPrefix(rest, "<") && !strings.HasPrefix(rest, ">") {
+			return Threshold{}, fmt.Errorf("threshold %q: want an operator (<, <=, >, >=) and a value after the step selector", orig)
+		}
+	} else {
+		idx := strings.IndexAny(expr, "<>")
+		if idx < 0 {
+			return Threshold{}, fmt.Errorf("threshold %q: want metric, operator and value, e.g. \"p95 < 300ms\" (operators: <, <=, >, >=)", orig)
+		}
+		metric = strings.ToLower(strings.TrimSpace(expr[:idx]))
+		rest = expr[idx:]
 	}
-	metric := strings.ToLower(strings.TrimSpace(expr[:idx]))
-	rest := expr[idx:]
 	op := ""
 	for _, o := range operators {
 		if strings.HasPrefix(rest, o) {
@@ -108,17 +133,70 @@ func Parse(expr string) (Threshold, error) {
 	if valueText == "" {
 		return Threshold{}, fmt.Errorf("threshold %q: missing value after %q", orig, op)
 	}
+	if step != "" && metric == "check_rate" {
+		return Threshold{}, fmt.Errorf("threshold %q: check_rate is for the whole run and cannot target a step", orig)
+	}
 
 	limit, canonical, err := parseValue(k, metric, valueText)
 	if err != nil {
 		return Threshold{}, fmt.Errorf("threshold %q: %w", orig, err)
 	}
 
-	t := Threshold{Name: name, Metric: metric, Operator: op, Value: canonical, limit: limit}
+	t := Threshold{Name: name, Metric: metric, Step: step, Operator: op, Value: canonical, limit: limit}
 	if t.Name == "" {
-		t.Name = fmt.Sprintf("%s %s %s", t.Metric, t.Operator, t.Value)
+		t.Name = t.core()
 	}
 	return t, nil
+}
+
+// parseSelector reads {step="name"} from the start of s and returns the
+// step name and the text after the closing brace. The name may be in
+// double or single quotes, or bare when it has no spaces or braces.
+func parseSelector(s string) (step, rest string, err error) {
+	end := strings.Index(s, "}")
+	if q := strings.IndexAny(s, "\"'"); q >= 0 && q < end {
+		// A quoted name may contain '}' so look for the closing quote first.
+		closeQ := strings.IndexByte(s[q+1:], s[q])
+		if closeQ < 0 {
+			return "", "", fmt.Errorf("the step name in the selector is missing its closing quote")
+		}
+		end = strings.Index(s[q+1+closeQ:], "}")
+		if end >= 0 {
+			end += q + 1 + closeQ
+		}
+	}
+	if end < 0 {
+		return "", "", fmt.Errorf("the step selector is missing its closing '}'")
+	}
+	inner := strings.TrimSpace(s[1:end])
+	key, val, ok := strings.Cut(inner, "=")
+	if !ok || strings.TrimSpace(key) != "step" {
+		return "", "", fmt.Errorf("the selector must be {step=NAME}, for example p95{step=\"login\"} < 300ms")
+	}
+	val = strings.TrimSpace(val)
+	if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
+		val = val[1 : len(val)-1]
+	}
+	if val == "" {
+		return "", "", fmt.Errorf("the step name in the selector is empty")
+	}
+	if strings.ContainsAny(val, "\"'") {
+		return "", "", fmt.Errorf("a step name with a quote mark cannot be used in a threshold")
+	}
+	return val, s[end+1:], nil
+}
+
+// selector is the text after the metric that names the step, or "".
+func (t Threshold) selector() string {
+	if t.Step == "" {
+		return ""
+	}
+	return fmt.Sprintf("{step=%q}", t.Step)
+}
+
+// core is the metric, selector, operator and value as text.
+func (t Threshold) core() string {
+	return fmt.Sprintf("%s%s %s %s", t.Metric, t.selector(), t.Operator, t.Value)
 }
 
 func parseValue(k kind, metric, text string) (limit float64, canonical string, err error) {
@@ -182,7 +260,7 @@ func ParseAll(exprs []string) ([]Threshold, error) {
 // including its name, e.g. "fast-api: p95 < 300ms". It is what other
 // commands print as a ready-to-paste -threshold flag.
 func (t Threshold) Expression() string {
-	core := fmt.Sprintf("%s %s %s", t.Metric, t.Operator, t.Value)
+	core := t.core()
 	if t.Name == core {
 		return core
 	}
@@ -195,7 +273,21 @@ func (t Threshold) Expression() string {
 func Evaluate(ts []Threshold, res *report.Result) []report.ThresholdResult {
 	out := make([]report.ThresholdResult, 0, len(ts))
 	for _, t := range ts {
-		r := report.ThresholdResult{Name: t.Name, Metric: t.Metric, Operator: t.Operator, Value: t.Value}
+		r := report.ThresholdResult{Name: t.Name, Metric: t.Metric, Step: t.Step, Operator: t.Operator, Value: t.Value}
+		if t.Step != "" {
+			s, ok := res.Step(t.Step)
+			if !ok {
+				r.Observed = fmt.Sprintf("no step named %q ran", t.Step)
+				out = append(out, r)
+				continue
+			}
+			view := &report.Result{Total: s.Total, Failed: s.Failed, ErrorRate: s.ErrorRate, Latency: s.Latency, Elapsed: res.Elapsed}
+			observed := observe(t.Metric, view)
+			r.Observed = formatObserved(t.Metric, observed)
+			r.Passed = compare(observed, t.Operator, t.limit)
+			out = append(out, r)
+			continue
+		}
 		if t.Metric == "check_rate" {
 			rate, any := res.CheckRate()
 			if !any {

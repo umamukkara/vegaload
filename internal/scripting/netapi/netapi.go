@@ -56,6 +56,14 @@ type CheckRecorder interface {
 	RecordCheck(name string, passed bool)
 }
 
+// StepRecorder receives every named step a scenario script runs (FR-CLI-18):
+// the step's name, how long it took, and whether it failed. The report
+// Collector implements it. A nil recorder is allowed everywhere it is
+// accepted, and means steps still run but are not counted.
+type StepRecorder interface {
+	RecordStep(name string, d time.Duration, failed bool)
+}
+
 // Inputs is what a scenario script can read from outside itself
 // (FR-CLI-17): environment variables the run was told to expose, and data
 // files that feed rows to virtual users. The cmd layer builds it from the

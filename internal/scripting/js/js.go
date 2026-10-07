@@ -145,6 +145,8 @@ type VU struct {
 
 	// checks receives every check() outcome (FR-CLI-12). It may be nil.
 	checks netapi.CheckRecorder
+	// steps receives every step() outcome (FR-CLI-18). It may be nil.
+	steps netapi.StepRecorder
 
 	// inputs is what the `env` and `data` globals expose (FR-CLI-17). It
 	// may be nil, which exposes nothing.
@@ -156,6 +158,10 @@ type VU struct {
 // recorder (or nil), check() still runs the tests and returns the
 // result, but nothing is counted.
 func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
+
+// SetStepRecorder sets where this VU reports the timing and outcome of
+// every step() its script runs. Call it before the first Iteration.
+func (v *VU) SetStepRecorder(rec netapi.StepRecorder) { v.steps = rec }
 
 // Option changes how NewVU builds a VU. An option is needed, rather than a
 // setter called afterwards, when the script's top-level code has to see it:
@@ -222,6 +228,9 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...
 		}
 	}
 	if err := vm.Set("check", v.newCheckFunc(vm)); err != nil {
+		return nil, fmt.Errorf("js: %w", err)
+	}
+	if err := vm.Set("step", v.newStepFunc(vm)); err != nil {
 		return nil, fmt.Errorf("js: %w", err)
 	}
 	if err := vm.Set("env", v.newEnvGlobal(vm)); err != nil {
@@ -368,6 +377,36 @@ func (v *VU) newCheckFunc(vm *goja.Runtime) func(goja.FunctionCall) goja.Value {
 			}
 		}
 		return vm.ToValue(allPassed)
+	}
+}
+
+// newStepFunc builds the step(name, fn) global (FR-CLI-18). It runs fn,
+// times it, and reports the time and outcome under name. A step that
+// throws is a failed step, and the exception carries on, so the iteration
+// fails too. The value fn returns is the value step returns. Steps may
+// nest; each is recorded on its own.
+func (v *VU) newStepFunc(vm *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		nameV := call.Argument(0)
+		fn, isFn := goja.AssertFunction(call.Argument(1))
+		if goja.IsUndefined(nameV) || goja.IsNull(nameV) || nameV.String() == "" || !isFn {
+			throw(vm, fmt.Errorf("step: want step(name, fn)"))
+		}
+		name := nameV.String()
+		start := time.Now()
+		res, err := fn(goja.Undefined())
+		d := time.Since(start)
+		if v.steps != nil && !(err != nil && netapi.RunEnded(v.ctx)) {
+			v.steps.RecordStep(name, d, err != nil)
+		}
+		if err != nil {
+			// Re-raise the original exception unchanged.
+			if ex, ok := err.(*goja.Exception); ok {
+				panic(ex.Value())
+			}
+			panic(vm.NewGoError(err))
+		}
+		return res
 	}
 }
 
