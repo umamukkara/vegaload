@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"errors"
-	"io"
 	"net"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/vegaload/vegaload/internal/inputs"
 	"github.com/vegaload/vegaload/internal/protocol/kafka/kafkatest"
+	"github.com/vegaload/vegaload/internal/protocol/mqtt/mqtttest"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 )
 
@@ -220,185 +219,22 @@ func TestProto_OutsideAnIterationThrows(t *testing.T) {
 	}
 }
 
-// ---- MQTT: a very small broker -------------------------------------------
-
-// miniBroker is just enough MQTT 3.1.1 for these tests: CONNECT, SUBSCRIBE
-// and PUBLISH (QoS 0 and 1) with exact topic matching, and optional login.
-type miniBroker struct {
-	ln         net.Listener
-	user, pass string
-	mu         sync.Mutex
-	subs       map[net.Conn][]string
-	wmu        sync.Mutex
-	pubs       []string // "topic=payload"
-}
-
-func startMini(t *testing.T) *miniBroker {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := &miniBroker{ln: ln, subs: map[net.Conn][]string{}}
-	t.Cleanup(func() { ln.Close() })
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go b.serve(c)
-		}
-	}()
-	return b
-}
-
-func (b *miniBroker) url() string { return "mqtt://" + b.ln.Addr().String() }
-
-func mstr(p []byte) (string, []byte) {
-	l := int(binary.BigEndian.Uint16(p))
-	return string(p[2 : 2+l]), p[2+l:]
-}
-
-func mvar(n int) []byte {
-	var out []byte
-	for {
-		x := byte(n % 128)
-		n /= 128
-		if n > 0 {
-			x |= 0x80
-		}
-		out = append(out, x)
-		if n == 0 {
-			return out
-		}
-	}
-}
-
-func (b *miniBroker) send(c net.Conn, p []byte) {
-	b.wmu.Lock()
-	defer b.wmu.Unlock()
-	_, _ = c.Write(p)
-}
-
-func (b *miniBroker) serve(c net.Conn) {
-	defer c.Close()
-	defer func() {
-		b.mu.Lock()
-		delete(b.subs, c)
-		b.mu.Unlock()
-	}()
-	r := bufio.NewReader(c)
-	for {
-		hdr, err := r.ReadByte()
-		if err != nil {
-			return
-		}
-		n, mul := 0, 1
-		for {
-			x, err := r.ReadByte()
-			if err != nil {
-				return
-			}
-			n += int(x&0x7f) * mul
-			if x&0x80 == 0 {
-				break
-			}
-			mul *= 128
-		}
-		body := make([]byte, n)
-		if _, err := io.ReadFull(r, body); err != nil {
-			return
-		}
-		switch hdr >> 4 {
-		case 1:
-			_, rest := mstr(body)
-			flags := rest[1]
-			rest = rest[4:]
-			_, rest = mstr(rest)
-			var user, pass string
-			if flags&0x80 != 0 {
-				user, rest = mstr(rest)
-			}
-			if flags&0x40 != 0 {
-				pass, _ = mstr(rest)
-			}
-			rc := byte(0)
-			if b.user != "" && (user != b.user || pass != b.pass) {
-				rc = 4
-			}
-			b.send(c, []byte{0x20, 2, 0, rc})
-			if rc != 0 {
-				return
-			}
-		case 8:
-			pid, rest := body[:2], body[2:]
-			var granted []byte
-			for len(rest) > 0 {
-				var f string
-				f, rest = mstr(rest)
-				rest = rest[1:]
-				granted = append(granted, 0)
-				b.mu.Lock()
-				b.subs[c] = append(b.subs[c], f)
-				b.mu.Unlock()
-			}
-			ack := append([]byte{0x90}, mvar(2+len(granted))...)
-			b.send(c, append(append(ack, pid...), granted...))
-		case 3:
-			qos := byte(hdr>>1) & 3
-			topic, rest := mstr(body)
-			if qos > 0 {
-				b.send(c, append([]byte{0x40, 2}, rest[:2]...))
-				rest = rest[2:]
-			}
-			b.mu.Lock()
-			b.pubs = append(b.pubs, topic+"="+string(rest))
-			var targets []net.Conn
-			for sc, fs := range b.subs {
-				for _, f := range fs {
-					if f == topic {
-						targets = append(targets, sc)
-					}
-				}
-			}
-			b.mu.Unlock()
-			pkt := append([]byte{byte(0x30)}, mvar(2+len(topic)+len(rest))...)
-			pkt = append(pkt, byte(len(topic)>>8), byte(len(topic)))
-			pkt = append(append(pkt, topic...), rest...)
-			for _, sc := range targets {
-				b.send(sc, pkt)
-			}
-		case 12:
-			b.send(c, []byte{0xd0, 0})
-		case 14:
-			return
-		}
-	}
-}
-
-func (b *miniBroker) published() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.pubs...)
-}
-
 func TestMQTT_Publish(t *testing.T) {
-	b := startMini(t)
+	b := mqtttest.Start(t)
 	must(t, nil, assertFn+`
-		const r = mqtt.publish("`+b.url()+`", {topic: "t/1", body: "hello", qos: 1});
+		const r = mqtt.publish("`+b.URL()+`", {topic: "t/1", body: "hello", qos: 1});
 		assert(r.ok, r.error);
 		assert(r.messages.length === 0, "publish reads nothing");
 	`)
-	if got := b.published(); len(got) != 1 || got[0] != "t/1=hello" {
+	if got := b.Published(); len(got) != 1 || got[0] != "t/1=hello" {
 		t.Fatalf("broker saw %v", got)
 	}
 }
 
 func TestMQTT_RoundtripReturnsTheMessage(t *testing.T) {
-	b := startMini(t)
+	b := mqtttest.Start(t)
 	must(t, nil, assertFn+`
-		const r = mqtt.roundtrip("`+b.url()+`", {topic: "rt/{id}", body: "order {id}"});
+		const r = mqtt.roundtrip("`+b.URL()+`", {topic: "rt/{id}", body: "order {id}"});
 		assert(r.ok, r.error);
 		assert(r.messages.length === 1, "one message");
 		assert(r.messages[0].body.indexOf("order vegaload-") === 0, r.messages[0].body);
@@ -409,7 +245,7 @@ func TestMQTT_RoundtripReturnsTheMessage(t *testing.T) {
 func TestMQTT_SubscribeAfterAPublishInTheSameIteration(t *testing.T) {
 	// Subscribe waits for a message while another call publishes it: the
 	// script cannot do both at once, so publish from outside.
-	b := startMini(t)
+	b := mqtttest.Start(t)
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -423,13 +259,13 @@ func TestMQTT_SubscribeAfterAPublishInTheSameIteration(t *testing.T) {
 			case <-time.After(60 * time.Millisecond):
 			}
 			_, _ = pc.MQTT(context.Background(), "publish", netapi.ProtoCall{
-				URL: b.url(), Body: []byte("tick"), Options: map[string]string{"topic": "feed"},
+				URL: b.URL(), Body: []byte("tick"), Options: map[string]string{"topic": "feed"},
 			})
 		}
 	}()
 	defer func() { close(stop); wg.Wait() }()
 	must(t, nil, assertFn+`
-		const r = mqtt.subscribe("`+b.url()+`", {topic: "feed", count: 2, expect: "tick", timeout: "5s"});
+		const r = mqtt.subscribe("`+b.URL()+`", {topic: "feed", count: 2, expect: "tick", timeout: "5s"});
 		assert(r.ok, r.error);
 		assert(r.messages.length === 2, "two messages: " + r.messages.length);
 		assert(r.messages[1].body === "tick" && r.messages[1].topic === "feed", "content");
@@ -437,13 +273,13 @@ func TestMQTT_SubscribeAfterAPublishInTheSameIteration(t *testing.T) {
 }
 
 func TestMQTT_PasswordFromEnvReachesTheBroker(t *testing.T) {
-	b := startMini(t)
-	b.user, b.pass = "alice", "s3cret"
+	b := mqtttest.Start(t)
+	b.User, b.Pass = "alice", "s3cret"
 	in := inputs.New(map[string]string{"MQ_PW": "s3cret"}, nil)
 	if err := runScript(t, nil, assertFn+`
-		const ok = mqtt.publish("`+b.url()+`", {topic: "a", body: "x", username: "alice", password: env.MQ_PW});
+		const ok = mqtt.publish("`+b.URL()+`", {topic: "a", body: "x", username: "alice", password: env.MQ_PW});
 		assert(ok.ok, ok.error);
-		const bad = mqtt.publish("`+b.url()+`", {topic: "a", body: "x", username: "alice", password: "wrong"});
+		const bad = mqtt.publish("`+b.URL()+`", {topic: "a", body: "x", username: "alice", password: "wrong"});
 		assert(!bad.ok && bad.error.length > 0, "wrong password must fail");
 	`, WithInputs(in)); err != nil {
 		t.Fatal(err)
@@ -615,5 +451,15 @@ func TestKafka_SafetyCheckAndFailure(t *testing.T) {
 		const r = kafka.produce("kafka://`+addr+`", {topic: "t", value: "x", timeout: 1500});
 		assert(!r.ok && r.error.length > 0, "refused broker is a reply");
 		assert(r.records.length === 0, "no records");
+	`)
+}
+
+func TestMQTT_MessagesIsARealArray(t *testing.T) {
+	b := mqtttest.Start(t)
+	must(t, nil, assertFn+`
+		const r = mqtt.roundtrip("`+b.URL()+`", {topic: "rt/{id}", body: "x {id}"});
+		assert(Array.isArray(r.messages), "messages is an array");
+		assert(r.messages.map((m) => m.topic).length === 1, "map works");
+		assert(r.messages.length === 1 && JSON.stringify(r.messages[0]).indexOf("topic") > 0, "plain objects");
 	`)
 }

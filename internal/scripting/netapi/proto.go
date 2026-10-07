@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +36,175 @@ type ProtoCall struct {
 	// Password is the MQTT password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
+}
+
+// ProtoFunctions lists the calls a script can make, by namespace: tcp.send,
+// mqtt.publish and so on. Each scripting language builds its globals from
+// this list, so they cannot differ.
+func ProtoFunctions() map[string][]string {
+	return map[string][]string{
+		"tcp":   {"send"},
+		"udp":   {"send"},
+		"mqtt":  {"publish", "subscribe", "roundtrip"},
+		"kafka": {"produce", "consume", "roundtrip", "admin"},
+	}
+}
+
+// Call makes the call that name says, such as "tcp.send" or "kafka.admin".
+func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*ProtoReply, error) {
+	ns, fn, _ := strings.Cut(name, ".")
+	switch ns {
+	case "tcp":
+		return c.TCP(ctx, call)
+	case "udp":
+		return c.UDP(ctx, call)
+	case "mqtt":
+		return c.MQTT(ctx, fn, call)
+	case "kafka":
+		return c.Kafka(ctx, fn, call)
+	}
+	return nil, fmt.Errorf("unknown call %q", name)
+}
+
+// ProtoCallFromArgs builds a call from a target and the options object a
+// script passed. body, insecure, timeout and password are the script's own
+// keys. For kafka, value is the same as body. Every other key becomes a
+// driver option, and the driver rejects the ones it does not know. A
+// trailing underscore is dropped from a key, so a language where a word such
+// as "from" is reserved can write from_.
+func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, error) {
+	pc := ProtoCall{URL: rawURL}
+	valueIsBody := strings.HasPrefix(name, "kafka.")
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		val := args[k]
+		if val == nil {
+			continue
+		}
+		key := strings.TrimSuffix(k, "_")
+		switch key {
+		case "body", "value":
+			if key == "value" && !valueIsBody {
+				return pc, errors.New("unknown option value (use body)")
+			}
+			if pc.Body != nil {
+				return pc, errors.New("give body or value, not both")
+			}
+			s, err := optionText(key, val)
+			if err != nil {
+				return pc, err
+			}
+			pc.Body = []byte(s)
+		case "insecure":
+			b, ok := val.(bool)
+			if !ok {
+				return pc, errors.New("option insecure must be true or false")
+			}
+			pc.Insecure = b
+		case "timeout":
+			d, err := optionTimeout(val)
+			if err != nil {
+				return pc, err
+			}
+			pc.Timeout = d
+		case "password":
+			s, err := optionText(key, val)
+			if err != nil {
+				return pc, err
+			}
+			pc.Password = &s
+		default:
+			s, err := optionText(key, val)
+			if err != nil {
+				return pc, err
+			}
+			if pc.Options == nil {
+				pc.Options = map[string]string{}
+			}
+			pc.Options[key] = s
+		}
+	}
+	return pc, nil
+}
+
+// optionText turns a script value into the text a driver option holds.
+func optionText(key string, val any) (string, error) {
+	switch x := val.(type) {
+	case string:
+		return x, nil
+	case bool:
+		return strconv.FormatBool(x), nil
+	case int:
+		return strconv.Itoa(x), nil
+	case int64:
+		return strconv.FormatInt(x, 10), nil
+	case float64:
+		if x == math.Trunc(x) && math.Abs(x) < 1e15 {
+			return strconv.FormatInt(int64(x), 10), nil
+		}
+		return strconv.FormatFloat(x, 'f', -1, 64), nil
+	}
+	return "", fmt.Errorf("option %s must be a string, number or boolean", key)
+}
+
+// optionTimeout reads timeout as milliseconds (a number) or as a duration
+// text such as "2s".
+func optionTimeout(val any) (time.Duration, error) {
+	var d time.Duration
+	switch x := val.(type) {
+	case int:
+		d = time.Duration(x) * time.Millisecond
+	case int64:
+		d = time.Duration(x) * time.Millisecond
+	case float64:
+		d = time.Duration(x * float64(time.Millisecond))
+	case string:
+		var err error
+		if d, err = time.ParseDuration(strings.TrimSpace(x)); err != nil {
+			return 0, fmt.Errorf("option timeout=%q: want milliseconds or a duration such as 2s", x)
+		}
+	default:
+		return 0, errors.New("option timeout must be milliseconds or a duration such as \"2s\"")
+	}
+	if d <= 0 {
+		return 0, errors.New("option timeout must be more than zero")
+	}
+	return d, nil
+}
+
+// Fields is the reply as plain data: the shape a script sees. body is the
+// reply of tcp and udp. messages is for mqtt, each {topic, body}. kafka adds
+// records (each {topic, partition, offset, key, value}) and text. error is
+// "" when the call worked.
+func (r *ProtoReply) Fields() map[string]any {
+	msgs := make([]any, 0, len(r.Messages))
+	for _, m := range r.Messages {
+		msgs = append(msgs, map[string]any{"topic": m.Topic, "body": string(m.Body)})
+	}
+	f := map[string]any{
+		"ok":            r.OK,
+		"error":         r.Error,
+		"bytesSent":     r.BytesSent,
+		"bytesReceived": r.BytesReceived,
+		"body":          string(r.Body),
+		"messages":      msgs,
+	}
+	if r.IsKafka {
+		recs := make([]any, 0, len(r.Records))
+		for _, rec := range r.Records {
+			recs = append(recs, map[string]any{
+				"topic": rec.Topic, "partition": rec.Partition, "offset": rec.Offset,
+				"key": string(rec.Key), "value": string(rec.Value),
+			})
+		}
+		f["records"] = recs
+		f["text"] = r.Text
+	}
+	return f
 }
 
 // ProtoMessage is one MQTT message a call received.

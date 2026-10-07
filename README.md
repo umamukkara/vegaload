@@ -293,7 +293,9 @@ export default function () {
   for every call. `consume` and `roundtrip` read with their own connection,
   as in the load-test mode. A SASL password is `password: env.NAME`.
   The safety allowlist checks the first broker you name, not the other
-  brokers the cluster announces.
+  brokers the cluster announces. The kept client stops at the longest timeout
+  it was built with (the first call's `timeout`, and at least one minute), so a
+  single Kafka call cannot run longer than that.
 - Every function also accepts `insecure` (skip TLS checks) and `timeout`
   (milliseconds, or text such as `"2s"`).
 - Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`.
@@ -304,10 +306,26 @@ export default function () {
   For `mqtt.subscribe`, the message must arrive during the call, so run it
   when something else publishes.
 
+Python scenarios have the same four globals, with the same options and the
+same reply. The options are keyword arguments, the reply works as
+`r.ok` and as `r["ok"]`, and a word that Python reserves gets a trailing
+underscore (`from_="end"`):
+
+```python
+def iteration():
+    r = tcp.send("tcp://localhost:6379", body="PING\r\n", until="\r\n")
+    check(r, {"got PONG": lambda x: x.ok and x.body == "+PONG\r\n"})
+    k = kafka.produce("kafka://localhost", topic="orders", key="k1", value="v")
+    print(k.records[0].partition, k.records[0].offset)
+```
+
+A call set up wrongly raises `VegaloadError`.
+
 [`examples/scenarios/mqtt-tcp.vl.js`](./examples/scenarios/mqtt-tcp.vl.js)
+(and its Python twin, [`mqtt_tcp.py`](./examples/scenarios/mqtt_tcp.py))
 is a small example, and
 [`examples/scenarios/kafka-orders.vl.js`](./examples/scenarios/kafka-orders.vl.js)
-shows Kafka. Python scenarios do not have these globals yet.
+shows Kafka.
 
 ### Start from a browser recording
 
