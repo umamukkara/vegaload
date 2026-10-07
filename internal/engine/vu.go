@@ -9,7 +9,8 @@ import (
 // is cancelled. Each completed iteration's result is sent to rec. vuID
 // identifies this VU in recorded results; it has no meaning beyond that.
 //
-// Iterations still in flight when the run ends (ctx cancelled) are not
+// Iterations still in flight when the run ends (ctx cancelled, or its
+// deadline passed) are not
 // recorded: a cancel/deadline error from cutting them off is not a real
 // failure and must not inflate error counts.
 //
@@ -19,10 +20,8 @@ import (
 // stop; protocol implementations are expected to respect ctx.
 func runVU(ctx context.Context, vuID int, iter IterationFunc, rec Recorder) {
 	for {
-		select {
-		case <-ctx.Done():
+		if runEnded(ctx) {
 			return
-		default:
 		}
 
 		start := time.Now()
@@ -43,8 +42,23 @@ func runVU(ctx context.Context, vuID int, iter IterationFunc, rec Recorder) {
 // A successful return (err == nil) is still recorded even if ctx is
 // done — the work finished.
 func recordIteration(ctx context.Context, rec Recorder, r IterationResult) {
-	if r.Err != nil && ctx.Err() != nil {
+	if r.Err != nil && runEnded(ctx) {
 		return
 	}
 	rec.Record(r)
+}
+
+// runEnded reports whether the run is over: ctx is done, or its deadline
+// has passed. The second test matters. The timer that cancels a ctx at
+// its deadline can fire a few milliseconds late, and ctx.Err() stays nil
+// until it does. In that gap a driver sees the deadline at once and fails
+// in microseconds, so a VU can record thousands of false failures before
+// the cancel arrives. Checking the clock against the deadline closes the
+// gap.
+func runEnded(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	dl, ok := ctx.Deadline()
+	return ok && !time.Now().Before(dl)
 }
