@@ -1,9 +1,13 @@
 ---
-description: VegaLoad load testing via its MCP server — use for any request to load-test, stress-test, soak-test, or benchmark an API's performance.
+description: VegaLoad real load testing via its MCP server — ramped or stepped VU shapes, soak, stress and capacity tests, thresholds, baselines, failure diagnosis. For a quick "does it work" check, use the vegaload-smoke rule instead.
 alwaysApply: false
 ---
 
 # VegaLoad load testing
+
+This rule is for real load: many users, longer runs, shapes, thresholds and
+baselines. For a quick check that an API works under a few users, use the
+`vegaload-smoke` rule first.
 
 `vegaload init` registered VegaLoad's MCP server for this project (see
 `.cursor/mcp.json`). It exposes eight tools, each a thin wrapper around a

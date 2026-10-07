@@ -1,9 +1,14 @@
 ---
 name: vegaload
-description: Use VegaLoad to load-test an HTTP/gRPC/WebSocket API — create a scenario, run a load test with a fixed, ramped, or stepped VU shape, read back results, get suggested pass/fail thresholds, diagnose a run's failures, compare a run against a baseline, or generate a runbook from an OpenAPI spec. Use this whenever the user asks to load test, stress test, soak test, or benchmark an API's performance.
+description: Use VegaLoad for a real load test of an HTTP/gRPC/WebSocket API — ramped or stepped VU shapes, soak runs, stress and capacity tests, pass/fail thresholds, comparing a run against a baseline, diagnosing failures, or generating a scenario from an OpenAPI spec. For a quick "does it work" check, use the vegaload-smoke skill instead.
 ---
 
 # VegaLoad load testing
+
+This skill is for real load: many users, longer runs, shapes, thresholds and
+baselines. For a quick check that an API works and answers fast under a few
+users, use the `vegaload-smoke` skill first. A clean smoke run is a good
+start before any load run.
 
 VegaLoad is an open-source load testing tool. `vegaload init` registered its MCP
 server for this project, which exposes eight tools — every one of them a thin

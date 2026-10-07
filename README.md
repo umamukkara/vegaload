@@ -665,9 +665,11 @@ back as a normal result with `thresholds_passed: false`.
 ./vegaload init
 ```
 
-writes four things into the current project, each skippable if already
-present: a Claude Code skill bundle (`.claude/skills/vegaload`), a Cursor
-rules file (`.cursor/rules/vegaload.mdc`), and an MCP server entry merged
+writes six files into the current project, each skippable if already
+present: two Claude Code skills (`.claude/skills/vegaload` for real load tests
+and `.claude/skills/vegaload-smoke` for a quick ten-second check), two Cursor
+rules files (`.cursor/rules/vegaload.mdc` and `.cursor/rules/vegaload-smoke.mdc`),
+and an MCP server entry merged
 into both `.mcp.json` and `.cursor/mcp.json`, pointing at this same compiled
 binary running `vegaload mcp serve`. Open the project in Claude Code or
 Cursor afterward and the agent has eight tools — `create_scenario`,

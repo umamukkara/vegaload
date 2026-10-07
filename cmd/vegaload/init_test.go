@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestCmdInit_CreatesAllFour(t *testing.T) {
+func TestCmdInit_CreatesAllFiles(t *testing.T) {
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
 	defer os.Chdir(cwd) //nolint:errcheck
@@ -22,7 +22,9 @@ func TestCmdInit_CreatesAllFour(t *testing.T) {
 
 	for _, p := range []string{
 		filepath.Join(".claude", "skills", "vegaload", "SKILL.md"),
+		filepath.Join(".claude", "skills", "vegaload-smoke", "SKILL.md"),
 		filepath.Join(".cursor", "rules", "vegaload.mdc"),
+		filepath.Join(".cursor", "rules", "vegaload-smoke.mdc"),
 		".mcp.json",
 		filepath.Join(".cursor", "mcp.json"),
 	} {

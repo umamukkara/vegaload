@@ -24,6 +24,18 @@ var ClaudeCode string
 //go:embed bundles/cursor/vegaload.mdc
 var Cursor string
 
+// ClaudeCodeSmoke is the Claude Code smoke-test skill's SKILL.md content,
+// written to .claude/skills/vegaload-smoke/SKILL.md.
+//
+//go:embed bundles/claude-code-smoke/SKILL.md
+var ClaudeCodeSmoke string
+
+// CursorSmoke is the Cursor smoke-test rules content, written to
+// .cursor/rules/vegaload-smoke.mdc.
+//
+//go:embed bundles/cursor/vegaload-smoke.mdc
+var CursorSmoke string
+
 // mcpServerEntry is one entry under a Claude Code or Cursor MCP config
 // file's "mcpServers" key — both tools share this schema.
 type mcpServerEntry struct {
