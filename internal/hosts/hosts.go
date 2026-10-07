@@ -351,6 +351,7 @@ const (
 	StatusMissing  = "missing"
 	StatusOutdated = "outdated" // a rules file that differs from this version's
 	StatusOtherExe = "other binary"
+	StatusBadArgs  = "wrong args" // an MCP entry that does not run "mcp serve"
 	StatusInvalid  = "invalid"
 )
 
@@ -382,6 +383,9 @@ func ArtifactStatus(dir string, a Artifact, exePath string) (string, string) {
 		return StatusMissing, "no \"vegaload\" server in the file"
 	case st.Entry.Command != exePath:
 		return StatusOtherExe, st.Entry.Command
+	}
+	if len(st.Entry.Args) < 2 || st.Entry.Args[0] != "mcp" || st.Entry.Args[1] != "serve" {
+		return StatusBadArgs, "args should be mcp serve; run init -force"
 	}
 	return StatusOK, ""
 }

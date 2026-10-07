@@ -161,3 +161,22 @@ func TestClaudeDesktopOnWindows(t *testing.T) {
 		t.Errorf("fallback config = %s, want %s", got, want)
 	}
 }
+
+func TestArtifactStatus_MCPArgsMustBeMCPServe(t *testing.T) {
+	dir := t.TempDir()
+	a := Artifact{Kind: "mcp", Host: "cursor", RelPath: "mcp.json"}
+	cases := []struct{ body, want string }{
+		{`{"mcpServers":{"vegaload":{"command":"/bin/vl","args":["mcp","serve"]}}}`, StatusOK},
+		{`{"mcpServers":{"vegaload":{"command":"/bin/vl","args":["run"]}}}`, StatusBadArgs},
+		{`{"mcpServers":{"vegaload":{"command":"/bin/vl"}}}`, StatusBadArgs},
+		{`{"mcpServers":{"vegaload":{"command":"/other","args":["mcp","serve"]}}}`, StatusOtherExe},
+		{`{"mcpServers":{}}`, StatusMissing},
+		{`{bad`, StatusInvalid},
+	}
+	for _, c := range cases {
+		write(t, filepath.Join(dir, "mcp.json"), c.body)
+		if got, _ := ArtifactStatus(dir, a, "/bin/vl"); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.body, got, c.want)
+		}
+	}
+}

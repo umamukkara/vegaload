@@ -173,7 +173,7 @@ func initStatus(dir, exePath string, editors map[string]bool, output string) int
 		if allOK {
 			fmt.Println("Everything is set up.")
 		} else {
-			fmt.Println("Something is not set up. Run \"vegaload init\" to fix it.")
+			fmt.Println("Something is not set up. Run \"vegaload init -force\" to fix it.")
 		}
 	}
 	if !allOK {

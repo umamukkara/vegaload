@@ -260,3 +260,18 @@ func TestCmdInit_StatusEditorOnlyChecksThatEditor(t *testing.T) {
 		t.Errorf("all editors: exit %d, want 1", code)
 	}
 }
+
+func TestCmdInit_StatusFailsWhenArgsAreNotMCPServe(t *testing.T) {
+	inTempDir(t)
+	if code := cmdInit([]string{"-editor", "cursor"}); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	exe, _ := os.Executable()
+	body, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"vegaload": map[string]any{"command": exe, "args": []string{"run"}}}})
+	if err := os.WriteFile(filepath.Join(".cursor", "mcp.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := cmdInit([]string{"-status", "-editor", "cursor"}); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+}

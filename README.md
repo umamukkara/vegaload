@@ -690,8 +690,9 @@ To see what is set up, without changing anything, use `-status`:
 ```
 
 It lists each file as `ok`, `missing`, `outdated` (the rules file differs from
-the one this binary ships) or `other binary` (the MCP entry points to another
-copy of `vegaload`). It exits 1 if anything is not `ok`, so a script can check
+the one this binary ships), `other binary` (the MCP entry points to another
+copy of `vegaload`), `wrong args` (the MCP entry does not run `mcp serve`) or
+`invalid` (the file cannot be read). It exits 1 if anything is not `ok`, so a script can check
 it. Run `vegaload init -force` to fix what it reports.
 
 By default the MCP server talks over stdio. To use it over the network (for
