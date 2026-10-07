@@ -25,7 +25,7 @@ If a proposed change breaks any of these three rules, stop and flag it instead o
 ## Language and runtime
 
 - Core engine: Go. Single static binary. Cross-compiles to Linux, macOS, Windows, and a scratch Docker image.
-- Scripting: JavaScript/TypeScript, run through an embedded Go JS interpreter (Goja), the same approach k6 uses. No Node.js dependency for this path.
+- Scripting: JavaScript/TypeScript, run through an embedded Go JS interpreter (Goja). No Node.js dependency for this path.
 - Python scripting is a second-class, optional path. It shells out to a local `python3` process. It requires Python installed on the user's machine. Never claim this path is dependency-free.
 - The MCP server is also Go, built as a subcommand (`vegaload mcp serve`), not a separate Node.js process. This keeps the single-binary story intact.
 
