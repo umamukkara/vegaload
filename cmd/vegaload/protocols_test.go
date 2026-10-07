@@ -113,6 +113,8 @@ func wireTestTarget(name string) protocol.Target {
 		return protocol.Target{URL: "ws://localhost:1/"}
 	case "mqtt":
 		return protocol.Target{URL: "mqtt://localhost:1", Options: map[string]string{"topic": "t"}}
+	case "kafka":
+		return protocol.Target{URL: "kafka://localhost:1", Options: map[string]string{"topic": "t"}}
 	case "tcp":
 		return protocol.Target{URL: "tcp://localhost:1"}
 	case "udp":

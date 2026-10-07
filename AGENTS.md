@@ -34,7 +34,7 @@ If a proposed change breaks any of these three rules, stop and flag it instead o
 Keep these modules separate. Do not let one reach into another's internals.
 
 - **Core engine**: the VU scheduler and load-shape executors (fixed-VU, ramp, step, constant-arrival-rate). Knows nothing about MCP, reporting, or Harness RT.
-- **Protocol drivers**: HTTP/1.1, HTTP/2, gRPC, WebSocket, MQTT, raw TCP and UDP. Each implements a shared `Protocol` interface. Adding a new protocol should never require editing the core engine.
+- **Protocol drivers**: HTTP/1.1, HTTP/2, gRPC, WebSocket, MQTT, Kafka, raw TCP and UDP. Each implements a shared `Protocol` interface. Adding a new protocol should never require editing the core engine.
 - **Output/reporting**: the self-contained HTML report, plus optional JSON/Parquet export. Implements a shared `Output` interface.
 - **MCP layer**: calls the same CLI commands a human would run, then parses their output. It must not call core-engine functions directly. If the MCP layer needs new data, add a CLI flag or output mode first, then have MCP use it.
 - **Doctor and host adapters**: `internal/doctor` holds the checks and `internal/hosts` holds where each agent host keeps its files. `vegaload init` and `vegaload doctor` both read from `internal/hosts`, so they cannot disagree. To support a new host, add one adapter there. Do not add host paths anywhere else.
