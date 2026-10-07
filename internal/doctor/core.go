@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/vegaload/vegaload/internal/pyfind"
 )
@@ -26,10 +27,17 @@ func coreChecks(env Env) []Check {
 		{ID: "core.dirs", Category: "core", Name: "Writable folders", Run: func(ctx context.Context) Result { return checkDirs(env) }},
 		{ID: "core.python", Category: "core", Name: "Python (optional)", Run: func(ctx context.Context) Result {
 			names := pyfind.Names(env.OS)
-			for _, name := range names {
-				if p, err := env.LookPath(name); err == nil {
-					return result(Pass, name+" at "+p)
-				}
+			// Same lookup as the Python scripting driver: on Windows a
+			// candidate must also run, so the Microsoft Store alias is
+			// not reported as Python.
+			works := func(in pyfind.Interpreter) bool {
+				cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				_, err := env.RunCmd(cctx, in.Path, pyfind.CheckArgs(in)...)
+				return err == nil
+			}
+			if in, ok := pyfind.Find(env.OS, env.LookPath, works); ok {
+				return result(Pass, strings.Join(append([]string{in.Path}, in.Args...), " "))
 			}
 			return result(Skip, strings.Join(names, ", ")+" not found. JavaScript and TypeScript scenarios work without it; Python scenarios need it.")
 		}},

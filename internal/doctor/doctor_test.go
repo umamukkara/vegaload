@@ -558,3 +558,35 @@ func TestIsPathCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestPythonCheck_WindowsDoesNotTrustAStoreAlias(t *testing.T) {
+	env := testEnv(t)
+	env.OS = "windows"
+	env.LookPath = func(n string) (string, error) {
+		if n == "python3" || n == "python" {
+			return `C:\bin\` + n + ".exe", nil
+		}
+		return "", errors.New("not found")
+	}
+	// python3 is the Store alias: it is on the PATH but does not run.
+	env.RunCmd = func(ctx context.Context, name string, args ...string) (string, error) {
+		if strings.HasSuffix(name, "python3.exe") {
+			return "", errors.New("exit status 9009")
+		}
+		return "", nil
+	}
+	rep := run(t, env, Options{Hosts: []string{"none"}, Only: []string{"core.python"}})
+	r := byID(t, rep, "core.python")
+	if r.Status != Pass || !strings.Contains(r.Message, "python.exe") {
+		t.Errorf("want pass with python.exe, got %+v", r)
+	}
+
+	// Nothing real is left once python is gone too: skip, not pass.
+	env.RunCmd = func(ctx context.Context, name string, args ...string) (string, error) {
+		return "", errors.New("does not run")
+	}
+	rep = run(t, env, Options{Hosts: []string{"none"}, Only: []string{"core.python"}})
+	if r := byID(t, rep, "core.python"); r.Status != Skip {
+		t.Errorf("a PATH entry that does not run must not pass: %+v", r)
+	}
+}

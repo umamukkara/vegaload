@@ -6,9 +6,17 @@
 package pyfind
 
 import (
+	"context"
+	"os"
 	"os/exec"
 	"runtime"
+	"time"
 )
+
+// runTimeout bounds the check run of one candidate. The Microsoft Store
+// stub can open the Store and never return, so a candidate must not be
+// allowed to hang the caller.
+const runTimeout = 10 * time.Second
 
 // Interpreter is a Python command: the program to run and any arguments
 // that must come before the script's own (the "py" launcher needs "-3").
@@ -34,6 +42,30 @@ func ArgsFor(name string) []string {
 	return nil
 }
 
+// statSize returns the size of the file at path. It is a variable so tests
+// can fake it.
+var statSize = func(path string) (int64, bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return fi.Size(), true
+}
+
+// IsStoreStub reports whether path looks like the Windows Store alias: a
+// file of length zero. Running it opens the Microsoft Store, so it must
+// never be started.
+func IsStoreStub(path string) bool {
+	size, ok := statSize(path)
+	return ok && size == 0
+}
+
+// CheckArgs returns the full arguments for the one-off run that checks an
+// interpreter is Python 3.
+func CheckArgs(in Interpreter) []string {
+	return append(append([]string{}, in.Args...), "-c", "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)")
+}
+
 // Find looks for a working interpreter for goos. lookPath is exec.LookPath
 // in real use. works is called on Windows only, to run a candidate; if it
 // is nil, any command found on PATH is accepted.
@@ -44,18 +76,25 @@ func Find(goos string, lookPath func(string) (string, error), works func(Interpr
 			continue
 		}
 		in := Interpreter{Path: p, Args: ArgsFor(name)}
-		if goos == "windows" && works != nil && !works(in) {
-			continue
+		if goos == "windows" {
+			if IsStoreStub(p) {
+				continue
+			}
+			if works != nil && !works(in) {
+				continue
+			}
 		}
 		return in, true
 	}
 	return Interpreter{}, false
 }
 
-// Runs reports whether in starts and is Python 3.
+// Runs reports whether in starts and is Python 3. It gives up after a
+// short time, so a program that never returns cannot hang the caller.
 func Runs(in Interpreter) bool {
-	args := append(append([]string{}, in.Args...), "-c", "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)")
-	return exec.Command(in.Path, args...).Run() == nil //nolint:gosec // interpreter found on PATH, fixed arguments
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, in.Path, CheckArgs(in)...).Run() == nil //nolint:gosec // interpreter found on PATH, fixed arguments
 }
 
 // FindOnThisMachine finds a Python 3 interpreter on the machine running

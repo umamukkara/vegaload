@@ -65,3 +65,47 @@ func TestFind_NoneFound(t *testing.T) {
 		t.Error("a candidate that does not run must be skipped")
 	}
 }
+
+func TestFind_WindowsSkipsAZeroByteAliasWithoutRunningIt(t *testing.T) {
+	old := statSize
+	defer func() { statSize = old }()
+	statSize = func(path string) (int64, bool) {
+		if path == `C:\bin\python3.exe` {
+			return 0, true // the Store alias
+		}
+		return 1024, true
+	}
+	ran := map[string]bool{}
+	works := func(in Interpreter) bool { ran[in.Path] = true; return true }
+	in, ok := Find("windows", lookup("python3", "python"), works)
+	if !ok || in.Path != `C:\bin\python.exe` {
+		t.Errorf("got %+v, %v; want python.exe", in, ok)
+	}
+	if ran[`C:\bin\python3.exe`] {
+		t.Error("the zero-byte alias must never be started")
+	}
+}
+
+func TestIsStoreStub(t *testing.T) {
+	old := statSize
+	defer func() { statSize = old }()
+	statSize = func(string) (int64, bool) { return 0, true }
+	if !IsStoreStub("x") {
+		t.Error("a zero-length file is the Store alias")
+	}
+	statSize = func(string) (int64, bool) { return 5, true }
+	if IsStoreStub("x") {
+		t.Error("a real file is not the alias")
+	}
+	statSize = func(string) (int64, bool) { return 0, false }
+	if IsStoreStub("x") {
+		t.Error("a file that cannot be read is not called an alias")
+	}
+}
+
+func TestCheckArgs(t *testing.T) {
+	got := CheckArgs(Interpreter{Path: "py", Args: []string{"-3"}})
+	if len(got) != 3 || got[0] != "-3" || got[1] != "-c" {
+		t.Errorf("CheckArgs = %v", got)
+	}
+}
