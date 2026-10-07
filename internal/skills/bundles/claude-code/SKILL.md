@@ -57,8 +57,9 @@ couldn't also do.
   the run) and, if the user has configured `VEGALOAD_LLM_PROVIDER` in this
   MCP server's environment, a plain-English narrative.
 - **compare_reports** — diff a candidate JSON report against a baseline JSON
-  report (`vegaload compare`). Returns metric deltas and whether error rate
-  or p95 latency regressed. Use after a second run to check for regressions.
+  report (`vegaload compare`). Returns metric deltas, each named check's pass
+  rate in both runs, and whether error rate, p95 latency or a check's pass
+  rate regressed. Use after a second run to check for regressions.
 - **generate_from_spec** — given a JSON OpenAPI document, write a runnable
   scenario (JavaScript, or Python with `python: true`) that calls every
   operation as a named step, and a runbook with one `vegaload run` command per

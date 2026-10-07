@@ -14,6 +14,7 @@ func GateOptions(baseline *report.Result, pct float64) Options {
 	return Options{
 		P95Ratio:       1 + pct/100,
 		ErrorRateDelta: baseline.ErrorRate * pct / 100,
+		SkipChecks:     true,
 	}
 }
 

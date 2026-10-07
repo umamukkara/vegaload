@@ -394,14 +394,15 @@ type compareReportsArgs struct {
 	CandidatePath  string   `json:"candidate_path"`
 	ErrorRateDelta *float64 `json:"error_rate_delta,omitempty"`
 	P95Ratio       *float64 `json:"p95_ratio,omitempty"`
+	CheckRateDelta *float64 `json:"check_rate_delta,omitempty"`
 }
 
 func compareReportsTool(exePath string) Tool {
 	return Tool{
 		Name: "compare_reports",
 		Description: "Diff a candidate JSON report against a baseline JSON report (both from " +
-			"`vegaload run -out` / run_test). Returns metric deltas and whether error rate or p95 " +
-			"latency regressed. Equivalent to `vegaload compare <baseline.json> <candidate.json>`.",
+			"`vegaload run -out` / run_test). Returns metric deltas, each named check's pass rate in both " +
+			"runs, and whether error rate, p95 latency or a check's pass rate regressed. Equivalent to `vegaload compare <baseline.json> <candidate.json>`.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -409,6 +410,7 @@ func compareReportsTool(exePath string) Tool {
 				"candidate_path":   map[string]any{"type": "string", "description": "path to the candidate vegaload JSON report"},
 				"error_rate_delta": map[string]any{"type": "number", "description": "absolute error-rate slack before counting as a regression (0.01 = one percentage point)"},
 				"p95_ratio":        map[string]any{"type": "number", "description": "max allowed candidate/baseline p95 ratio (1.2 allows 20% headroom)"},
+				"check_rate_delta": map[string]any{"type": "number", "description": "absolute slack on each check's pass rate before counting as a regression (0.01 = one percentage point)"},
 			},
 			"required": []string{"baseline_path", "candidate_path"},
 		},
@@ -426,6 +428,9 @@ func compareReportsTool(exePath string) Tool {
 			}
 			if in.P95Ratio != nil {
 				args = append(args, "-p95-ratio", strconv.FormatFloat(*in.P95Ratio, 'f', -1, 64))
+			}
+			if in.CheckRateDelta != nil {
+				args = append(args, "-check-rate-delta", strconv.FormatFloat(*in.CheckRateDelta, 'f', -1, 64))
 			}
 			args = append(args, in.BaselinePath, in.CandidatePath)
 			stdout, err := RunCLI(ctx, exePath, args...)
