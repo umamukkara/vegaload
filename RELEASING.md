@@ -9,6 +9,14 @@ A release is a version tag. Pushing the tag runs
 4. publish the container image to `ghcr.io/vegaload/vegaload` (a second job,
    `image`, in the same workflow).
 
+## Before you tag
+
+Set `appVersion` in `charts/vegaload/Chart.yaml` to the new version without the
+`v` (for a tag `v0.5.2`, write `"0.5.2"`), and the image in
+`examples/k8s/job.yaml` too. Merge that first. The Release run checks it with
+`scripts/check-chart-version.sh` and stops before it publishes anything if the
+two do not match. A pre-release tag such as `v0.5.2-rc.1` is not checked.
+
 ## One-time setup
 
 1. Create a public repo `vegaload/homebrew-tap` with a `README.md` and no
