@@ -100,6 +100,19 @@ type Driver struct {
 // New returns an error only for a configuration problem, never for the
 // broker being unreachable, which Do reports per call.
 func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
+	return newDriver(target, timeout, nil)
+}
+
+// NewWithPassword is New for a caller that already holds the password, such
+// as a scenario script that read it from an environment variable it was
+// given. The command line never uses it: there the password is read from
+// the environment variable that password_env names. password_env and a
+// password given here are not allowed together.
+func NewWithPassword(target protocol.Target, timeout time.Duration, password string) (*Driver, error) {
+	return newDriver(target, timeout, &password)
+}
+
+func newDriver(target protocol.Target, timeout time.Duration, password *string) (*Driver, error) {
 	d := &Driver{target: target, timeout: timeout}
 
 	u, err := url.Parse(target.URL)
@@ -170,7 +183,15 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	}
 
 	d.username = target.Option("username", "")
-	if env := target.Option("password_env", ""); env != "" {
+	if password != nil {
+		if target.Option("password_env", "") != "" {
+			return nil, errors.New("mqtt: give a password or password_env, not both")
+		}
+		if d.username == "" {
+			return nil, errors.New("mqtt: a password needs username: a password is only sent together with a user name")
+		}
+		d.password = *password
+	} else if env := target.Option("password_env", ""); env != "" {
 		if d.username == "" {
 			return nil, errors.New("mqtt: password_env needs username: a password is only sent together with a user name")
 		}
@@ -234,8 +255,22 @@ func wait(ctx context.Context, tok paho.Token, deadline time.Time, what string) 
 	}
 }
 
+// Message is one message that came from the broker.
+type Message struct {
+	Topic   string
+	Payload []byte
+}
+
 // Do implements protocol.Protocol.
 func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
+	res, _ := d.Run(parent)
+	return res, nil
+}
+
+// Run is Do, and it also returns the messages that were received: the
+// messages that satisfied a subscribe, or the message that came back in a
+// roundtrip. A load test does not need them. A scenario script does.
+func (d *Driver) Run(parent context.Context) (protocol.Result, []Message) {
 	// One budget for the whole call. Cancelling ctx also closes the
 	// connection (see open), so the end of the run, or the timeout, stops
 	// a connect that is still in progress.
@@ -272,14 +307,14 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 	// this iteration's own message is kept, so other users' traffic on a
 	// shared topic can never crowd it out. A surplus message is dropped,
 	// so a busy topic can never block Paho's delivery.
-	msgs := make(chan []byte, d.count)
+	msgs := make(chan Message, d.count)
 	handler := func(_ paho.Client, m paho.Message) {
 		p := m.Payload()
 		if d.mode == modeRoundtrip && !bytes.Equal(p, payload) {
 			return
 		}
 		select {
-		case msgs <- append([]byte(nil), p...):
+		case msgs <- Message{Topic: m.Topic(), Payload: append([]byte(nil), p...)}:
 		default:
 		}
 	}
@@ -291,6 +326,7 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 	defer c.Disconnect(100)
 
 	var sent, got int64
+	var recv []Message
 	subscribe := func() error {
 		tok := c.Subscribe(topic, d.qos, handler)
 		if err := wait(ctx, tok, deadline, "the subscription"); err != nil {
@@ -314,40 +350,42 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 	switch d.mode {
 	case modePublish:
 		if err := publish(); err != nil {
-			return fail(sent, got, err), nil
+			return fail(sent, got, err), recv
 		}
 
 	case modeSubscribe:
 		if err := subscribe(); err != nil {
-			return fail(sent, got, err), nil
+			return fail(sent, got, err), recv
 		}
 		for n := 0; n < d.count; n++ {
 			m, err := d.receive(ctx, msgs, deadline)
 			if err != nil {
-				return fail(sent, got, err), nil
+				return fail(sent, got, err), recv
 			}
-			got += int64(len(m))
-			if len(d.expect) > 0 && !bytes.Contains(m, d.expect) {
-				return fail(sent, got, fmt.Errorf("mqtt: message %q did not contain %q", clip(m), d.expect)), nil
+			got += int64(len(m.Payload))
+			recv = append(recv, m)
+			if len(d.expect) > 0 && !bytes.Contains(m.Payload, d.expect) {
+				return fail(sent, got, fmt.Errorf("mqtt: message %q did not contain %q", clip(m.Payload), d.expect)), recv
 			}
 		}
 
 	case modeRoundtrip:
 		if err := subscribe(); err != nil {
-			return fail(sent, got, err), nil
+			return fail(sent, got, err), recv
 		}
 		if err := publish(); err != nil {
-			return fail(sent, got, err), nil
+			return fail(sent, got, err), recv
 		}
 		for n := 0; n < d.count; n++ {
 			m, err := d.receive(ctx, msgs, deadline)
 			if err != nil {
-				return fail(sent, got, err), nil
+				return fail(sent, got, err), recv
 			}
-			got += int64(len(m))
+			got += int64(len(m.Payload))
+			recv = append(recv, m)
 		}
 	}
-	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, nil
+	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, recv
 }
 
 // open makes Paho dial with ctx instead of with its own dialer. When ctx
@@ -379,16 +417,16 @@ func open(ctx context.Context) func(*url.URL, paho.ClientOptions) (net.Conn, err
 }
 
 // receive waits for the next message.
-func (d *Driver) receive(ctx context.Context, msgs <-chan []byte, deadline time.Time) ([]byte, error) {
+func (d *Driver) receive(ctx context.Context, msgs <-chan Message, deadline time.Time) (Message, error) {
 	t := time.NewTimer(time.Until(deadline))
 	defer t.Stop()
 	select {
 	case m := <-msgs:
 		return m, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return Message{}, ctx.Err()
 	case <-t.C:
-		return nil, fmt.Errorf("%w waiting for a message", errTimeout)
+		return Message{}, fmt.Errorf("%w waiting for a message", errTimeout)
 	}
 }
 

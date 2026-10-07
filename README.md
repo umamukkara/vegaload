@@ -256,6 +256,46 @@ protocol-direct commands from an OpenAPI spec:
 writes `sample-app.vegaload-plan.md`: one ready-to-run `vegaload run`
 command per endpoint the spec declares.
 
+### Call TCP, UDP and MQTT from a scenario
+
+A JavaScript scenario can also use the `tcp`, `udp` and `mqtt` globals. Each
+function is one call that does one job and returns what it read:
+
+```js
+export default function () {
+  const r = tcp.send("tcp://localhost:6379", { body: "PING\r\n", until: "\r\n" });
+  check(r, { "got PONG": (x) => x.ok && x.body === "+PONG\r\n" });
+
+  mqtt.publish("mqtt://localhost", { topic: "sensors/1", body: "21.5", qos: 1 });
+  const m = mqtt.subscribe("mqtt://localhost", { topic: "sensors/#", count: 2, timeout: "5s" });
+  console.log(m.messages.map((x) => x.topic + "=" + x.body).join(", "));
+}
+```
+
+- `tcp.send(url, options)` and `udp.send(url, options)`: the options are the
+  same as the `-opt` keys in the TCP and UDP sections above (`until`, `read`,
+  `expect`, `tls`, `reply`, and so on), plus `body`. The reply is `r.body`.
+  A script's text is sent as written: backslash escapes are off unless you
+  pass `escape: true`.
+- `mqtt.publish`, `mqtt.subscribe` and `mqtt.roundtrip` take `topic`, `body`
+  and the other MQTT `-opt` keys (not `mode`: the function sets it). The
+  messages that were read are in `r.messages`, each with `topic` and `body`.
+  Give a password as `password: env.MQTT_PASSWORD` and run with
+  `-secret-env MQTT_PASSWORD`, so it is removed from every output.
+- Every function also accepts `insecure` (skip TLS checks) and `timeout`
+  (milliseconds, or text such as `"2s"`).
+- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`.
+  A network failure does not throw: `ok` is false and `error` says why. A
+  call that is set up wrongly (an unknown option, a missing topic) does throw.
+- The safety allowlist is checked for the host of every call, like `http`.
+- Each call opens its own connection and closes it, like the load-test mode.
+  For `mqtt.subscribe`, the message must arrive during the call, so run it
+  when something else publishes.
+
+[`examples/scenarios/mqtt-tcp.vl.js`](./examples/scenarios/mqtt-tcp.vl.js)
+is a small example. Python scenarios do not have these globals yet. Kafka
+will follow.
+
 ### Start from a browser recording
 
 Record a real session in your browser (the network tab can save it as a

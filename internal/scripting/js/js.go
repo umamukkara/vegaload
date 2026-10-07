@@ -136,6 +136,7 @@ type VU struct {
 	fn goja.Callable
 
 	http        *netapi.HTTPClient
+	proto       *netapi.ProtoClient
 	safetyCheck netapi.SafetyCheck
 	timeout     time.Duration
 	ctx         context.Context //nolint:containedctx // set per-Iteration; native functions called synchronously from within that same iteration read it to build call/dial contexts.
@@ -187,6 +188,7 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...
 	v := &VU{
 		vm:          vm,
 		http:        netapi.NewHTTPClient(check, timeout),
+		proto:       netapi.NewProtoClient(check, timeout),
 		safetyCheck: check,
 		timeout:     timeout,
 	}
@@ -213,6 +215,11 @@ func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...
 	}
 	if err := vm.Set("ws", v.newWSGlobal(vm)); err != nil {
 		return nil, fmt.Errorf("js: %w", err)
+	}
+	for name, obj := range v.newProtoGlobals(vm) {
+		if err := vm.Set(name, obj); err != nil {
+			return nil, fmt.Errorf("js: %w", err)
+		}
 	}
 	if err := vm.Set("check", v.newCheckFunc(vm)); err != nil {
 		return nil, fmt.Errorf("js: %w", err)

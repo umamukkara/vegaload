@@ -173,14 +173,25 @@ func (d *Driver) Name() string { return d.network }
 // does it. The same context ends the call when the run ends, because
 // context.AfterFunc closes the socket as soon as the context is done.
 func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
+	res, _ := d.Run(parent)
+	return res, nil
+}
+
+// Run is Do, and it also returns the reply that was read, even when the
+// call failed after some bytes came in. A load test does not need the
+// reply. A scenario script does.
+func (d *Driver) Run(parent context.Context) (protocol.Result, []byte) {
 	ctx, cancel := context.WithTimeout(parent, d.timeout)
 	defer cancel()
 
-	var res protocol.Result
+	var (
+		res   protocol.Result
+		reply []byte
+	)
 	if d.network == "udp" {
-		res = d.doUDP(ctx)
+		res, reply = d.doUDP(ctx)
 	} else {
-		res = d.doTCP(ctx)
+		res, reply = d.doTCP(ctx)
 	}
 	// Say "timeout" only when -timeout ran out, and not when the run ended.
 	// The clock is checked, not ctx.Err(): the timer that cancels a context
@@ -188,7 +199,7 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 	if !res.Success && !ended(parent) && ended(ctx) {
 		res.Err = fmt.Errorf("%s: no answer within -timeout %s: %w", d.network, d.timeout, res.Err)
 	}
-	return res, nil
+	return res, reply
 }
 
 // ended reports whether ctx is done, or its deadline has passed.
@@ -208,7 +219,7 @@ func fail(sent, got int64, err error) protocol.Result {
 	return protocol.Result{Success: false, BytesSent: sent, BytesReceived: got, Err: err}
 }
 
-func (d *Driver) doTCP(ctx context.Context) protocol.Result {
+func (d *Driver) doTCP(ctx context.Context) (protocol.Result, []byte) {
 	var dialer net.Dialer // no Timeout of its own: ctx carries the one budget
 	var (
 		conn net.Conn
@@ -224,7 +235,7 @@ func (d *Driver) doTCP(ctx context.Context) protocol.Result {
 		conn, err = dialer.DialContext(ctx, "tcp", d.addr)
 	}
 	if err != nil {
-		return fail(0, 0, err)
+		return fail(0, 0, err), nil
 	}
 	defer conn.Close()
 	// A run that ends mid-call closes the connection so Do returns now.
@@ -239,23 +250,23 @@ func (d *Driver) doTCP(ctx context.Context) protocol.Result {
 		n, err := conn.Write(d.body)
 		sent = int64(n)
 		if err != nil {
-			return fail(sent, 0, err)
+			return fail(sent, 0, err), nil
 		}
 	}
 
 	if d.read == 0 && len(d.until) == 0 && len(d.expect) == 0 {
-		return protocol.Result{Success: true, BytesSent: sent}
+		return protocol.Result{Success: true, BytesSent: sent}, nil
 	}
 
 	reply, err := d.readTCP(conn)
 	got := int64(len(reply))
 	if err != nil {
-		return fail(sent, got, err)
+		return fail(sent, got, err), reply
 	}
 	if len(d.expect) > 0 && !bytes.Contains(reply, d.expect) {
-		return fail(sent, got, fmt.Errorf("tcp: reply did not contain %q", d.expect))
+		return fail(sent, got, fmt.Errorf("tcp: reply did not contain %q", d.expect)), reply
 	}
-	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}
+	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, reply
 }
 
 // readTCP reads the reply the options ask for.
@@ -295,11 +306,11 @@ func (d *Driver) readTCP(conn net.Conn) ([]byte, error) {
 	}
 }
 
-func (d *Driver) doUDP(ctx context.Context) protocol.Result {
+func (d *Driver) doUDP(ctx context.Context) (protocol.Result, []byte) {
 	var dialer net.Dialer // no Timeout of its own: ctx carries the one budget
 	conn, err := dialer.DialContext(ctx, "udp", d.addr)
 	if err != nil {
-		return fail(0, 0, err)
+		return fail(0, 0, err), nil
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -311,22 +322,22 @@ func (d *Driver) doUDP(ctx context.Context) protocol.Result {
 	n, err := conn.Write(d.body)
 	sent := int64(n)
 	if err != nil {
-		return fail(sent, 0, err)
+		return fail(sent, 0, err), nil
 	}
 	if !d.reply {
-		return protocol.Result{Success: true, BytesSent: sent}
+		return protocol.Result{Success: true, BytesSent: sent}, nil
 	}
 
 	buf := make([]byte, maxDatagram)
 	n, err = conn.Read(buf)
 	if err != nil {
-		return fail(sent, 0, fmt.Errorf("udp: no reply: %w", err))
+		return fail(sent, 0, fmt.Errorf("udp: no reply: %w", err)), nil
 	}
 	reply := buf[:n]
 	if len(d.expect) > 0 && !bytes.Contains(reply, d.expect) {
-		return fail(sent, int64(n), fmt.Errorf("udp: reply did not contain %q", d.expect))
+		return fail(sent, int64(n), fmt.Errorf("udp: reply did not contain %q", d.expect)), reply
 	}
-	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: int64(n)}
+	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: int64(n)}, reply
 }
 
 // Unescape turns \n, \r, \t, \0, \\ and \xNN in s into the bytes they
