@@ -40,6 +40,9 @@ expect_has   "runs as non-root"                     'runAsNonRoot: true' -- "${d
 expect_has   "read-only root file system"           'readOnlyRootFilesystem: true' -- "${direct[@]}"
 expect_has   "image tag defaults to appVersion"     'vegaload:0.4.0' -- "${direct[@]}"
 expect_has   "image tag can be set"                 'vegaload:9.9.9' -- "${direct[@]}" --set image.tag=9.9.9
+expect_has   "pod fsGroup makes /tmp writable"      'fsGroup: 65532' -- "${direct[@]}"
+expect_has   "the job is kept on upgrade"           'helm.sh/resource-policy": keep' -- "${direct[@]}"
+expect_has   "the scenario ConfigMap has the revision" 'name: t-vegaload-scenario-1' -- --set scenario='x'
 expect_lacks "direct mode has no ConfigMap"         'kind: ConfigMap' -- "${direct[@]}"
 expect_has   "scenario mode makes a ConfigMap"      'kind: ConfigMap' -- --set scenario='export default function () {}'
 expect_has   "scenario mode runs the mounted file"  '"/scenario/scenario.vl.js"' -- --set scenario='export default function () {}'

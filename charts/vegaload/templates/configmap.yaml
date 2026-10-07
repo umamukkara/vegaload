@@ -2,7 +2,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "vegaload.fullname" . }}-scenario
+  # One ConfigMap per revision, so an upgrade does not rewrite the scenario
+  # that an earlier Job used.
+  name: {{ include "vegaload.fullname" . }}-scenario-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "vegaload.labels" . | nindent 4 }}

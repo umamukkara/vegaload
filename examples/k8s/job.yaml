@@ -1,5 +1,5 @@
 # A load test as a plain Kubernetes Job, with no Helm. It needs only access to
-# one namespace. Change the target and the image tag, then:
+# one namespace. Change the target and the image, then:
 #
 #   kubectl apply -f job.yaml
 #   kubectl wait --for=condition=complete --timeout=10m job/vegaload-smoke
@@ -7,6 +7,10 @@
 #
 # A broken threshold exits with code 3, so the Job is marked Failed. Delete the
 # Job to run it again: kubectl delete job vegaload-smoke
+#
+# The image below is not published yet. Build it from the repository's
+# Dockerfile, push it to a registry your cluster can pull from, and put that
+# name here (see "Install" in the README).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,6 +25,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        runAsGroup: 65532
+        # Makes the /tmp emptyDir writable by this user.
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:

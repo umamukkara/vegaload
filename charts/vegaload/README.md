@@ -4,6 +4,12 @@ Runs one VegaLoad load test as a Kubernetes Job. The chart creates a Job (and a
 ConfigMap when you give a scenario file). It creates no CRD, no Role and no
 cluster-wide object, so a user with access to one namespace can install it.
 
+**Image.** The project does not publish a container image yet, so the default
+`ghcr.io/vegaload/vegaload` will not pull. Build one from the repository's
+`Dockerfile`, push it to a registry your cluster can use, and add
+`--set image.repository=<your registry>/vegaload --set image.tag=<tag>` to the
+commands below.
+
 ```
 # Protocol-direct: just a target
 helm install smoke ./charts/vegaload -n perf \
@@ -27,9 +33,15 @@ the Job.
 ## Run it again
 
 `helm upgrade` with the same or new values starts a new Job (the Job name ends
-with the revision number). The old Job and its logs stay until
-`ttlSecondsAfterFinished` ends (24 hours by default). `helm uninstall` deletes
-the Jobs.
+with the revision number). Each Job is marked `helm.sh/resource-policy: keep`,
+so Helm does not delete the old one. The old Job and its logs stay until
+`ttlSecondsAfterFinished` ends (24 hours by default). Each revision also gets
+its own scenario ConfigMap, so an upgrade does not change the scenario of an
+earlier run.
+
+`helm uninstall` does not delete the Jobs either. They are removed by the same
+24-hour limit once they finish, and by `activeDeadlineSeconds` if one never
+finishes. To remove one at once, run `kubectl delete job <name>`.
 
 ## Pass and fail
 
@@ -55,7 +67,8 @@ See `values.yaml`; every value has a comment. The main ones:
 Writing `run.target` is the permission to load test that host, so it is passed
 as `-allow-target`. Any other host a scenario calls must be in
 `run.allowTargets`. The pod runs as a non-root user, with a read-only root file
-system and all capabilities dropped.
+system and all capabilities dropped. A pod `fsGroup` makes the `/tmp` volume
+writable for that user, which is where the audit log goes.
 
 Python scenarios need Python in the image, and the default image has none. Use
 your own image with `image.repository`.

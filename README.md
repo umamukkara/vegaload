@@ -443,7 +443,9 @@ help` for the top-level summary.
 
 A Helm chart in [`charts/vegaload`](./charts/vegaload) runs a load test as a
 Kubernetes Job, close to the service you are testing. It needs no CRD and no
-cluster-wide permissions, only access to one namespace:
+cluster-wide permissions, only access to one namespace. The project does not
+publish a container image yet, so build one from the `Dockerfile` (see
+[Install](#install)) and set `image.repository` and `image.tag`:
 
 ```
 helm install smoke ./charts/vegaload --namespace perf \

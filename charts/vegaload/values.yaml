@@ -3,6 +3,9 @@
 # cluster-wide object, so a user with access to one namespace can install it.
 
 # The VegaLoad image. The tag defaults to the chart's appVersion.
+# The project does not publish this image yet. Until it does, build it from
+# the repository's Dockerfile, push it to a registry your cluster can pull
+# from, and set repository and tag below (see the README).
 image:
   repository: ghcr.io/vegaload/vegaload
   tag: ""
