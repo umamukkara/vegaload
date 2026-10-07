@@ -385,6 +385,30 @@ func TestParseTarget(t *testing.T) {
 	}
 }
 
+func TestSchemeTable(t *testing.T) {
+	for name, sc := range schemes {
+		if sc.http && sc.protocol == "" {
+			t.Errorf("scheme %q is probed over HTTP but names no protocol", name)
+		}
+	}
+	got, err := parseTarget("grpcs://h")
+	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
+		t.Errorf("grpcs://h = %+v, %v", got, err)
+	}
+}
+
+// A UDP target has no connection to open, so the connect check is
+// skipped, not failed.
+func TestTargetConnectSkippedForUDP(t *testing.T) {
+	schemes["udptest"] = scheme{udp: true}
+	defer delete(schemes, "udptest")
+
+	rep := run(t, testEnv(t), Options{Hosts: []string{"none"}, Only: []string{"target.connect"}, Target: "udptest://127.0.0.1:9"})
+	if r := byID(t, rep, "target.connect"); r.Status != Skip {
+		t.Errorf("target.connect for UDP = %+v, want Skip", r)
+	}
+}
+
 func TestTargetChecksAgainstLiveServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	defer srv.Close()

@@ -47,10 +47,6 @@ import (
 	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/engine"
 	"github.com/vegaload/vegaload/internal/protocol"
-	"github.com/vegaload/vegaload/internal/protocol/grpc"
-	"github.com/vegaload/vegaload/internal/protocol/http1"
-	"github.com/vegaload/vegaload/internal/protocol/http2"
-	"github.com/vegaload/vegaload/internal/protocol/websocket"
 	"github.com/vegaload/vegaload/internal/report"
 	"github.com/vegaload/vegaload/internal/safety"
 	"github.com/vegaload/vegaload/internal/scripting/js"
@@ -77,6 +73,22 @@ func (h headerFlags) Set(v string) error {
 		return fmt.Errorf("-header %q must be in \"Key: Value\" form", v)
 	}
 	h[strings.TrimSpace(k)] = strings.TrimSpace(val)
+	return nil
+}
+
+// optionFlags accumulates repeated -opt key=value flags into a map. The
+// keys are driver specific; see protocol.Target.Options.
+type optionFlags map[string]string
+
+func (o optionFlags) String() string { return "" }
+
+func (o optionFlags) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	k = strings.TrimSpace(k)
+	if !ok || k == "" {
+		return fmt.Errorf("-opt %q must be in key=value form", v)
+	}
+	o[k] = val
 	return nil
 }
 
@@ -161,6 +173,7 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	cfg := &runConfig{}
 	headers := headerFlags{}
+	options := optionFlags{}
 
 	var stagesRaw string
 	var bodyRaw string
@@ -177,13 +190,14 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.Float64Var(&cfg.Rate, "rate", 0, "iterations per second (constant-arrival-rate)")
 	fs.IntVar(&cfg.MaxVUs, "max-vus", 0, "max concurrent VUs (constant-arrival-rate)")
 	fs.StringVar(&cfg.Target.URL, "target", "", "target URL or host:port (protocol-direct mode; omit if a scenario file is given)")
-	fs.StringVar(&cfg.Protocol, "protocol", "", "http1, http2, grpc, or websocket (protocol-direct mode)")
+	fs.StringVar(&cfg.Protocol, "protocol", "", protocolList()+" (protocol-direct mode)")
 	fs.StringVar(&method, "method", "", "HTTP verb, or the full gRPC method (e.g. /package.Service/Method)")
 	fs.StringVar(&bodyRaw, "body", "", "request body")
 	fs.BoolVar(&insecure, "insecure", false, "skip TLS certificate verification")
 	fs.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "per-iteration timeout")
 	fs.StringVar(&cfg.OutPath, "out", "", "also write a JSON summary to this path")
 	fs.Var(headers, "header", "request header \"Key: Value\" (repeatable)")
+	fs.Var(options, "opt", "driver option key=value, e.g. -opt read=64 (repeatable; each protocol lists its own keys)")
 
 	// FR-CLI-06: target allowlist and hard caps, on by default.
 	fs.Var(&allowTargets, "allow-target", "additional host (or host:port) allowed without confirmation, besides localhost (repeatable)")
@@ -242,6 +256,9 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	cfg.Target.Method = method
 	cfg.Target.Body = []byte(bodyRaw)
 	cfg.Target.Headers = headers
+	if len(options) > 0 {
+		cfg.Target.Options = options
+	}
 	cfg.Target.InsecureSkipVerify = insecure
 
 	if stagesRaw != "" {
@@ -303,6 +320,9 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	}
 	if cfg.ScenarioPath != "" && (cfg.Target.URL != "" || cfg.Protocol != "") {
 		return nil, fmt.Errorf("a scenario file and -target/-protocol are two different modes — see run.go's doc comment; use one, not both")
+	}
+	if cfg.ScenarioPath != "" && len(cfg.Target.Options) > 0 {
+		return nil, fmt.Errorf("-opt sets options for a protocol driver, so it needs -target and -protocol, not a scenario file")
 	}
 
 	return cfg, nil
@@ -426,22 +446,16 @@ func buildSafetyCheck(cfg *runConfig) netapi.SafetyCheck {
 // the richer per-call detail in protocol.Result (status code, byte
 // counts) wires into a real report in Phase 1, not here.
 func protocolIteration(name string, target protocol.Target, timeout time.Duration) (engine.IterationFunc, func() error, error) {
-	var (
-		driver protocol.Protocol
-		err    error
-	)
-	switch name {
-	case "http1":
-		driver = http1.New(target, timeout)
-	case "http2":
-		driver, err = http2.New(target, timeout)
-	case "grpc":
-		driver, err = grpc.New(target, timeout)
-	case "websocket":
-		driver, err = websocket.New(target, timeout)
-	default:
-		return nil, nil, fmt.Errorf("unknown -protocol %q (want http1, http2, grpc, or websocket)", name)
+	spec, ok := findDriver(name)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown -protocol %q (want %s)", name, protocolList())
 	}
+	// A driver says which -opt keys it knows. Any other key is a typo or
+	// meant for another protocol, so refuse it now instead of ignoring it.
+	if err := target.RejectUnknownOptions(spec.options...); err != nil {
+		return nil, nil, fmt.Errorf("-opt for -protocol %s: %w", name, err)
+	}
+	driver, err := spec.build(target, timeout)
 	if err != nil {
 		return nil, nil, err
 	}

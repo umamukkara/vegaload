@@ -11,6 +11,11 @@ package protocol
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // Target describes what a driver connects to and how, in terms generic
@@ -36,6 +41,52 @@ type Target struct {
 	// with self-signed or internal-CA certificates; it is false (verify
 	// normally) by default and a scenario author has to opt in.
 	InsecureSkipVerify bool
+	// Options carries settings that only one driver understands, as
+	// text key=value pairs, for example a TCP driver's "read" size or a
+	// message queue driver's "topic". They come from repeated -opt
+	// flags (or the MCP "options" argument). A driver reads the keys it
+	// knows through the Option helpers below. Every driver must list the
+	// keys it knows, and RejectUnknownOptions turns any other key into an
+	// error, so a typo is never silently ignored. It is nil when none
+	// were given.
+	Options map[string]string
+}
+
+// Option returns the value of an option key, or def if it was not set.
+func (t Target) Option(key, def string) string {
+	if v, ok := t.Options[key]; ok {
+		return v
+	}
+	return def
+}
+
+// OptionInt returns an option as an integer, or def if it was not set.
+// A value that is not a whole number is an error, so a typo is reported
+// instead of silently using the default.
+func (t Target) OptionInt(key string, def int) (int, error) {
+	v, ok := t.Options[key]
+	if !ok {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("option %s=%q: want a whole number", key, v)
+	}
+	return n, nil
+}
+
+// OptionDuration returns an option as a duration such as "250ms" or "2s",
+// or def if it was not set.
+func (t Target) OptionDuration(key string, def time.Duration) (time.Duration, error) {
+	v, ok := t.Options[key]
+	if !ok {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("option %s=%q: want a duration such as 500ms or 2s", key, v)
+	}
+	return d, nil
 }
 
 // Result is what a driver reports after one Do call — enough detail for
@@ -76,4 +127,31 @@ type Protocol interface {
 	// clients). Called once, after every VU using this driver instance
 	// has stopped.
 	Close() error
+}
+
+// RejectUnknownOptions returns an error if the target has an option key
+// that is not in allowed. A driver that takes no options passes none, and
+// any option is then refused. The error lists the keys that are accepted.
+func (t Target) RejectUnknownOptions(allowed ...string) error {
+	ok := make(map[string]bool, len(allowed))
+	for _, a := range allowed {
+		ok[a] = true
+	}
+	var unknown []string
+	for k := range t.Options {
+		if !ok[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	if len(allowed) == 0 {
+		return fmt.Errorf("unknown option %s (this protocol takes no options)", strings.Join(unknown, ", "))
+	}
+	known := append([]string(nil), allowed...)
+	sort.Strings(known)
+	return fmt.Errorf("unknown option %s (this protocol accepts: %s)",
+		strings.Join(unknown, ", "), strings.Join(known, ", "))
 }

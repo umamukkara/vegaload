@@ -102,6 +102,7 @@ type runTestArgs struct {
 	Yes           bool     `json:"yes,omitempty"`
 	ReportPath    string   `json:"report_path,omitempty"`
 	NoReport      bool     `json:"no_report,omitempty"`
+	Options       []string `json:"options,omitempty"`
 	Thresholds    []string `json:"thresholds,omitempty"`
 	BaselinePath  string   `json:"baseline_path,omitempty"`
 	MaxRegression *float64 `json:"max_regression,omitempty"`
@@ -129,6 +130,7 @@ func runTestTool(exePath string) Tool {
 				"scenario_path":  map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
 				"target":         map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
 				"protocol":       map[string]any{"type": "string", "description": "http1, http2, grpc, or websocket (protocol-direct mode)"},
+				"options":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "driver options, each \"key=value\" (protocol-direct mode). Each protocol has its own keys"},
 				"executor":       map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
 				"vus":            map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
 				"duration":       map[string]any{"type": "string", "description": "run duration, e.g. \"30s\" (fixed-vus, constant-arrival-rate)"},
@@ -189,6 +191,9 @@ func runTestTool(exePath string) Tool {
 			}
 			if in.Protocol != "" {
 				args = append(args, "-protocol", in.Protocol)
+			}
+			for _, o := range in.Options {
+				args = append(args, "-opt", o)
 			}
 			for _, t := range in.AllowTargets {
 				args = append(args, "-allow-target", t)
