@@ -41,7 +41,8 @@ The same port speaks HTTP/1.1 and HTTP/2 over plain TCP (h2c), so
 | POST   | `/widgets`      | creates a widget, 20-60ms latency, and a ~3% random `500`  |
 
 [`openapi.json`](./openapi.json) describes these four operations, for the
-`generate_from_spec` / `vegaload new -from-openapi` walkthrough.
+`generate_from_spec` / `vegaload new -from-openapi` walkthrough, which writes a
+runnable scenario for them.
 
 ### WebSocket -- `ws://127.0.0.1:8080/ws/echo`
 

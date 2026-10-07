@@ -253,8 +253,17 @@ protocol-direct commands from an OpenAPI spec:
 ./vegaload new -from-openapi examples/sample-app/openapi.json sample-app
 ```
 
-writes `sample-app.vegaload-plan.md`: one ready-to-run `vegaload run`
-command per endpoint the spec declares.
+writes two files. `sample-app.vl.js` is a runnable scenario that calls every
+operation of the spec once per iteration, each as a named step (add `-python`
+for a Python scenario; flags go before the name). It sends the example bodies
+and required query parameters from the spec, reads a credential from `env`
+(give it with `-secret-env`), and uses the id that a create returns in the calls
+under it. A spec describes each endpoint on its own, so the order (creates,
+reads, updates, deletes) is a guess: the file says so, and marks the ids and
+other values it could not fill. Check it with `vegaload validate` and edit it to
+fit your real flow. `sample-app.vegaload-plan.md` is a runbook with one
+ready-to-run `vegaload run` command per endpoint, for loading one endpoint at a
+time.
 
 ### Call TCP, UDP, MQTT, Kafka and gRPC from a scenario
 

@@ -36,8 +36,9 @@ alwaysApply: false
   `VEGALOAD_LLM_PROVIDER` is configured for this MCP server.
 - `compare_reports` — diff a candidate JSON report against a baseline
   (`vegaload compare`); reports whether error rate or p95 latency regressed.
-- `generate_from_spec` — generate a runbook of ready-to-run `vegaload run`
-  commands from a JSON OpenAPI spec (JSON only, not YAML).
+- `generate_from_spec` — write a runnable scenario (every operation as a named
+  step) and a runbook of `vegaload run` commands from a JSON OpenAPI spec (JSON
+  only, not YAML). The order is a guess: validate it and edit it.
 - `validate_scenario` — run a scenario once, with one user, and report whether
   it works (`vegaload validate`). Makes real calls under the same host rules as
   `run_test`. Returns `valid`, and when not valid, `stage` and `error`. Call it

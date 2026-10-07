@@ -128,20 +128,22 @@ A CI job is the same command; the build fails when the exit code is not 0:
 - run: vegaload run -target "$TARGET" -protocol http1 -vus 20 -duration 1m -threshold "p95 < 300ms" -threshold "error_rate < 1%"
 ```
 
-## 4. Generate a runbook from an OpenAPI spec
+## 4. Generate a scenario from an OpenAPI spec
 
 `generate_from_spec` (the MCP tool) and `vegaload new -from-openapi` (the CLI
-command behind it) are the same thing -- a Markdown runbook of one
-ready-to-run command per endpoint, not a chained scenario (an OpenAPI spec
-describes each endpoint on its own, not how their responses should feed
-into each other -- see `internal/openapi`'s doc comment):
+command behind it) are the same thing:
 
 ```
 vegaload new -from-openapi ../sample-app/openapi.json sample-app
 ```
 
-This writes `sample-app.vegaload-plan.md` with a `vegaload run` command for
-each of `/health`, `/widgets` (GET and POST), and `/widgets/{id}`.
+This writes two files. `sample-app.vl.js` is a scenario that calls each of
+`/health`, `/widgets` (GET and POST) and `/widgets/{id}` as a named step. The
+`POST /widgets` runs first, and the id it returns is used for `GET
+/widgets/{id}`. Run it with `vegaload run sample-app.vl.js`. A spec does not
+say how its endpoints fit together, so the order is a guess: check it and edit
+it. `sample-app.vegaload-plan.md` is a runbook with one `vegaload run` command
+per endpoint, for loading one endpoint at a time.
 
 ## 5. The scripted scenario
 
