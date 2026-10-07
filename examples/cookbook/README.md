@@ -43,17 +43,21 @@ requests beat). Run this before any bigger test.
 
 ## 2. Find out how many users it can take
 
-Raise the number of users in steps and watch where latency or errors start
-to climb. `-stages` takes `users:time` pairs.
+Raise the number of users in stages and watch where latency or errors start
+to climb. `-stages` takes `users:time` pairs: the first number is how many
+users to reach, the second is how long the stage lasts. The users go up
+smoothly during each stage.
 
 ```
 vegaload run -target http://127.0.0.1:8080/widgets -protocol http1 \
-  -executor ramp -vus 50 -stages 10:20s,25:20s,50:20s,0:10s
+  -executor ramp -stages 10:20s,25:20s,50:20s,0:10s
 ```
 
-`-vus` is the most users the run may use. Open the HTML report and look at
-the time series: the point where p95 bends up is your limit. Use
-`-executor step` for jumps instead of smooth climbs.
+This run lasts as long as its stages, 70 seconds here. `-duration` is not
+used with `-stages`, even though the start line of the run prints the default
+10 seconds. Open the HTML report and look at the time series: the
+point where p95 bends up is your limit. Use `-executor step` for jumps
+instead of smooth climbs.
 
 ## 3. Send a fixed number of requests per second
 
