@@ -22,6 +22,10 @@ type fakeBroker struct {
 	// Optional login check. Empty user means no check.
 	user, pass string
 
+	// Optional. When set, subscribers get this payload instead of the real
+	// one. It stands for another user's message on the same topic.
+	decoy []byte
+
 	mu        sync.Mutex
 	clientIDs []string
 	published []pubRecord
@@ -263,6 +267,9 @@ func (b *fakeBroker) route(topic string, payload []byte, qos byte, retain bool) 
 		}
 	}
 	b.mu.Unlock()
+	if b.decoy != nil {
+		payload = b.decoy
+	}
 	for _, c := range targets {
 		c.write(publishPacket(topic, payload, false))
 	}

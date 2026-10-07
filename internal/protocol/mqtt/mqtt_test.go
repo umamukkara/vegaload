@@ -3,6 +3,7 @@ package mqtt
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -216,6 +217,16 @@ func TestRoundtrip_ManyAtOnceOnOneTopic(t *testing.T) {
 	}
 }
 
+func TestRoundtrip_OtherUsersMessageDoesNotCount(t *testing.T) {
+	// The broker hands back a message that belongs to someone else.
+	b := startBroker(t)
+	b.decoy = []byte("msg some-other-client-id")
+	res := do(t, target(b.url(), "msg {id}", map[string]string{"mode": "roundtrip", "topic": "shared"}), 400*time.Millisecond)
+	if res.Success {
+		t.Fatal("another user's message must not count as our own")
+	}
+}
+
 func TestConnectRefused(t *testing.T) {
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := l.Addr().String()
@@ -227,17 +238,19 @@ func TestConnectRefused(t *testing.T) {
 }
 
 func TestRunEndCutsCallShort(t *testing.T) {
-	// A broker that accepts the connection and never answers.
+	// A broker that accepts the connection and never answers. The test
+	// also checks that the driver closes its side of the connection.
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer l.Close()
+	closed := make(chan struct{})
 	go func() {
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				return
-			}
-			defer c.Close()
+		c, err := l.Accept()
+		if err != nil {
+			return
 		}
+		defer c.Close()
+		_, _ = io.Copy(io.Discard, c) // returns when the driver closes
+		close(closed)
 	}()
 	d, _ := New(target("mqtt://"+l.Addr().String(), "x", map[string]string{"topic": "t"}), 10*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -246,6 +259,11 @@ func TestRunEndCutsCallShort(t *testing.T) {
 	res, _ := d.Do(ctx)
 	if res.Success || time.Since(start) > 2*time.Second {
 		t.Errorf("cancel should end the call quickly: success=%v after %v", res.Success, time.Since(start))
+	}
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Error("the connection was left open after the run ended")
 	}
 }
 
@@ -290,7 +308,10 @@ func TestNew_ConfigErrors(t *testing.T) {
 		{"bad keepalive", target("mqtt://h", "", map[string]string{"topic": "t", "keepalive": "0s"}), "keepalive"},
 		{"wildcard publish", target("mqtt://h", "", map[string]string{"topic": "a/#"}), "wildcard"},
 		{"wildcard roundtrip", target("mqtt://h", "", map[string]string{"topic": "a/+", "mode": "roundtrip"}), "wildcard"},
-		{"unset password env", target("mqtt://h", "", map[string]string{"topic": "t", "password_env": "VEGALOAD_SURELY_UNSET_VAR"}), "not set"},
+		{"unset password env", target("mqtt://h", "", map[string]string{"topic": "t", "username": "u", "password_env": "VEGALOAD_SURELY_UNSET_VAR"}), "not set"},
+		{"password without user", target("mqtt://h", "", map[string]string{"topic": "t", "password_env": "PATH"}), "username"},
+		{"roundtrip without id", target("mqtt://h", "same body", map[string]string{"topic": "t", "mode": "roundtrip"}), "{id}"},
+		{"clean is gone", target("mqtt://h", "", map[string]string{"topic": "t", "clean": "false"}), "unknown option clean"},
 		{"expect when publishing", target("mqtt://h", "", map[string]string{"topic": "t", "expect": "x"}), "subscribe mode"},
 	}
 	for _, c := range cases {

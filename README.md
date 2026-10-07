@@ -153,10 +153,11 @@ job is set with `-opt mode=...`. The body is the message payload.
 ```
 
 The options are `mode` (`publish`, `subscribe`, `roundtrip`), `topic`,
-`qos`, `retain`, `username`, `password_env`, `client_id`, `count`, `expect`,
-`clean` and `keepalive`. Put the password in an environment variable and
-pass its name with `-opt password_env=NAME`, so it is not on the command
-line. Use `mqtts://` for TLS, with `-insecure` if the certificate is not
+`qos`, `retain`, `username`, `password_env`, `client_id`, `count`, `expect`
+and `keepalive`. Put the password in an environment variable and pass its
+name with `-opt password_env=NAME` (it needs `username`), so it is not on
+the command line. In `roundtrip` mode the body must contain `{id}`, so each
+user can tell its own message from the messages of other users. Use `mqtts://` for TLS, with `-insecure` if the certificate is not
 trusted. Every iteration uses a new client id, because a broker closes an
 older connection that has the same id. The same host allowlist and caps
 apply as for HTTP targets.

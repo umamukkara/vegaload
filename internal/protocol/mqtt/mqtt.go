@@ -8,8 +8,10 @@
 //	publish    connect, publish the body, wait for the broker's ack. This
 //	           is the default.
 //	subscribe  connect, subscribe, wait for count messages.
-//	roundtrip  connect, subscribe, publish the body, wait until the same
-//	           message comes back. This measures delivery through the broker.
+//	roundtrip  connect, subscribe, publish the body, wait until this
+//	           iteration's own message comes back. This measures delivery
+//	           through the broker. The body must contain {id}, so the driver
+//	           can tell its own message from another user's.
 //
 // Options (set with -opt key=value):
 //
@@ -22,17 +24,18 @@
 //	retain         true to publish the message as retained.
 //	username       The user name.
 //	password_env   The name of an environment variable that holds the
-//	               password. The password is never put on the command line.
+//	               password. It needs username. The password is never put
+//	               on the command line.
 //	client_id      A prefix for the client ids (default "vegaload"). Each
 //	               iteration adds a unique suffix, because a broker closes
 //	               an older connection that has the same id.
 //	count          subscribe and roundtrip: messages to wait for (default 1).
 //	expect         subscribe: every message must contain this text.
-//	clean          false to ask for a persistent session (default true).
 //	keepalive      Keep-alive time, such as 30s (default 30s).
 //
-// The body is the message payload. {id} in it is replaced too. Use an
-// mqtts:// target for TLS.
+// Every iteration asks for a clean session, so the broker keeps nothing
+// between iterations. The body is the message payload. {id} in it is
+// replaced too. Use an mqtts:// target for TLS.
 package mqtt
 
 import (
@@ -60,7 +63,7 @@ import (
 // table uses the same list, so the two cannot differ.
 var Options = []string{
 	"mode", "topic", "qos", "retain", "username", "password_env",
-	"client_id", "count", "expect", "clean", "keepalive",
+	"client_id", "count", "expect", "keepalive",
 }
 
 const (
@@ -85,7 +88,6 @@ type Driver struct {
 	prefix   string
 	count    int
 	expect   []byte
-	clean    bool
 	alive    time.Duration
 
 	salt string // random, per Driver, so two runs never share client ids
@@ -154,9 +156,6 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	if d.retain, err = target.OptionBool("retain", false); err != nil {
 		return nil, fmt.Errorf("mqtt: %w", err)
 	}
-	if d.clean, err = target.OptionBool("clean", true); err != nil {
-		return nil, fmt.Errorf("mqtt: %w", err)
-	}
 	if d.count, err = target.OptionInt("count", 1); err != nil {
 		return nil, fmt.Errorf("mqtt: %w", err)
 	}
@@ -172,6 +171,9 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 
 	d.username = target.Option("username", "")
 	if env := target.Option("password_env", ""); env != "" {
+		if d.username == "" {
+			return nil, errors.New("mqtt: password_env needs username: a password is only sent together with a user name")
+		}
 		pw, ok := os.LookupEnv(env)
 		if !ok || pw == "" {
 			return nil, fmt.Errorf("mqtt: password_env=%s, but that environment variable is not set", env)
@@ -184,6 +186,9 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	}
 	if len(d.expect) > 0 && d.mode != modeSubscribe {
 		return nil, errors.New("mqtt: expect is only used in subscribe mode")
+	}
+	if d.mode == modeRoundtrip && !bytes.Contains(target.Body, []byte("{id}")) {
+		return nil, errors.New("mqtt: roundtrip needs {id} in -body, so each iteration can tell its own message from another user's")
 	}
 
 	var b [3]byte
@@ -230,45 +235,51 @@ func wait(ctx context.Context, tok paho.Token, deadline time.Time, what string) 
 }
 
 // Do implements protocol.Protocol.
-func (d *Driver) Do(ctx context.Context) (protocol.Result, error) {
-	deadline := time.Now().Add(d.timeout)
-	if cd, ok := ctx.Deadline(); ok && cd.Before(deadline) {
-		deadline = cd
-	}
+func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
+	// One budget for the whole call. Cancelling ctx also closes the
+	// connection (see open), so the end of the run, or the timeout, stops
+	// a connect that is still in progress.
+	ctx, cancel := context.WithTimeout(parent, d.timeout)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
 
 	id := d.clientID()
+	idb := []byte(id)
 	topic := strings.ReplaceAll(d.topic, "{id}", id)
 	payload := d.target.Body
 	if bytes.Contains(payload, []byte("{id}")) {
-		payload = bytes.ReplaceAll(payload, []byte("{id}"), []byte(id))
+		payload = bytes.ReplaceAll(payload, []byte("{id}"), idb)
 	}
 
 	opts := paho.NewClientOptions().
 		AddBroker(d.broker).
 		SetClientID(id).
-		SetCleanSession(d.clean).
+		SetCleanSession(true).
 		SetKeepAlive(d.alive).
 		SetConnectTimeout(d.timeout).
 		SetWriteTimeout(d.timeout).
 		SetAutoReconnect(false).
 		SetConnectRetry(false).
 		SetOrderMatters(false).
+		SetCustomOpenConnectionFn(open(ctx)).
 		SetTLSConfig(&tls.Config{InsecureSkipVerify: d.target.InsecureSkipVerify}) //nolint:gosec // opt-in, see protocol.Target
 	if d.username != "" {
 		opts.SetUsername(d.username)
 		opts.SetPassword(d.password)
 	}
 
-	// Messages that arrive for our subscription. A surplus message is
-	// dropped, so a busy topic can never block Paho's delivery.
-	size := d.count
-	if d.mode == modeRoundtrip {
-		size += 256 // room for other users' messages on a shared topic
-	}
-	msgs := make(chan []byte, size)
+	// Messages that arrive for our subscription. In roundtrip mode only
+	// this iteration's own message is kept, so other users' traffic on a
+	// shared topic can never crowd it out. A surplus message is dropped,
+	// so a busy topic can never block Paho's delivery.
+	msgs := make(chan []byte, d.count)
 	handler := func(_ paho.Client, m paho.Message) {
+		p := m.Payload()
+		if d.mode == modeRoundtrip && !bytes.Contains(p, idb) {
+			return
+		}
 		select {
-		case msgs <- append([]byte(nil), m.Payload()...):
+		case msgs <- append([]byte(nil), p...):
 		default:
 		}
 	}
@@ -328,20 +339,43 @@ func (d *Driver) Do(ctx context.Context) (protocol.Result, error) {
 		if err := publish(); err != nil {
 			return fail(sent, got, err), nil
 		}
-		// Wait for our own message to come back. Other messages on the
-		// topic, from other users, are skipped.
-		for n := 0; n < d.count; {
+		for n := 0; n < d.count; n++ {
 			m, err := d.receive(ctx, msgs, deadline)
 			if err != nil {
 				return fail(sent, got, err), nil
 			}
-			if bytes.Equal(m, payload) {
-				n++
-				got += int64(len(m))
-			}
+			got += int64(len(m))
 		}
 	}
 	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, nil
+}
+
+// open makes Paho dial with ctx instead of with its own dialer. When ctx
+// ends, by the run ending, the timeout, or Do returning, the connection is
+// closed. That stops a connect or a CONNACK wait that is still in progress,
+// which Paho's default dialer would let run to the end of its own timeout.
+func open(ctx context.Context) func(*url.URL, paho.ClientOptions) (net.Conn, error) {
+	return func(u *url.URL, o paho.ClientOptions) (net.Conn, error) {
+		var dialer net.Dialer
+		var (
+			conn net.Conn
+			err  error
+		)
+		switch u.Scheme {
+		case "tcp":
+			conn, err = dialer.DialContext(ctx, "tcp", u.Host)
+		case "ssl":
+			td := tls.Dialer{NetDialer: &dialer, Config: o.TLSConfig}
+			conn, err = td.DialContext(ctx, "tcp", u.Host)
+		default:
+			return nil, fmt.Errorf("mqtt: unsupported broker scheme %q", u.Scheme)
+		}
+		if err != nil {
+			return nil, err
+		}
+		context.AfterFunc(ctx, func() { _ = conn.Close() })
+		return conn, nil
+	}
 }
 
 // receive waits for the next message.
