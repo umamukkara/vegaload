@@ -167,11 +167,37 @@ func newDriver(network string, target protocol.Target, timeout time.Duration) (*
 func (d *Driver) Name() string { return d.network }
 
 // Do implements protocol.Protocol.
-func (d *Driver) Do(ctx context.Context) (protocol.Result, error) {
+//
+// -timeout is one budget for the whole call: dial, send and read together.
+// It is applied once, as a context around the call, the way the gRPC driver
+// does it. The same context ends the call when the run ends, because
+// context.AfterFunc closes the socket as soon as the context is done.
+func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
+	ctx, cancel := context.WithTimeout(parent, d.timeout)
+	defer cancel()
+
+	var res protocol.Result
 	if d.network == "udp" {
-		return d.doUDP(ctx), nil
+		res = d.doUDP(ctx)
+	} else {
+		res = d.doTCP(ctx)
 	}
-	return d.doTCP(ctx), nil
+	// Say "timeout" only when -timeout ran out, and not when the run ended.
+	// The clock is checked, not ctx.Err(): the timer that cancels a context
+	// can fire a few milliseconds after its deadline.
+	if !res.Success && !ended(parent) && ended(ctx) {
+		res.Err = fmt.Errorf("%s: no answer within -timeout %s: %w", d.network, d.timeout, res.Err)
+	}
+	return res, nil
+}
+
+// ended reports whether ctx is done, or its deadline has passed.
+func ended(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	dl, ok := ctx.Deadline()
+	return ok && !time.Now().Before(dl)
 }
 
 // Close implements protocol.Protocol. Do opens and closes its own
@@ -182,22 +208,14 @@ func fail(sent, got int64, err error) protocol.Result {
 	return protocol.Result{Success: false, BytesSent: sent, BytesReceived: got, Err: err}
 }
 
-func (d *Driver) deadline(ctx context.Context) time.Time {
-	dl := time.Now().Add(d.timeout)
-	if cd, ok := ctx.Deadline(); ok && cd.Before(dl) {
-		dl = cd
-	}
-	return dl
-}
-
 func (d *Driver) doTCP(ctx context.Context) protocol.Result {
-	dialer := &net.Dialer{Timeout: d.timeout}
+	var dialer net.Dialer // no Timeout of its own: ctx carries the one budget
 	var (
 		conn net.Conn
 		err  error
 	)
 	if d.useTLS {
-		td := &tls.Dialer{NetDialer: dialer, Config: &tls.Config{
+		td := &tls.Dialer{NetDialer: &dialer, Config: &tls.Config{
 			ServerName:         d.host,
 			InsecureSkipVerify: d.target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 		}}
@@ -212,7 +230,9 @@ func (d *Driver) doTCP(ctx context.Context) protocol.Result {
 	// A run that ends mid-call closes the connection so Do returns now.
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	_ = conn.SetDeadline(d.deadline(ctx))
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
 
 	var sent int64
 	if len(d.body) > 0 {
@@ -257,13 +277,14 @@ func (d *Driver) readTCP(conn net.Conn) ([]byte, error) {
 	var reply []byte
 	chunk := make([]byte, 4096)
 	for {
-		n, err := conn.Read(chunk)
+		if len(reply) >= d.max {
+			return reply, fmt.Errorf("tcp: read max=%d bytes without seeing %q", d.max, delim)
+		}
+		// Never read past max, so the cap is exact.
+		n, err := conn.Read(chunk[:min(len(chunk), d.max-len(reply))])
 		reply = append(reply, chunk[:n]...)
 		if bytes.Contains(reply, delim) {
 			return reply, nil
-		}
-		if len(reply) > d.max {
-			return reply, fmt.Errorf("tcp: read more than max=%d bytes without seeing %q", d.max, delim)
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -275,7 +296,7 @@ func (d *Driver) readTCP(conn net.Conn) ([]byte, error) {
 }
 
 func (d *Driver) doUDP(ctx context.Context) protocol.Result {
-	dialer := &net.Dialer{Timeout: d.timeout}
+	var dialer net.Dialer // no Timeout of its own: ctx carries the one budget
 	conn, err := dialer.DialContext(ctx, "udp", d.addr)
 	if err != nil {
 		return fail(0, 0, err)
@@ -283,7 +304,9 @@ func (d *Driver) doUDP(ctx context.Context) protocol.Result {
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	_ = conn.SetDeadline(d.deadline(ctx))
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
 
 	n, err := conn.Write(d.body)
 	sent := int64(n)

@@ -365,3 +365,80 @@ func TestName(t *testing.T) {
 		t.Error("Close should do nothing")
 	}
 }
+
+// The read cap is exact: a delimiter that arrives after max bytes does not
+// count, even when it is in the same network read as the last allowed byte.
+func TestTCP_MaxReadIsExact(t *testing.T) {
+	addr := lineServer(t, func(string) string { return strings.Repeat("a", 2000) + "END" })
+	res := tcpDo(t, protocol.Target{URL: addr, Body: []byte(`x\n`), Options: map[string]string{"until": "END", "max": "1000"}})
+	if res.Success {
+		t.Fatal("END is after byte 1000, so max=1000 must stop first")
+	}
+	if res.BytesReceived != 1000 {
+		t.Errorf("BytesReceived = %d, want exactly 1000", res.BytesReceived)
+	}
+
+	// A delimiter that ends exactly at max is still found.
+	addr = lineServer(t, func(string) string { return strings.Repeat("a", 997) + "END" })
+	res = tcpDo(t, protocol.Target{URL: addr, Body: []byte(`x\n`), Options: map[string]string{"until": "END", "max": "1000"}})
+	if !res.Success {
+		t.Fatalf("END ends at byte 1000, which is allowed: %v", res.Err)
+	}
+}
+
+// -timeout is one budget for the whole call, and a timeout says so.
+func TestTCP_TimeoutIsOneBudgetAndIsNamed(t *testing.T) {
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close() // accepts, then stays silent
+		}
+	}()
+	d, _ := NewTCP(protocol.Target{URL: l.Addr().String(), Body: []byte("x"), Options: map[string]string{"read": "1"}}, 200*time.Millisecond)
+	start := time.Now()
+	res, _ := d.Do(context.Background())
+	if res.Success {
+		t.Fatal("a silent server must time out")
+	}
+	if el := time.Since(start); el > 600*time.Millisecond {
+		t.Errorf("took %v for a 200ms -timeout", el)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "-timeout") {
+		t.Errorf("err = %v, want it to name -timeout", res.Err)
+	}
+}
+
+// When the run ends, the error is not dressed up as a -timeout.
+func TestTCP_RunEndIsNotReportedAsTimeout(t *testing.T) {
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	d, _ := NewTCP(protocol.Target{URL: l.Addr().String(), Options: map[string]string{"read": "1"}}, 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	res, _ := d.Do(ctx)
+	if res.Success || (res.Err != nil && strings.Contains(res.Err.Error(), "-timeout")) {
+		t.Errorf("run end: success=%v err=%v", res.Success, res.Err)
+	}
+}
+
+func TestUDP_TimeoutIsNamed(t *testing.T) {
+	addr := udpEcho(t, func([]byte) []byte { return nil })
+	res := udpDo(t, protocol.Target{URL: addr, Body: []byte("x"), Options: map[string]string{"reply": "true"}}, 150*time.Millisecond)
+	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "-timeout") {
+		t.Errorf("res = %+v, want a failure that names -timeout", res)
+	}
+}

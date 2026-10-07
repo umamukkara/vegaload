@@ -1,5 +1,5 @@
 // Package protocol defines the shared interface every wire protocol
-// driver (HTTP/1.1, HTTP/2, gRPC, WebSocket) implements, plus the request
+// driver (HTTP/1.1, HTTP/2, gRPC, WebSocket, TCP, UDP) implements, plus the request
 // and result types they exchange with the engine.
 //
 // This package, and the driver packages beneath it, are the only places
@@ -19,7 +19,7 @@ import (
 )
 
 // Target describes what a driver connects to and how, in terms generic
-// enough to cover any of the four wire protocols VegaLoad supports. Each
+// enough to cover every wire protocol VegaLoad supports. Each
 // driver interprets the fields relevant to it and ignores the rest — for
 // example Method is meaningless to the WebSocket and gRPC drivers.
 type Target struct {
