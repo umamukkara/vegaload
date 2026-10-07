@@ -223,3 +223,34 @@ func TestDial_BadURL(t *testing.T) {
 		t.Fatal("expected an error dialing a non-ws(s) URL")
 	}
 }
+
+type noTimerCtx struct {
+	context.Context
+	dl time.Time
+}
+
+func (c noTimerCtx) Deadline() (time.Time, bool) { return c.dl, true }
+func (c noTimerCtx) Done() <-chan struct{}       { return nil }
+func (c noTimerCtx) Err() error                  { return nil }
+
+func TestRunEnded(t *testing.T) {
+	if RunEnded(nil) { //nolint:staticcheck // a nil context must be safe
+		t.Error("nil ctx: not ended")
+	}
+	if RunEnded(context.Background()) {
+		t.Error("no deadline: not ended")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !RunEnded(ctx) {
+		t.Error("cancelled: ended")
+	}
+	future := noTimerCtx{context.Background(), time.Now().Add(time.Hour)}
+	if RunEnded(future) {
+		t.Error("future deadline: not ended")
+	}
+	past := noTimerCtx{context.Background(), time.Now().Add(-time.Millisecond)}
+	if !RunEnded(past) {
+		t.Error("deadline passed but timer not fired: ended")
+	}
+}

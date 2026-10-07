@@ -633,6 +633,15 @@ func (v *VU) dispatchCall(msg message) (interface{}, error) {
 	case "check":
 		if v.checks != nil {
 			for _, r := range msg.Results {
+				if !r.OK && netapi.RunEnded(v.ctx) {
+					// Cut off by the end of the run, not a real failure.
+					// Python runs every test of a check() call first and
+					// sends one list, so this decision is made once, when
+					// the list arrives. If the run ended meanwhile, every
+					// failed test in the list is dropped, even one that
+					// failed earlier. Passed tests are still counted.
+					continue
+				}
 				v.checks.RecordCheck(r.Name, r.OK)
 			}
 		}
