@@ -1,0 +1,201 @@
+{
+  "version": "v2",
+  "cases": [
+    {
+      "name": "create_scenario writes a JS scenario",
+      "tool": "create_scenario",
+      "arguments": {
+        "name": "${WORKDIR}/eval-scenario",
+        "force": true
+      },
+      "expect_contains": {
+        "created": true
+      }
+    },
+    {
+      "name": "run_test rejects a scenario_path + target combination",
+      "tool": "run_test",
+      "arguments": {
+        "scenario_path": "${WORKDIR}/eval-scenario.vl.js",
+        "target": "http://127.0.0.1:1",
+        "protocol": "http1"
+      },
+      "expect_error": true
+    },
+    {
+      "name": "run_test against an unreachable loopback port still reports cleanly (per-iteration failures aren't a CLI error)",
+      "tool": "run_test",
+      "arguments": {
+        "target": "http://127.0.0.1:1",
+        "protocol": "http1",
+        "vus": 1,
+        "duration": "1s",
+        "yes": true,
+        "no_report": true
+      }
+    },
+    {
+      "name": "get_results requires report_path",
+      "tool": "get_results",
+      "arguments": {},
+      "expect_error": true
+    },
+    {
+      "name": "get_results reads back the fixture report",
+      "tool": "get_results",
+      "arguments": {
+        "report_path": "${WORKDIR}/fixture-report.json"
+      },
+      "expect_contains": {
+        "total": 100,
+        "failed": 0
+      }
+    },
+    {
+      "name": "suggest_thresholds derives a p95 ceiling from the fixture report",
+      "tool": "suggest_thresholds",
+      "arguments": {
+        "report_path": "${WORKDIR}/fixture-report.json"
+      },
+      "expect_contains": {
+        "latency_p95": "60ms"
+      }
+    },
+    {
+      "name": "diagnose_failure explains the fixture report with narration disabled",
+      "tool": "diagnose_failure",
+      "arguments": {
+        "report_path": "${WORKDIR}/fixture-report.json",
+        "no_llm": true
+      },
+      "expect_contains": {
+        "report_path": "${WORKDIR}/fixture-report.json"
+      }
+    },
+    {
+      "name": "compare_reports flags a worse candidate against the baseline fixture",
+      "tool": "compare_reports",
+      "arguments": {
+        "baseline_path": "${WORKDIR}/fixture-report.json",
+        "candidate_path": "${WORKDIR}/fixture-report-worse.json"
+      },
+      "expect_contains": {
+        "regressed": true
+      }
+    },
+    {
+      "name": "generate_from_spec requires spec_path",
+      "tool": "generate_from_spec",
+      "arguments": {},
+      "expect_error": true
+    },
+    {
+      "name": "generate_from_spec scaffolds a runbook from the fixture OpenAPI spec",
+      "tool": "generate_from_spec",
+      "arguments": {
+        "spec_path": "${WORKDIR}/fixture-spec.json",
+        "name": "${WORKDIR}/eval-widgets",
+        "force": true
+      },
+      "expect_contains": {
+        "created": true,
+        "endpoints": 1
+      }
+    },
+    {
+      "name": "validate_scenario accepts a scenario that runs cleanly and lists its checks",
+      "tool": "validate_scenario",
+      "arguments": {
+        "scenario_path": "${WORKDIR}/fixture-ok.vl.js"
+      },
+      "expect_contains": {
+        "valid": true,
+        "checks.0.name": "is one",
+        "checks.0.passes": 1,
+        "checks.1.fails": 1
+      }
+    },
+    {
+      "name": "validate_scenario reports a scenario whose iteration throws as not valid, at the iteration stage",
+      "tool": "validate_scenario",
+      "arguments": {
+        "scenario_path": "${WORKDIR}/fixture-bad.vl.js"
+      },
+      "expect_contains": {
+        "valid": false,
+        "stage": "iteration"
+      }
+    },
+    {
+      "name": "validate_scenario reports a missing file as not valid, at the load stage",
+      "tool": "validate_scenario",
+      "arguments": {
+        "scenario_path": "${WORKDIR}/no-such-scenario.vl.js"
+      },
+      "expect_contains": {
+        "valid": false,
+        "stage": "load"
+      }
+    },
+    {
+      "name": "validate_scenario requires scenario_path",
+      "tool": "validate_scenario",
+      "arguments": {},
+      "expect_error_contains": "scenario_path"
+    },
+    {
+      "name": "run_test fails the baseline gate when the run is worse than the baseline report",
+      "tool": "run_test",
+      "arguments": {
+        "target": "http://127.0.0.1:1",
+        "protocol": "http1",
+        "vus": 1,
+        "duration": "1s",
+        "yes": true,
+        "no_report": true,
+        "baseline_path": "${WORKDIR}/fixture-report.json"
+      },
+      "expect_contains": {
+        "result.baseline.passed": false
+      }
+    },
+    {
+      "name": "run_test with a bad baseline_path is an error, not a gate failure",
+      "tool": "run_test",
+      "arguments": {
+        "target": "http://127.0.0.1:1",
+        "protocol": "http1",
+        "vus": 1,
+        "duration": "1s",
+        "yes": true,
+        "no_report": true,
+        "baseline_path": "${WORKDIR}/no-such-report.json"
+      },
+      "expect_error": true
+    },
+    {
+      "name": "run_test writes a JUnit file when junit_path is set",
+      "tool": "run_test",
+      "arguments": {
+        "target": "http://127.0.0.1:1",
+        "protocol": "http1",
+        "vus": 1,
+        "duration": "1s",
+        "yes": true,
+        "no_report": true,
+        "junit_path": "${WORKDIR}/eval-junit.xml"
+      },
+      "expect_files": [
+        "${WORKDIR}/eval-junit.xml"
+      ]
+    },
+    {
+      "name": "compare_reports requires candidate_path",
+      "tool": "compare_reports",
+      "arguments": {
+        "baseline_path": "${WORKDIR}/fixture-report.json"
+      },
+      "expect_error_contains": "candidate_path"
+    }
+  ]
+}

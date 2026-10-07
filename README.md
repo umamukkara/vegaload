@@ -378,6 +378,10 @@ of any model's tool-picking behavior:
 ./vegaload mcp eval
 ```
 
+There are two suites. `v1` is the default and never changes. `v2` keeps every
+v1 case and adds cases for `validate_scenario`, the baseline gate, JUnit
+output and checks. Run it with `./vegaload mcp eval -suite v2`.
+
 ### 5. Check that everything is wired up
 
 ```

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,5 +73,29 @@ func TestWriteEvalFixtures(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("expected %s to exist: %v", name, err)
 		}
+	}
+}
+
+func TestCmdMCPEval_RejectsUnknownSuite(t *testing.T) {
+	if code := cmdMCPEval([]string{"-suite", "v9"}); code != 2 {
+		t.Errorf("cmdMCPEval with an unknown -suite returned %d, want 2", code)
+	}
+}
+
+func TestCmdMCPEval_V2AllCasesPass(t *testing.T) {
+	bin := buildVegaload(t)
+	output, err := exec.Command(bin, "mcp", "eval", "-suite", "v2", "-output", "json").CombinedOutput()
+	if err != nil {
+		t.Fatalf("vegaload mcp eval -suite v2 failed: %v\n%s", err, output)
+	}
+	var got struct {
+		Version string `json:"version"`
+		Passed  bool   `json:"passed"`
+	}
+	if err := json.Unmarshal(output, &got); err != nil {
+		t.Fatalf("decoding %q: %v", output, err)
+	}
+	if got.Version != "v2" || !got.Passed {
+		t.Errorf("got %+v, want version v2 and passed", got)
 	}
 }

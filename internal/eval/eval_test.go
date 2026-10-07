@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -123,5 +126,105 @@ func TestCheckContains_NonObjectResult(t *testing.T) {
 	}
 	if detail == "" {
 		t.Error("expected a non-empty Detail")
+	}
+}
+
+func TestRawV2_KeepsEveryV1CaseUnchanged(t *testing.T) {
+	v1, err := ParseSuite(RawV1())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, err := ParseSuite(RawV2())
+	if err != nil {
+		t.Fatalf("parsing the embedded v2 suite: %v", err)
+	}
+	if v2.Version != "v2" {
+		t.Errorf("Version = %q, want v2", v2.Version)
+	}
+	if len(v2.Cases) <= len(v1.Cases) {
+		t.Fatalf("v2 has %d cases, v1 has %d: v2 should add cases", len(v2.Cases), len(v1.Cases))
+	}
+	for i, c := range v1.Cases {
+		a, _ := json.Marshal(c)
+		b, _ := json.Marshal(v2.Cases[i])
+		if string(a) != string(b) {
+			t.Errorf("v2 case %d differs from v1:\n v1 %s\n v2 %s", i, a, b)
+		}
+	}
+}
+
+func TestRaw_ByName(t *testing.T) {
+	for _, name := range []string{"v1", "v2"} {
+		if b, ok := Raw(name); !ok || len(b) == 0 {
+			t.Errorf("Raw(%q) = (%d bytes, %v)", name, len(b), ok)
+		}
+	}
+	if _, ok := Raw("v9"); ok {
+		t.Error("Raw(\"v9\") should not exist")
+	}
+}
+
+func TestRun_ExpectErrorContains(t *testing.T) {
+	call := func(ctx context.Context, tool string, args json.RawMessage) (any, error) {
+		return nil, errors.New("report_path is required")
+	}
+	results := Run(context.Background(), call, []Case{
+		{Name: "match", Tool: "t", ExpectErrorContains: "report_path"},
+		{Name: "no match", Tool: "t", ExpectErrorContains: "scenario_path"},
+	})
+	if !results[0].Passed {
+		t.Errorf("match: %+v", results[0])
+	}
+	if results[1].Passed {
+		t.Errorf("no match should fail: %+v", results[1])
+	}
+	ok := func(ctx context.Context, tool string, args json.RawMessage) (any, error) {
+		return map[string]any{}, nil
+	}
+	if r := Run(context.Background(), ok, []Case{{Name: "x", Tool: "t", ExpectErrorContains: "a"}})[0]; r.Passed {
+		t.Errorf("a call that succeeded must fail an expected error: %+v", r)
+	}
+}
+
+func TestRun_ExpectFiles(t *testing.T) {
+	dir := t.TempDir()
+	have := filepath.Join(dir, "have.xml")
+	if err := os.WriteFile(have, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call := func(ctx context.Context, tool string, args json.RawMessage) (any, error) {
+		return map[string]any{}, nil
+	}
+	results := Run(context.Background(), call, []Case{
+		{Name: "present", Tool: "t", ExpectFiles: []string{have}},
+		{Name: "absent", Tool: "t", ExpectFiles: []string{filepath.Join(dir, "none.xml")}},
+	})
+	if !results[0].Passed {
+		t.Errorf("present: %+v", results[0])
+	}
+	if results[1].Passed || !strings.Contains(results[1].Detail, "none.xml") {
+		t.Errorf("absent should fail and name the file: %+v", results[1])
+	}
+}
+
+func TestCheckContains_DottedPaths(t *testing.T) {
+	out := map[string]any{
+		"result": map[string]any{"baseline": map[string]any{"passed": false}},
+		"checks": []any{map[string]any{"name": "a", "passes": 1}, map[string]any{"name": "b"}},
+		"a.b":    "literal",
+	}
+	ok, detail := checkContains(out, map[string]any{
+		"result.baseline.passed": false, "checks.0.name": "a", "checks.1.name": "b", "a.b": "literal",
+	})
+	if !ok {
+		t.Fatalf("dotted paths should match: %s", detail)
+	}
+	for _, key := range []string{"result.nope", "checks.5.name", "checks.x", "result.baseline.passed.deeper"} {
+		if ok, _ := checkContains(out, map[string]any{key: 1}); ok {
+			t.Errorf("path %q should not match", key)
+		}
+	}
+	if ok, _ := checkContains(out, map[string]any{"result.baseline.passed": true}); ok {
+		t.Error("a wrong value at a dotted path should fail")
 	}
 }

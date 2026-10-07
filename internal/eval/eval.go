@@ -19,6 +19,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 )
 
 // rawV1 is v1's cases, unmodified — WORKDIR tokens and all. cmd/vegaload
@@ -35,6 +38,31 @@ func RawV1() []byte {
 	return rawV1
 }
 
+// rawV2 is v2's cases, with the same "${WORKDIR}" tokens as v1. v2 keeps
+// every v1 case as it was and adds cases for the tools and options added
+// since: validate_scenario, the baseline gate, JUnit output and checks.
+//
+//go:embed v2/cases.json
+var rawV2 []byte
+
+// RawV2 returns the v2 suite's raw JSON bytes, before any "${WORKDIR}"
+// substitution.
+func RawV2() []byte {
+	return rawV2
+}
+
+// Raw returns the raw JSON of the named suite ("v1" or "v2"), and false
+// when there is no such suite.
+func Raw(name string) ([]byte, bool) {
+	switch name {
+	case "v1":
+		return rawV1, true
+	case "v2":
+		return rawV2, true
+	}
+	return nil, false
+}
+
 // Case is one eval case: call Tool with Arguments and check the result
 // against ExpectError/ExpectContains.
 type Case struct {
@@ -46,9 +74,19 @@ type Case struct {
 	// error; ExpectContains is ignored in that case.
 	ExpectError bool `json:"expect_error,omitempty"`
 
+	// ExpectErrorContains, when set, also requires the error message to
+	// contain this text. It implies ExpectError (v2).
+	ExpectErrorContains string `json:"expect_error_contains,omitempty"`
+
+	// ExpectFiles lists paths that must exist after the call (v2). A
+	// case uses it for files a tool writes, such as a JUnit report.
+	ExpectFiles []string `json:"expect_files,omitempty"`
+
 	// ExpectContains lists fields the JSON-decoded result must contain
-	// with exactly these values (a shallow, top-level check — enough
-	// for this suite's cases without needing a general JSON-diff).
+	// with exactly these values. A key is a top-level field name. In v2 a
+	// key may also be a dotted path into nested objects and arrays, such
+	// as "baseline.passed" or "checks.0.name" (a number picks an array
+	// item). There is no general JSON-diff.
 	ExpectContains map[string]any `json:"expect_contains,omitempty"`
 }
 
@@ -96,9 +134,12 @@ func Run(ctx context.Context, call Caller, cases []Case) []CaseResult {
 func runCase(ctx context.Context, call Caller, c Case) CaseResult {
 	out, err := call(ctx, c.Tool, c.Arguments)
 
-	if c.ExpectError {
+	if c.ExpectError || c.ExpectErrorContains != "" {
 		if err == nil {
 			return CaseResult{Name: c.Name, Passed: false, Detail: "expected an error but the call succeeded"}
+		}
+		if c.ExpectErrorContains != "" && !strings.Contains(err.Error(), c.ExpectErrorContains) {
+			return CaseResult{Name: c.Name, Passed: false, Detail: fmt.Sprintf("error %q does not contain %q", err.Error(), c.ExpectErrorContains)}
 		}
 		return CaseResult{Name: c.Name, Passed: true}
 	}
@@ -107,7 +148,15 @@ func runCase(ctx context.Context, call Caller, c Case) CaseResult {
 	}
 
 	ok, detail := checkContains(out, c.ExpectContains)
-	return CaseResult{Name: c.Name, Passed: ok, Detail: detail}
+	if !ok {
+		return CaseResult{Name: c.Name, Passed: false, Detail: detail}
+	}
+	for _, f := range c.ExpectFiles {
+		if _, statErr := os.Stat(f); statErr != nil {
+			return CaseResult{Name: c.Name, Passed: false, Detail: fmt.Sprintf("expected file %s was not written", f)}
+		}
+	}
+	return CaseResult{Name: c.Name, Passed: true}
 }
 
 // checkContains verifies that out, once round-tripped through JSON,
@@ -129,6 +178,9 @@ func checkContains(out any, want map[string]any) (bool, string) {
 	for key, wantVal := range want {
 		gotVal, ok := got[key]
 		if !ok {
+			gotVal, ok = lookupPath(got, key)
+		}
+		if !ok {
 			return false, fmt.Sprintf("missing field %q", key)
 		}
 		gotJSON, _ := json.Marshal(gotVal)
@@ -138,4 +190,31 @@ func checkContains(out any, want map[string]any) (bool, string) {
 		}
 	}
 	return true, ""
+}
+
+// lookupPath follows a dotted path such as "baseline.passed" or
+// "checks.0.name" through nested objects and arrays. A path segment that
+// is a number picks an array item. It reports false when any step is
+// missing.
+func lookupPath(root map[string]any, path string) (any, bool) {
+	var cur any = root
+	for _, seg := range strings.Split(path, ".") {
+		switch v := cur.(type) {
+		case map[string]any:
+			next, ok := v[seg]
+			if !ok {
+				return nil, false
+			}
+			cur = next
+		case []any:
+			i, err := strconv.Atoi(seg)
+			if err != nil || i < 0 || i >= len(v) {
+				return nil, false
+			}
+			cur = v[i]
+		default:
+			return nil, false
+		}
+	}
+	return cur, true
 }
