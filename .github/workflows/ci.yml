@@ -143,3 +143,12 @@ jobs:
       - name: The broken threshold really failed the step
         if: steps.thresholds.outputs.supported == 'true'
         run: test "${{ steps.breach.outcome }}" = "failure"
+
+  # Checks the Helm chart: lint, and renders it with different values.
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/vegaload --set run.target=http://example.svc:8080/health --set run.protocol=http1
+      - run: ./charts/vegaload/test.sh

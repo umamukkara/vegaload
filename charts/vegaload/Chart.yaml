@@ -1,0 +1,14 @@
+apiVersion: v2
+name: vegaload
+description: Run a VegaLoad load test as a Kubernetes Job. Needs only namespace permissions.
+type: application
+version: 0.1.0
+# appVersion is the VegaLoad release used as the default image tag.
+appVersion: "0.4.0"
+home: https://github.com/vegaload/vegaload
+sources:
+  - https://github.com/vegaload/vegaload
+keywords:
+  - load-testing
+  - performance
+license: Apache-2.0
