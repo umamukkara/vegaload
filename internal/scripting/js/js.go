@@ -615,6 +615,7 @@ func (v *VU) Iteration(ctx context.Context) error {
 // a script never explicitly closed itself.
 func (v *VU) Close() error {
 	v.http.Close()
+	v.proto.Close()
 	for _, conn := range v.openConns {
 		_ = conn.Close()
 	}

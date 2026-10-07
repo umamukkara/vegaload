@@ -40,26 +40,26 @@ func do(t *testing.T, tg protocol.Target, timeout time.Duration) protocol.Result
 
 func TestProduce(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("orders", 3)
-	res := do(t, target(b.url(), "hello", map[string]string{"topic": "orders", "key": "k1", "count": "4"}), 5*time.Second)
+	b.AddTopic("orders", 3)
+	res := do(t, target(b.URL(), "hello", map[string]string{"topic": "orders", "key": "k1", "count": "4"}), 5*time.Second)
 	if !res.Success {
 		t.Fatalf("produce failed: %v", res.Err)
 	}
 	if res.BytesSent != 4*(5+2) {
 		t.Errorf("BytesSent = %d, want %d", res.BytesSent, 4*7)
 	}
-	if got := b.producedCount(); got != 4 {
+	if got := b.ProducedCount(); got != 4 {
 		t.Errorf("broker stored %d records, want 4", got)
 	}
 }
 
 func TestProduce_AllAcksAndCompression(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("t", 1)
+	b.AddTopic("t", 1)
 	n := 0
 	for _, acks := range []string{"all", "leader", "none"} {
 		for _, comp := range []string{"none", "gzip", "snappy", "lz4", "zstd"} {
-			res := do(t, target(b.url(), "payload payload payload", map[string]string{"topic": "t", "acks": acks, "compression": comp}), 5*time.Second)
+			res := do(t, target(b.URL(), "payload payload payload", map[string]string{"topic": "t", "acks": acks, "compression": comp}), 5*time.Second)
 			if !res.Success {
 				t.Fatalf("acks=%s compression=%s: %v", acks, comp, res.Err)
 			}
@@ -67,17 +67,17 @@ func TestProduce_AllAcksAndCompression(t *testing.T) {
 		}
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for b.producedCount() < n && time.Now().Before(deadline) {
+	for b.ProducedCount() < n && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := b.producedCount(); got != n {
+	if got := b.ProducedCount(); got != n {
 		t.Errorf("broker stored %d records, want %d", got, n)
 	}
 }
 
 func TestProduce_IDPlaceholderGivesEachCallItsOwnTopic(t *testing.T) {
 	b := startBroker(t)
-	d := newDriver(t, target(b.url(), "x {id}", map[string]string{"topic": "t-{id}"}), 5*time.Second)
+	d := newDriver(t, target(b.URL(), "x {id}", map[string]string{"topic": "t-{id}"}), 5*time.Second)
 	// The topics do not exist yet, so the first call must fail clearly.
 	res, _ := d.Do(context.Background())
 	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "producing to t-vegaload-") {
@@ -88,7 +88,7 @@ func TestProduce_IDPlaceholderGivesEachCallItsOwnTopic(t *testing.T) {
 func TestProduce_UnknownTopicFailsFast(t *testing.T) {
 	b := startBroker(t)
 	start := time.Now()
-	res := do(t, target(b.url(), "x", map[string]string{"topic": "nope"}), 5*time.Second)
+	res := do(t, target(b.URL(), "x", map[string]string{"topic": "nope"}), 5*time.Second)
 	if res.Success || res.Err == nil {
 		t.Fatalf("an unknown topic must fail: %+v", res)
 	}
@@ -99,11 +99,11 @@ func TestProduce_UnknownTopicFailsFast(t *testing.T) {
 
 func TestConsume(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("logs", 1)
-	if res := do(t, target(b.url(), "line ok", map[string]string{"topic": "logs", "count": "3"}), 5*time.Second); !res.Success {
+	b.AddTopic("logs", 1)
+	if res := do(t, target(b.URL(), "line ok", map[string]string{"topic": "logs", "count": "3"}), 5*time.Second); !res.Success {
 		t.Fatal(res.Err)
 	}
-	res := do(t, target(b.url(), "", map[string]string{"mode": "consume", "topic": "logs", "count": "3", "expect": "ok"}), 5*time.Second)
+	res := do(t, target(b.URL(), "", map[string]string{"mode": "consume", "topic": "logs", "count": "3", "expect": "ok"}), 5*time.Second)
 	if !res.Success {
 		t.Fatalf("consume failed: %v", res.Err)
 	}
@@ -114,9 +114,9 @@ func TestConsume(t *testing.T) {
 
 func TestConsume_WrongTextFails(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("logs", 1)
-	do(t, target(b.url(), "hello", map[string]string{"topic": "logs"}), 5*time.Second)
-	res := do(t, target(b.url(), "", map[string]string{"mode": "consume", "topic": "logs", "expect": "bye"}), 5*time.Second)
+	b.AddTopic("logs", 1)
+	do(t, target(b.URL(), "hello", map[string]string{"topic": "logs"}), 5*time.Second)
+	res := do(t, target(b.URL(), "", map[string]string{"mode": "consume", "topic": "logs", "expect": "bye"}), 5*time.Second)
 	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "did not contain") {
 		t.Fatalf("want a failure about the text, got %+v", res)
 	}
@@ -124,10 +124,10 @@ func TestConsume_WrongTextFails(t *testing.T) {
 
 func TestConsume_NotEnoughRecordsTimesOut(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("logs", 1)
-	do(t, target(b.url(), "one", map[string]string{"topic": "logs"}), 5*time.Second)
+	b.AddTopic("logs", 1)
+	do(t, target(b.URL(), "one", map[string]string{"topic": "logs"}), 5*time.Second)
 	start := time.Now()
-	res := do(t, target(b.url(), "", map[string]string{"mode": "consume", "topic": "logs", "count": "2"}), 700*time.Millisecond)
+	res := do(t, target(b.URL(), "", map[string]string{"mode": "consume", "topic": "logs", "count": "2"}), 700*time.Millisecond)
 	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "within -timeout") {
 		t.Fatalf("want a timeout, got %+v", res)
 	}
@@ -138,9 +138,9 @@ func TestConsume_NotEnoughRecordsTimesOut(t *testing.T) {
 
 func TestConsume_FromEndSeesNothingOld(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("logs", 1)
-	do(t, target(b.url(), "old", map[string]string{"topic": "logs"}), 5*time.Second)
-	res := do(t, target(b.url(), "", map[string]string{"mode": "consume", "topic": "logs", "from": "end"}), 600*time.Millisecond)
+	b.AddTopic("logs", 1)
+	do(t, target(b.URL(), "old", map[string]string{"topic": "logs"}), 5*time.Second)
+	res := do(t, target(b.URL(), "", map[string]string{"mode": "consume", "topic": "logs", "from": "end"}), 600*time.Millisecond)
 	if res.Success {
 		t.Fatal("from=end must not return records that were there before")
 	}
@@ -148,7 +148,7 @@ func TestConsume_FromEndSeesNothingOld(t *testing.T) {
 
 func TestConsume_UnknownTopicFails(t *testing.T) {
 	b := startBroker(t)
-	res := do(t, target(b.url(), "", map[string]string{"mode": "consume", "topic": "nope"}), 700*time.Millisecond)
+	res := do(t, target(b.URL(), "", map[string]string{"mode": "consume", "topic": "nope"}), 700*time.Millisecond)
 	if res.Success {
 		t.Fatal("an unknown topic must fail")
 	}
@@ -156,8 +156,8 @@ func TestConsume_UnknownTopicFails(t *testing.T) {
 
 func TestRoundtrip(t *testing.T) {
 	b := startBroker(t)
-	b.addTopic("rt", 4)
-	res := do(t, target(b.url(), "ping {id}", map[string]string{"mode": "roundtrip", "topic": "rt", "count": "3"}), 5*time.Second)
+	b.AddTopic("rt", 4)
+	res := do(t, target(b.URL(), "ping {id}", map[string]string{"mode": "roundtrip", "topic": "rt", "count": "3"}), 5*time.Second)
 	if !res.Success {
 		t.Fatalf("roundtrip failed: %v", res.Err)
 	}
@@ -170,8 +170,8 @@ func TestRoundtrip_ManyAtOnceOnOneTopic(t *testing.T) {
 	// Each user reads back exactly its own records, even when others write
 	// to the same partitions at the same time.
 	b := startBroker(t)
-	b.addTopic("shared", 1)
-	d := newDriver(t, target(b.url(), "msg {id}", map[string]string{"mode": "roundtrip", "topic": "shared"}), 10*time.Second)
+	b.AddTopic("shared", 1)
+	d := newDriver(t, target(b.URL(), "msg {id}", map[string]string{"mode": "roundtrip", "topic": "shared"}), 10*time.Second)
 	const users = 8
 	results := make(chan protocol.Result, users)
 	for i := 0; i < users; i++ {
@@ -189,13 +189,13 @@ func TestRoundtrip_ManyAtOnceOnOneTopic(t *testing.T) {
 
 func TestAdmin_TopicLifecycle(t *testing.T) {
 	b := startBroker(t)
-	d := newDriver(t, target(b.url(), "", map[string]string{"mode": "admin", "action": "topic_lifecycle", "topic": "tmp-{id}", "partitions": "3"}), 5*time.Second)
+	d := newDriver(t, target(b.URL(), "", map[string]string{"mode": "admin", "action": "topic_lifecycle", "topic": "tmp-{id}", "partitions": "3"}), 5*time.Second)
 	for i := 0; i < 3; i++ {
 		if res, _ := d.Do(context.Background()); !res.Success {
 			t.Fatalf("lifecycle %d: %v", i, res.Err)
 		}
 	}
-	if names := b.topicNames(); len(names) != 0 {
+	if names := b.TopicNames(); len(names) != 0 {
 		t.Errorf("topics left behind: %v", names)
 	}
 }
@@ -204,12 +204,12 @@ func TestAdmin_CreateListDelete(t *testing.T) {
 	b := startBroker(t)
 	admin := func(opts map[string]string) protocol.Result {
 		opts["mode"] = "admin"
-		return do(t, target(b.url(), "", opts), 5*time.Second)
+		return do(t, target(b.URL(), "", opts), 5*time.Second)
 	}
 	if res := admin(map[string]string{"action": "create_topic", "topic": "alpha", "partitions": "2"}); !res.Success {
 		t.Fatalf("create: %v", res.Err)
 	}
-	if !b.hasTopic("alpha") {
+	if !b.HasTopic("alpha") {
 		t.Fatal("the topic was not created")
 	}
 	if res := admin(map[string]string{"action": "create_topic", "topic": "alpha"}); res.Success || !strings.Contains(res.Err.Error(), "already exists") {
@@ -224,14 +224,14 @@ func TestAdmin_CreateListDelete(t *testing.T) {
 	if res := admin(map[string]string{"action": "describe_cluster", "expect": "1 brokers"}); !res.Success {
 		t.Fatalf("describe: %v", res.Err)
 	}
-	b.groups = []string{"billing"}
+	b.Groups = []string{"billing"}
 	if res := admin(map[string]string{"action": "list_groups", "expect": "billing"}); !res.Success {
 		t.Fatalf("groups: %v", res.Err)
 	}
 	if res := admin(map[string]string{"action": "delete_topic", "topic": "alpha"}); !res.Success {
 		t.Fatalf("delete: %v", res.Err)
 	}
-	if b.hasTopic("alpha") {
+	if b.HasTopic("alpha") {
 		t.Fatal("the topic was not deleted")
 	}
 	if res := admin(map[string]string{"action": "delete_topic", "topic": "alpha"}); res.Success {
@@ -241,20 +241,20 @@ func TestAdmin_CreateListDelete(t *testing.T) {
 
 func TestSASLPlain(t *testing.T) {
 	b := startBroker(t)
-	b.user, b.pass = "alice", "s3cret"
-	b.addTopic("t", 1)
+	b.User, b.Pass = "alice", "s3cret"
+	b.AddTopic("t", 1)
 	t.Setenv("KAFKA_TEST_PW", "s3cret")
 	t.Setenv("KAFKA_TEST_BAD", "wrong")
 	opts := func(env string) map[string]string {
 		return map[string]string{"topic": "t", "sasl": "plain", "username": "alice", "password_env": env}
 	}
-	if res := do(t, target(b.url(), "x", opts("KAFKA_TEST_PW")), 5*time.Second); !res.Success {
+	if res := do(t, target(b.URL(), "x", opts("KAFKA_TEST_PW")), 5*time.Second); !res.Success {
 		t.Fatalf("right login failed: %v", res.Err)
 	}
-	if res := do(t, target(b.url(), "x", opts("KAFKA_TEST_BAD")), 1500*time.Millisecond); res.Success {
+	if res := do(t, target(b.URL(), "x", opts("KAFKA_TEST_BAD")), 1500*time.Millisecond); res.Success {
 		t.Fatal("wrong password must fail")
 	}
-	if res := do(t, target(b.url(), "x", map[string]string{"topic": "t"}), 2*time.Second); res.Success {
+	if res := do(t, target(b.URL(), "x", map[string]string{"topic": "t"}), 2*time.Second); res.Success {
 		t.Fatal("no login must fail when the broker needs one")
 	}
 }
@@ -268,7 +268,7 @@ func TestKafkaS(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newFakeBroker(t, ln)
-	b.addTopic("t", 1)
+	b.AddTopic("t", 1)
 	url := "kafkas://" + ln.Addr().String()
 
 	tg := target(url, "secure", map[string]string{"topic": "t"})
@@ -427,10 +427,10 @@ func TestErrorsNameTheRealReason(t *testing.T) {
 	// A refused connection and a wrong password both look like "timed out"
 	// to the client. The driver must say what really happened.
 	b := startBroker(t)
-	b.user, b.pass = "alice", "s3cret"
-	b.addTopic("t", 1)
+	b.User, b.Pass = "alice", "s3cret"
+	b.AddTopic("t", 1)
 	t.Setenv("KAFKA_TEST_BAD", "wrong")
-	bad := do(t, target(b.url(), "x", map[string]string{"topic": "t", "sasl": "plain", "username": "alice", "password_env": "KAFKA_TEST_BAD"}), 1500*time.Millisecond)
+	bad := do(t, target(b.URL(), "x", map[string]string{"topic": "t", "sasl": "plain", "username": "alice", "password_env": "KAFKA_TEST_BAD"}), 1500*time.Millisecond)
 	if bad.Success || bad.Err == nil || !strings.Contains(bad.Err.Error(), "wrong user name or password") {
 		t.Errorf("a wrong password should be named, got %+v", bad)
 	}
