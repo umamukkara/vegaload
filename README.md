@@ -353,6 +353,22 @@ Cursor afterward and the agent has eight tools — `create_scenario`,
 command shown above and parsing its `-output json` result; there is no
 agent-only path that skips the CLI.
 
+By default the MCP server talks over stdio. To use it over the network (for
+example from a container), run it over HTTP:
+
+```
+vegaload mcp serve -http 127.0.0.1:8765
+```
+
+`POST /mcp` takes one JSON-RPC message and returns the answer. `GET /sse` opens
+a Server-Sent Events stream (MCP protocol 2024-11-05) and `POST /message` sends
+requests to it. On a loopback address no token is needed. On any other address
+a token is required: put it in an environment variable and pass its name, for
+example `-token-env VEGALOAD_MCP_TOKEN`. Clients then send
+`Authorization: Bearer <token>`. Browser requests are refused unless their
+Origin is a loopback host or the one given with `-allow-origin`. HTTP is off by
+default, and stays off in the Docker image unless you pass `-http`.
+
 `vegaload mcp eval` runs a versioned, non-LLM suite of {tool call, expected
 outcome} cases against those same tools directly — the thing to run in
 CI after upgrading, to check the tool layer itself still behaves, independent
@@ -403,7 +419,7 @@ this same walkthrough as a standalone, copy-pasteable script.
 | `vegaload validate`      | Run a scenario once, with one user, to check that it works            |
 | `vegaload new`           | Scaffold a starter scenario file, or a runbook from an OpenAPI spec    |
 | `vegaload diagnose`      | Print environment info, or explain a report's results                |
-| `vegaload mcp serve`     | Run an MCP server over stdio for agent-native use                     |
+| `vegaload mcp serve`     | Run an MCP server over stdio (or `-http addr`) for agent-native use   |
 | `vegaload mcp eval`      | Run the versioned MCP tool-calling eval suite against this binary     |
 | `vegaload init`          | Register the MCP server and skill bundles for the current project     |
 | `vegaload doctor`        | Check the CLI, agent hosts, and a target; `-fix` repairs what it can   |
