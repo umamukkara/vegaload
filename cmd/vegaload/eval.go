@@ -24,22 +24,36 @@ import (
 	"github.com/vegaload/vegaload/internal/report"
 )
 
-// cmdMCPEval runs the embedded v1 eval suite and reports pass/fail per
-// case, exiting non-zero if any case failed.
+// cmdMCPEval runs an embedded eval suite (v1 by default, v2 with
+// -suite v2) and reports pass/fail per case, exiting non-zero if any
+// case failed. v1 stays the default so a CI job pinned to it does not
+// change when a newer suite is added.
 func cmdMCPEval(args []string) int {
 	output := "text"
+	suiteName := "v1"
+	usage := func() { fmt.Fprintln(os.Stderr, "Usage: vegaload mcp eval [-suite v1|v2] [-output text|json]") }
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-output" && i+1 < len(args) {
 			output = args[i+1]
 			i++
 			continue
 		}
+		if args[i] == "-suite" && i+1 < len(args) {
+			suiteName = args[i+1]
+			i++
+			continue
+		}
 		fmt.Fprintf(os.Stderr, "vegaload mcp eval: unrecognized argument %q\n", args[i])
-		fmt.Fprintln(os.Stderr, "Usage: vegaload mcp eval [-output text|json]")
+		usage()
 		return 2
 	}
 	if output != "text" && output != "json" {
 		fmt.Fprintf(os.Stderr, "vegaload mcp eval: -output %q: want text or json\n", output)
+		return 2
+	}
+	rawSuite, ok := eval.Raw(suiteName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "vegaload mcp eval: -suite %q: want v1 or v2\n", suiteName)
 		return 2
 	}
 
@@ -61,7 +75,7 @@ func cmdMCPEval(args []string) int {
 		return 1
 	}
 
-	suiteJSON := bytes.ReplaceAll(eval.RawV1(), []byte("${WORKDIR}"), []byte(workdir))
+	suiteJSON := bytes.ReplaceAll(rawSuite, []byte("${WORKDIR}"), []byte(workdir))
 	suite, err := eval.ParseSuite(suiteJSON)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload mcp eval: parsing the embedded suite: %v\n", err)
@@ -148,6 +162,9 @@ func passCount(results []eval.CaseResult) int {
 //     for the compare_reports case that expects regressed=true.
 //   - fixture-spec.json: a one-endpoint OpenAPI document, for the
 //     generate_from_spec case that expects "endpoints": 1.
+//   - fixture-ok.vl.js, fixture-bad.vl.js: two scenarios that make no
+//     network calls, for the v2 validate_scenario cases. The first makes
+//     one passing and one failing check(), the second throws.
 func writeEvalFixtures(workdir string) error {
 	res := &report.Result{
 		Executor:  "fixed-vus",
@@ -190,6 +207,20 @@ func writeEvalFixtures(workdir string) error {
 }`
 	if err := os.WriteFile(workdir+"/fixture-spec.json", []byte(spec), 0o644); err != nil {
 		return fmt.Errorf("fixture-spec.json: %w", err)
+	}
+	const okScenario = `export default function () {
+  check(1, { "is one": (v) => v === 1, "is two": (v) => v === 2 });
+}
+`
+	const badScenario = `export default function () {
+  throw new Error("boom");
+}
+`
+	if err := os.WriteFile(workdir+"/fixture-ok.vl.js", []byte(okScenario), 0o644); err != nil {
+		return fmt.Errorf("fixture-ok.vl.js: %w", err)
+	}
+	if err := os.WriteFile(workdir+"/fixture-bad.vl.js", []byte(badScenario), 0o644); err != nil {
+		return fmt.Errorf("fixture-bad.vl.js: %w", err)
 	}
 	return nil
 }

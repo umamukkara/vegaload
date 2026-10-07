@@ -85,7 +85,7 @@ A "run" also writes a self-contained HTML report by default — see
 Run "vegaload run -h" for the run command's flags.
 Run "vegaload compare -h" for baseline-vs-candidate flags.
 Run "vegaload mcp serve -h" for the MCP server's tools.
-Run "vegaload mcp eval -output json" for machine-readable eval results.
+Run "vegaload mcp eval -output json" for machine-readable eval results ("-suite v2" for the newer suite).
 Run "vegaload init -h" for what init writes.
 Run "vegaload doctor -h" for what doctor checks and how -fix works.`)
 }
