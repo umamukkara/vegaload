@@ -1,11 +1,18 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/vegaload/vegaload/internal/mcp"
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/grpc/grpctest"
+	"github.com/vegaload/vegaload/internal/report"
 )
 
 func TestJoinOr(t *testing.T) {
@@ -137,5 +144,50 @@ func TestProtocolIteration_KnownOptionIsAccepted(t *testing.T) {
 	tg.Options = map[string]string{"read": "4"}
 	if _, _, err := protocolIteration("udp", tg, 0); err == nil {
 		t.Error("read is a tcp option and must be refused for udp")
+	}
+}
+
+// A scenario that mixes HTTP and gRPC runs end to end through `vegaload run`
+// (FR-CLI-19).
+func TestCmdRun_ScenarioCallsGRPC(t *testing.T) {
+	srv := grpctest.Start(t, true)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"service":"up"}`))
+	}))
+	t.Cleanup(api.Close)
+
+	dir := t.TempDir()
+	scenario := filepath.Join(dir, "mixed.vl.js")
+	src := `export default function () {
+  const cfg = step("http", () => http.get("` + api.URL + `").json());
+  step("grpc", () => {
+    const r = grpc.call("` + srv.Addr + `", {method: "/grpc.health.v1.Health/Check", body: {service: cfg.service}});
+    check(r, {"serving": (x) => x.ok && x.json.status === "SERVING"});
+    if (!r.ok) throw new Error(r.error);
+  });
+}`
+	if err := os.WriteFile(scenario, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "summary.json")
+	code := cmdRun([]string{
+		"-vus", "2", "-duration", "300ms", "-no-report",
+		"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+		"-threshold", "check_rate >= 100%", "-threshold", `error_rate{step="grpc"} < 1%`,
+		scenario,
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res report.Result
+	if err := json.Unmarshal(data, &res); err != nil {
+		t.Fatal(err)
+	}
+	if s, ok := res.Step("grpc"); !ok || s.Total == 0 || s.Failed != 0 {
+		t.Errorf("grpc step = %+v, %v", s, ok)
 	}
 }

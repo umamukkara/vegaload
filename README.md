@@ -256,9 +256,9 @@ protocol-direct commands from an OpenAPI spec:
 writes `sample-app.vegaload-plan.md`: one ready-to-run `vegaload run`
 command per endpoint the spec declares.
 
-### Call TCP, UDP, MQTT and Kafka from a scenario
+### Call TCP, UDP, MQTT, Kafka and gRPC from a scenario
 
-A JavaScript scenario can also use the `tcp`, `udp`, `mqtt` and `kafka` globals. Each
+A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka` and `grpc` globals. Each
 function is one call that does one job and returns what it read:
 
 ```js
@@ -296,9 +296,23 @@ export default function () {
   brokers the cluster announces. The kept client stops at the longest timeout
   it was built with (the first call's `timeout`, and at least one minute), so a
   single Kafka call cannot run longer than that.
+- `grpc.call(url, options)` makes one unary gRPC call. The options are
+  `method` (required, such as `"/package.Service/Method"`), `body` (an object,
+  or JSON text; leave it out for an empty message) and `headers` (an object,
+  sent as gRPC metadata). The reply has `status` (the gRPC code, 0 when it
+  worked), `statusName` (such as `"NotFound"`), `body` (the reply as JSON
+  text) and `json` (the same, already parsed). The script needs no `.proto`
+  file: the first call to a method asks the server for its message types
+  (server reflection), and the answer is kept. A JSON body needs the server to
+  offer reflection. Sent to a server without it, the call throws. Call such a
+  server with `encoding: "base64"`: `body` and the reply are then the encoded
+  message in base64. A server's error status is a reply with `ok` false, not
+  an exception. Only unary methods work for now. `url` is `host:port`,
+  `grpc://host:port` or `grpcs://host:port` for TLS. One connection is made on
+  the first call and kept for the rest of that virtual user's run.
 - Every function also accepts `insecure` (skip TLS checks) and `timeout`
   (milliseconds, or text such as `"2s"`).
-- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`.
+- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`, and gRPC calls return `status`, `statusName` and `json`.
   A network failure does not throw: `ok` is false and `error` says why. A
   call that is set up wrongly (an unknown option, a missing topic) does throw.
 - The safety allowlist is checked for the host of every call, like `http`.
@@ -306,7 +320,7 @@ export default function () {
   For `mqtt.subscribe`, the message must arrive during the call, so run it
   when something else publishes.
 
-Python scenarios have the same four globals, with the same options and the
+Python scenarios have the same globals, with the same options and the
 same reply. The options are keyword arguments, the reply works as
 `r.ok` and as `r["ok"]`, and a word that Python reserves gets a trailing
 underscore (`from_="end"`):
@@ -317,7 +331,13 @@ def iteration():
     check(r, {"got PONG": lambda x: x.ok and x.body == "+PONG\r\n"})
     k = kafka.produce("kafka://localhost", topic="orders", key="k1", value="v")
     print(k.records[0].partition, k.records[0].offset)
+    g = grpc.call("localhost:50051", method="/pkg.Greeter/SayHello", body={"name": "x"})
+    check(g, {"greeted": lambda x: x.ok and x.json.message == "Hello x"})
 ```
+
+`grpc.call` sends and reads JSON, which needs server reflection on the
+server. Without it, the call throws. For such a server use
+`encoding="base64"`, and send the encoded message in base64.
 
 A call set up wrongly raises `VegaloadError`.
 
@@ -325,7 +345,10 @@ A call set up wrongly raises `VegaloadError`.
 (and its Python twin, [`mqtt_tcp.py`](./examples/scenarios/mqtt_tcp.py))
 is a small example, and
 [`examples/scenarios/kafka-orders.vl.js`](./examples/scenarios/kafka-orders.vl.js)
-shows Kafka.
+shows Kafka, and
+[`examples/scenarios/mixed-protocols.vl.js`](./examples/scenarios/mixed-protocols.vl.js)
+(Python: [`mixed_protocols.py`](./examples/scenarios/mixed_protocols.py)) mixes
+HTTP, gRPC and WebSocket in one flow.
 
 ### Start from a browser recording
 

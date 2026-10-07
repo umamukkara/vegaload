@@ -253,3 +253,8 @@ bundle) for the project you run it in, so an agent can call `run_test`,
 [FR-MCP-03's tool set](../../AGENTS.md) directly -- each one shelling out to
 the exact commands above. See the top-level `README.md` for the full
 walkthrough.
+
+`mixed-protocols.vl.js` (and `mixed_protocols.py`) mixes HTTP, gRPC and
+WebSocket in one flow: an HTTP call says which service to check, a gRPC call
+checks it (JSON in and out, with no `.proto` file, through server
+reflection), and the answer goes out over a WebSocket.

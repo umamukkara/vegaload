@@ -47,3 +47,27 @@ func TestKafka_ClientIsKeptPerConnectionSetup(t *testing.T) {
 		t.Error("Close must release the clients")
 	}
 }
+
+func TestProtoCallFromArgs_GRPC(t *testing.T) {
+	pc, err := ProtoCallFromArgs("grpc.call", "h:1", map[string]any{
+		"method":  "/a.B/C",
+		"body":    map[string]any{"name": "x"},
+		"headers": map[string]any{"authorization": "Bearer t", "n": 3},
+		"timeout": "2s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(pc.Body) != `{"name":"x"}` || pc.Options["method"] != "/a.B/C" || pc.Headers["authorization"] != "Bearer t" || pc.Headers["n"] != "3" {
+		t.Errorf("pc = %+v", pc)
+	}
+	if _, err := ProtoCallFromArgs("grpc.call", "h:1", map[string]any{"headers": "x"}); err == nil {
+		t.Error("headers must be an object")
+	}
+	if _, err := ProtoCallFromArgs("tcp.send", "h:1", map[string]any{"headers": map[string]any{}}); err == nil {
+		t.Error("only grpc.call takes headers")
+	}
+	if _, err := ProtoCallFromArgs("tcp.send", "h:1", map[string]any{"body": map[string]any{"a": 1}}); err == nil {
+		t.Error("only grpc.call takes an object body")
+	}
+}
