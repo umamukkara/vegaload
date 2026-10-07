@@ -35,10 +35,12 @@ func doctorRun(t *testing.T, args ...string) (code int, stdout string, dir, home
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = out.Close() }) // Windows cannot delete an open file
 	errf, err := os.CreateTemp(t.TempDir(), "err")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = errf.Close() })
 	args = append([]string{"-dir", dir}, args...)
 	code = runDoctor(args, out, errf, func(e *doctor.Env) {
 		e.Home = home
@@ -74,7 +76,9 @@ func TestDoctor_FailsThenFixesMissingCursorSetup(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
 	out, _ := os.CreateTemp(t.TempDir(), "out")
+	t.Cleanup(func() { _ = out.Close() }) // Windows cannot delete an open file
 	errf, _ := os.CreateTemp(t.TempDir(), "err")
+	t.Cleanup(func() { _ = errf.Close() })
 	mutate := func(e *doctor.Env) {
 		e.Home = home
 		fakeMachine(e)

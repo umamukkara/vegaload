@@ -55,8 +55,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 	"time"
 
+	"github.com/vegaload/vegaload/internal/pyfind"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 )
 
@@ -65,6 +68,28 @@ import (
 // at a specific interpreter instead of whatever "python3" resolves to on
 // PATH.
 var pythonBin = "python3"
+
+// defaultPythonBin is pythonBin's default. While pythonBin is unchanged,
+// the interpreter is searched with internal/pyfind (on Windows that tries
+// python3, python and the py launcher). Once something sets pythonBin to
+// another value, that exact command is used.
+const defaultPythonBin = "python3"
+
+// findInterpreter returns the interpreter command to run.
+func findInterpreter() (pyfind.Interpreter, error) {
+	if pythonBin != defaultPythonBin {
+		p, err := exec.LookPath(pythonBin)
+		if err != nil {
+			return pyfind.Interpreter{}, fmt.Errorf("python: %s not found on PATH: %w", pythonBin, err)
+		}
+		return pyfind.Interpreter{Path: p}, nil
+	}
+	in, ok := pyfind.FindOnThisMachine()
+	if !ok {
+		return pyfind.Interpreter{}, fmt.Errorf("python: no Python 3 interpreter found on PATH (tried %s). The Python scripting driver needs Python 3 installed separately, see AGENTS.md", strings.Join(pyfind.Names(runtime.GOOS), ", "))
+	}
+	return in, nil
+}
 
 // harnessSource is run as `python3 -c harnessSource <script path>`. It
 // loads the scenario module once (with `http`/`ws` already present as
@@ -309,7 +334,8 @@ main()
 // does it even parse?) is checked once per VU, in NewVU, since that is
 // where the interpreter that would tell us is actually started.
 type Script struct {
-	path string
+	path   string
+	interp pyfind.Interpreter
 }
 
 // Load returns a Script for the scenario file at path, after confirming
@@ -319,10 +345,11 @@ func Load(path string) (*Script, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("python: %w", err)
 	}
-	if _, err := exec.LookPath(pythonBin); err != nil {
-		return nil, fmt.Errorf("python: %s not found on PATH (the Python scripting driver requires a python3 interpreter to be installed separately — see AGENTS.md): %w", pythonBin, err)
+	interp, err := findInterpreter()
+	if err != nil {
+		return nil, err
 	}
-	return &Script{path: path}, nil
+	return &Script{path: path, interp: interp}, nil
 }
 
 // message is one line of the harness's stdout protocol: a "ready"
@@ -420,7 +447,8 @@ func WithInputs(in netapi.Inputs) Option { return func(v *VU) { v.inputs = in } 
 // individual HTTP request and WebSocket handshake, same as
 // js.Script.NewVU's parameters of the same name.
 func (s *Script) NewVU(check netapi.SafetyCheck, timeout time.Duration, opts ...Option) (*VU, error) {
-	cmd := exec.Command(pythonBin, "-u", "-c", harnessSource, s.path) //nolint:gosec // path and interpreter are operator-controlled, not request input
+	cmdArgs := append(append([]string{}, s.interp.Args...), "-u", "-c", harnessSource, s.path)
+	cmd := exec.Command(s.interp.Path, cmdArgs...) //nolint:gosec // path and interpreter are operator-controlled, not request input
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

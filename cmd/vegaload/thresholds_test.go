@@ -60,7 +60,7 @@ func TestCmdRun_ThresholdsPass_ExitsZero(t *testing.T) {
 }
 
 func TestCmdRun_ThresholdBreached_ExitsThree(t *testing.T) {
-	code, summary := thresholdRun(t, "-threshold", "fast: p95 < 1ns", "-threshold", "error_rate < 1%")
+	code, summary := thresholdRun(t, "-threshold", "fast: p95 < 0s", "-threshold", "error_rate < 1%")
 	if code != 3 || exitThresholdsBreached != 3 {
 		t.Fatalf("exit code = %d, want 3", code)
 	}
@@ -115,7 +115,7 @@ func TestCmdRun_ThresholdsFile(t *testing.T) {
 	}
 
 	// File and flags combine.
-	code, _ = thresholdRun(t, "-thresholds", path, "-threshold", "p50 < 1ns")
+	code, _ = thresholdRun(t, "-thresholds", path, "-threshold", "p50 < 0s")
 	if code != 3 {
 		t.Errorf("a breached flag next to a passing file: exit code = %d, want 3", code)
 	}
@@ -128,7 +128,7 @@ func TestCmdRun_AuditLogRecordsThresholds(t *testing.T) {
 
 	code := cmdRun([]string{
 		"-target", srv.URL, "-protocol", "http1", "-vus", "1", "-duration", "200ms",
-		"-no-report", "-audit-log", auditPath, "-threshold", "p95 < 1ns",
+		"-no-report", "-audit-log", auditPath, "-threshold", "p95 < 0s",
 	})
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3", code)
@@ -138,7 +138,7 @@ func TestCmdRun_AuditLogRecordsThresholds(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := string(data)
-	if !strings.Contains(line, `"thresholds":["p95 \u003c 1ns"]`) && !strings.Contains(line, `"thresholds":["p95 < 1ns"]`) {
+	if !strings.Contains(line, `"thresholds":["p95 \u003c 0s"]`) && !strings.Contains(line, `"thresholds":["p95 < 0s"]`) {
 		t.Errorf("audit line does not record the threshold: %s", line)
 	}
 	if !strings.Contains(line, `"thresholds_passed":false`) {

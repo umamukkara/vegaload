@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,8 +19,8 @@ import (
 
 func skipIfNoPython(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath(pythonBin); err != nil {
-		t.Skipf("%s not on PATH, skipping", pythonBin)
+	if _, err := findInterpreter(); err != nil {
+		t.Skipf("no Python 3 interpreter on PATH, skipping: %v", err)
 	}
 }
 

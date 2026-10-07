@@ -8,8 +8,8 @@
 // commands cannot disagree about where a host's files live. It knows
 // nothing about the engine, protocols, or reporting.
 //
-// Supported platforms are macOS and Linux. Claude Desktop is only
-// offered on macOS, because it has no official Linux build.
+// Supported platforms are macOS, Linux and Windows. Claude Desktop is
+// offered on macOS and Windows, because it has no official Linux build.
 package hosts
 
 import (
@@ -26,8 +26,9 @@ import (
 // questions. Tests build one over a temp directory instead of the real
 // home directory.
 type Env struct {
-	OS       string // runtime.GOOS: "darwin" or "linux"
+	OS       string // runtime.GOOS: "darwin", "linux" or "windows"
 	Home     string // the user's home directory
+	AppData  string // Windows only: the %APPDATA% folder; empty elsewhere
 	Dir      string // the project directory being checked
 	LookPath func(name string) (string, error)
 	// DirExists reports whether a directory exists. Nil means the real
@@ -292,9 +293,11 @@ func claudeDesktop() Host {
 	return Host{
 		ID:        "claude-desktop",
 		Name:      "Claude Desktop",
-		Supported: func(osName string) bool { return osName == "darwin" },
+		Supported: func(osName string) bool { return osName == "darwin" || osName == "windows" },
 		Detect: func(e Env) (bool, string) {
 			switch {
+			case e.OS == "windows" && e.AppData != "" && e.dirExists(filepath.Join(e.AppData, "Claude")):
+				return true, filepath.Join(e.AppData, "Claude")
 			case e.dirExists("/Applications/Claude.app"):
 				return true, "/Applications/Claude.app"
 			case e.dirExists(filepath.Join(e.Home, "Library", "Application Support", "Claude")):
@@ -303,10 +306,18 @@ func claudeDesktop() Host {
 			return false, ""
 		},
 		Configs: func(e Env) []MCPConfig {
+			path := filepath.Join(e.Home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+			if e.OS == "windows" {
+				appData := e.AppData
+				if appData == "" {
+					appData = filepath.Join(e.Home, "AppData", "Roaming")
+				}
+				path = filepath.Join(appData, "Claude", "claude_desktop_config.json")
+			}
 			return []MCPConfig{{
 				Host:  "claude-desktop",
 				Scope: ScopeUser,
-				Path:  filepath.Join(e.Home, "Library", "Application Support", "Claude", "claude_desktop_config.json"),
+				Path:  path,
 			}}
 		},
 	}

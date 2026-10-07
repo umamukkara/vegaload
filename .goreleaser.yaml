@@ -72,3 +72,24 @@ brews:
     commit_msg_template: "vegaload {{ .Tag }}"
     test: |
       assert_match "vegaload #{version}", shell_output("#{bin}/vegaload version")
+
+# Scoop manifest for Windows, pushed to the vegaload/scoop-bucket repo on each
+# tagged release. It is off until that repo exists and the token can write to
+# it (see RELEASING.md, "Windows packages"). To turn it on, remove the "#"
+# at the start of each line below.
+#
+# scoops:
+#   - name: vegaload
+#     ids:
+#       - vegaload
+#     repository:
+#       owner: vegaload
+#       name: scoop-bucket
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     homepage: https://github.com/vegaload/vegaload
+#     description: "Open-source load testing for code and AI agents. One static binary."
+#     license: Apache-2.0
+#     commit_author:
+#       name: vegaload-bot
+#       email: bot@vegaload.dev
+#     commit_msg_template: "vegaload {{ .Tag }}"

@@ -47,6 +47,13 @@ go build -o vegaload ./cmd/vegaload
 `go install github.com/vegaload/vegaload/cmd/vegaload@latest` also works
 once the repository is public. Release archives for Linux, macOS and
 Windows are attached to each [GitHub release](https://github.com/vegaload/vegaload/releases).
+
+On Windows 10 or later, download the zip for your CPU from the release page,
+unpack it, and run `vegaload.exe`. Put its folder on your `PATH` to run
+`vegaload` from anywhere. `run`, `validate`, `doctor`, `init` and `mcp serve`
+all work. Python scenarios need Python 3 from python.org (VegaLoad finds
+`python3`, `python` or the `py` launcher). Scoop and winget packages are set
+up in [RELEASING.md](./RELEASING.md) and come after the first Windows release.
 A scratch-based Docker image builds from the
 included `Dockerfile` (`docker build .`); it carries nothing but the binary
 and CA certificates, so Python-scripted scenarios (which shell out to a

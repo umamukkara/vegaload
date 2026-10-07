@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,9 @@ import (
 // actually building or running vegaload itself.
 func fakeBinary(t *testing.T, stdout string, stderr string, exitCode int) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake binary is a /bin/sh script, which Windows cannot run")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fake-vegaload")
 	var script strings.Builder

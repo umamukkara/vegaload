@@ -32,6 +32,25 @@ jobs:
             exit 1
           fi
 
+  # Builds and tests on Windows, which the release also ships. Python-driven
+  # tests skip themselves when no Python 3 is found.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+      - name: The binary runs
+        shell: bash
+        run: |
+          go build -o vegaload.exe ./cmd/vegaload
+          ./vegaload.exe version
+          ./vegaload.exe doctor || true
+
   # Builds every release target and the Homebrew formula without publishing,
   # so a broken .goreleaser.yaml fails in a PR and not on release day.
   release-dry-run:

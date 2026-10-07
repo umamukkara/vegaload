@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +20,9 @@ import (
 // CLI flags that handler built.
 func argRecordingBinary(t *testing.T, respStdout string, exitCode int) (binPath, argsFile string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake binary is a /bin/sh script, which Windows cannot run")
+	}
 	dir := t.TempDir()
 	binPath = filepath.Join(dir, "fake-vegaload")
 	argsFile = filepath.Join(dir, "args.txt")

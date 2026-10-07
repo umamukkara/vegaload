@@ -14,6 +14,7 @@ import (
 
 	"github.com/vegaload/vegaload/internal/diagnose"
 	"github.com/vegaload/vegaload/internal/llm"
+	"github.com/vegaload/vegaload/internal/pyfind"
 	"github.com/vegaload/vegaload/internal/report"
 )
 
@@ -238,13 +239,14 @@ func formatPercent(rate float64) string {
 }
 
 func pythonDiagnosis() string {
-	path, err := exec.LookPath("python3")
-	if err != nil {
+	interp, ok := pyfind.FindOnThisMachine()
+	if !ok {
 		return "not found on PATH (only needed for Python scenarios; JavaScript/TypeScript scenarios don't need it)"
 	}
-	out, err := exec.Command(path, "--version").Output() //nolint:gosec // fixed interpreter lookup, no user input
+	args := append(append([]string{}, interp.Args...), "--version")
+	out, err := exec.Command(interp.Path, args...).Output() //nolint:gosec // fixed interpreter lookup, no user input
 	if err != nil {
-		return fmt.Sprintf("found at %s, but running it failed: %v", path, err)
+		return fmt.Sprintf("found at %s, but running it failed: %v", interp.Path, err)
 	}
-	return fmt.Sprintf("%s (%s)", strings.TrimSpace(string(out)), path)
+	return fmt.Sprintf("%s (%s)", strings.TrimSpace(string(out)), interp.Path)
 }
