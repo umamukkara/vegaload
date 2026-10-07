@@ -35,6 +35,8 @@ var schemes = map[string]scheme{
 	"wss":   {port: "443", protocol: "websocket", http: true},
 	"grpc":  {protocol: "grpc"},
 	"grpcs": {port: "443", protocol: "grpc"},
+	"mqtt":  {port: "1883", protocol: "mqtt"},
+	"mqtts": {port: "8883", protocol: "mqtt"},
 	"tcp":   {protocol: "tcp"},
 	"udp":   {protocol: "udp", udp: true},
 }

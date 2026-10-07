@@ -402,6 +402,12 @@ func TestSchemeTable(t *testing.T) {
 	if got, err := parseTarget("udp://h:7"); err != nil || got.protocol() != "udp" {
 		t.Errorf("udp://h:7 = %+v, %v", got, err)
 	}
+	for in, want := range map[string]string{"mqtt://h": "1883", "mqtts://h": "8883"} {
+		got, err := parseTarget(in)
+		if err != nil || got.Port != want || got.protocol() != "mqtt" {
+			t.Errorf("%s = %+v, %v; want port %s and protocol mqtt", in, got, err, want)
+		}
+	}
 	got, err := parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)
