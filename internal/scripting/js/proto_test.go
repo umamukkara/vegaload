@@ -3,10 +3,12 @@ package js
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"io"
 	"net"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -488,4 +490,40 @@ func TestProto_EndOfRunStopsACall(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("call kept running after the run ended: %s", time.Since(start))
 	}
+}
+
+func TestTCP_InsecureSkipsCertificateCheck(t *testing.T) {
+	// A TLS server with a certificate no client trusts.
+	hs := httptest.NewUnstartedServer(nil)
+	hs.StartTLS()
+	cert := hs.TLS.Certificates[0]
+	hs.Close()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				line, err := bufio.NewReader(c).ReadString('\n')
+				if err == nil {
+					_, _ = c.Write([]byte("echo:" + line))
+				}
+			}()
+		}
+	}()
+	addr := ln.Addr().String()
+	must(t, nil, assertFn+`
+		const strict = tcp.send("tcp://`+addr+`", {body: "hi\n", until: "\n", tls: true});
+		assert(!strict.ok, "an untrusted certificate must fail without insecure");
+		const r = tcp.send("tcp://`+addr+`", {body: "hi\n", until: "\n", tls: true, insecure: true});
+		assert(r.ok, r.error);
+		assert(r.body === "echo:hi\n", r.body);
+	`)
 }

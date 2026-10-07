@@ -123,7 +123,7 @@ func (c *ProtoClient) socket(ctx context.Context, network string, call ProtoCall
 	if _, ok := opts["escape"]; !ok {
 		opts["escape"] = "false"
 	}
-	target := protocol.Target{URL: call.URL, Body: call.Body, Options: opts}
+	target := protocol.Target{URL: call.URL, Body: call.Body, Options: opts, InsecureSkipVerify: call.Insecure}
 	newDriver := socket.NewTCP
 	if network == "udp" {
 		newDriver = socket.NewUDP
