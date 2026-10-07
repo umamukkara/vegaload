@@ -324,6 +324,21 @@ func TestGenerateFromSpecTool_BuildsArgs(t *testing.T) {
 	}
 }
 
+func TestGenerateFromSpecTool_PythonAndScenarioPath(t *testing.T) {
+	stdout := `{"path":"w.vegaload-plan.md","scenario_path":"w.py","created":true,"endpoints":3}`
+	bin, argsFile := argRecordingBinary(t, stdout, 0)
+	out, err := callTool(t, NewTools(bin), "generate_from_spec", map[string]any{"spec_path": "spec.json", "name": "w", "python": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.(map[string]any)["scenario_path"] != "w.py" {
+		t.Errorf("out = %v, want scenario_path passed through", out)
+	}
+	if args := readArgs(t, argsFile); !containsArg(args, "-python") {
+		t.Errorf("args = %v, want -python", args)
+	}
+}
+
 func TestGenerateFromSpecTool_RequiresSpecPath(t *testing.T) {
 	tools := NewTools("/unused")
 	if _, err := callTool(t, tools, "generate_from_spec", map[string]any{}); err == nil {

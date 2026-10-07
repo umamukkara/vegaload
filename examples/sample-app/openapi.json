@@ -7,23 +7,62 @@
   "servers": [
     { "url": "http://127.0.0.1:8080" }
   ],
+  "components": {
+    "schemas": {
+      "Widget": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "readOnly": true },
+          "name": { "type": "string", "example": "sprocket" }
+        }
+      },
+      "NewWidget": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "example": "sample-widget" }
+        }
+      }
+    }
+  },
   "paths": {
     "/health": {
       "get": {
-        "summary": "Health check"
+        "summary": "Health check",
+        "responses": { "200": { "description": "ok" } }
       }
     },
     "/widgets": {
       "get": {
-        "summary": "List widgets"
+        "summary": "List widgets",
+        "responses": { "200": { "description": "all widgets" } }
       },
       "post": {
-        "summary": "Create a widget"
+        "summary": "Create a widget",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/NewWidget" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } }
+          }
+        }
       }
     },
     "/widgets/{id}": {
       "get": {
-        "summary": "Get a widget by id"
+        "summary": "Get a widget by id",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "the widget" },
+          "404": { "description": "no such widget" }
+        }
       }
     }
   }

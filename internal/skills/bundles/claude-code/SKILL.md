@@ -54,9 +54,13 @@ couldn't also do.
 - **compare_reports** — diff a candidate JSON report against a baseline JSON
   report (`vegaload compare`). Returns metric deltas and whether error rate
   or p95 latency regressed. Use after a second run to check for regressions.
-- **generate_from_spec** — given a JSON OpenAPI document, generate a runbook
-  (one ready-to-run `vegaload run` command per endpoint). Only JSON specs are
-  supported — ask the user to export YAML specs to JSON first.
+- **generate_from_spec** — given a JSON OpenAPI document, write a runnable
+  scenario (JavaScript, or Python with `python: true`) that calls every
+  operation as a named step, and a runbook with one `vegaload run` command per
+  endpoint. The order is a guess (creates, reads, updates, deletes; a created
+  id is used by the calls under it), so validate it and edit it to fit the
+  real flow. Only JSON specs are supported — ask the user to export YAML specs
+  to JSON first.
 - **validate_scenario** — run a scenario once, with one user and one iteration,
   and report whether it works (`vegaload validate`). It makes real calls, under
   the same host rules as **run_test**. Returns `valid`, and when not valid, the
@@ -66,8 +70,9 @@ couldn't also do.
 
 ## Typical flow
 
-1. If the user names an OpenAPI spec, call **generate_from_spec** first to see
-   what endpoints exist and get a starting command for each.
+1. If the user names an OpenAPI spec, call **generate_from_spec** first. It
+   writes a scenario to start from (check it with **validate_scenario**) and a
+   runbook with a command for each endpoint.
 2. For a scenario you just wrote or edited, call **validate_scenario** first to
    check that it works with one user. Fix it if `valid` is false.
 3. Call **run_test** with the target/protocol (or scenario) and shape the user

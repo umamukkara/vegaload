@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/vegaload/vegaload/internal/openapi"
 )
@@ -62,7 +63,7 @@ func cmdNew(args []string) int {
 	python := fs.Bool("python", false, "scaffold a Python scenario instead of JavaScript")
 	force := fs.Bool("force", false, "overwrite the file if it already exists")
 	output := fs.String("output", "text", "output mode: text or json")
-	fromOpenAPI := fs.String("from-openapi", "", "path to a JSON OpenAPI spec; generates a run-command runbook instead of a scenario template")
+	fromOpenAPI := fs.String("from-openapi", "", "path to a JSON OpenAPI spec; writes a runnable scenario that calls every operation as a named step (JavaScript, or Python with -python), plus a runbook of one run command per endpoint")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: vegaload new [name] [flags]")
 		fs.PrintDefaults()
@@ -84,7 +85,7 @@ func cmdNew(args []string) int {
 	}
 
 	if *fromOpenAPI != "" {
-		return cmdNewFromOpenAPI(name, *fromOpenAPI, *force, *output)
+		return cmdNewFromOpenAPI(name, *fromOpenAPI, *python, *force, *output)
 	}
 
 	var (
@@ -123,17 +124,17 @@ func cmdNew(args []string) int {
 	return 0
 }
 
-// cmdNewFromOpenAPI implements FR-MCP-06's `vegaload new --from-openapi
-// <spec>`: it reads a JSON OpenAPI document at specPath and writes a
-// Markdown runbook of ready-to-run `vegaload run` commands, one per
-// endpoint the spec declares, rather than one scripted scenario that
-// chains them all together. See internal/openapi's doc comment: a flat
-// list of per-endpoint protocol-direct commands is what a spec's set of
-// independent endpoints actually maps to; a spec alone doesn't say how
-// their responses should feed into each other the way a hand-written
-// FR-CLI-08 scenario does, so generating one would be guessing at a
-// flow the spec never described.
-func cmdNewFromOpenAPI(name, specPath string, force bool, output string) int {
+// cmdNewFromOpenAPI implements `vegaload new -from-openapi <spec>`
+// (FR-MCP-06, FR-CLI-16): it reads a JSON OpenAPI document at specPath and
+// writes two files.
+//
+// The first is a runnable scenario that calls every operation once per
+// iteration, each as a named step. A spec describes each endpoint on its own,
+// so the order and the data flow are chosen by simple rules, and the file
+// says so: see internal/openapi's RenderScenario. The second is a Markdown
+// runbook with one ready-to-run `vegaload run` command per endpoint, which
+// is the better start when you want to load one endpoint at a time.
+func cmdNewFromOpenAPI(name, specPath string, python, force bool, output string) int {
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload new: reading %s: %v\n", specPath, err)
@@ -145,31 +146,54 @@ func cmdNewFromOpenAPI(name, specPath string, force bool, output string) int {
 		return 1
 	}
 
-	path := withExt(name, ".vegaload-plan.md")
+	lang, scenarioPath := openapi.JavaScript, withExt(name, ".vl.js")
+	if python {
+		lang, scenarioPath = openapi.Python, withExt(name, ".py")
+	}
+	runbookPath := trimScenarioExt(name) + ".vegaload-plan.md"
 	if !force {
-		if _, err := os.Stat(path); err == nil {
-			fmt.Fprintf(os.Stderr, "vegaload new: %s already exists (use -force to overwrite)\n", path)
-			return 1
+		for _, path := range []string{scenarioPath, runbookPath} {
+			if _, err := os.Stat(path); err == nil {
+				fmt.Fprintf(os.Stderr, "vegaload new: %s already exists (use -force to overwrite)\n", path)
+				return 1
+			}
 		}
 	}
 
-	content := spec.RenderRunbook(name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(scenarioPath, []byte(spec.RenderScenario(scenarioPath, lang)), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "vegaload new: %v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(runbookPath, []byte(spec.RenderRunbook(name)), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload new: %v\n", err)
 		return 1
 	}
 
 	if output == "json" {
 		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"path": path, "created": true, "endpoints": len(spec.Endpoints),
+			// path is the runbook, as it was before the scenario was added.
+			"path": runbookPath, "scenario_path": scenarioPath, "created": true, "endpoints": len(spec.Endpoints),
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "vegaload new: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	fmt.Printf("created %s (%d endpoints)\n", path, len(spec.Endpoints))
+	fmt.Printf("created %s (%d endpoints as named steps)\n", scenarioPath, len(spec.Endpoints))
+	fmt.Printf("created %s (one run command per endpoint)\n", runbookPath)
+	fmt.Printf("try it: vegaload run -vus 5 -duration 30s %s\n", scenarioPath)
 	return 0
+}
+
+// trimScenarioExt removes a scenario file extension, so a name such as
+// "shop.vl.js" gives the runbook "shop.vegaload-plan.md".
+func trimScenarioExt(name string) string {
+	for _, suffix := range []string{".vl.js", ".vl.ts", ".py", ".js", ".ts"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
+	}
+	return name
 }
 
 // withExt appends ext to name unless name already ends with it (or any

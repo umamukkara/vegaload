@@ -451,23 +451,29 @@ type generateFromSpecArgs struct {
 	SpecPath string `json:"spec_path"`
 	Name     string `json:"name,omitempty"`
 	Force    bool   `json:"force,omitempty"`
+	Python   bool   `json:"python,omitempty"`
 }
 
 func generateFromSpecTool(exePath string) Tool {
 	return Tool{
 		Name: "generate_from_spec",
-		Description: "Generate a load-test runbook from a JSON OpenAPI spec: one ready-to-run `vegaload run` " +
-			"command per endpoint the spec declares. Equivalent to `vegaload new -from-openapi <spec>`. YAML specs " +
-			"are not supported — convert to JSON first. This does not produce a runnable scenario script, since " +
-			"a spec describes each endpoint on its own, not how their responses should chain together; it " +
-			"produces the exact command to run each endpoint protocol-direct instead, which you can also use " +
-			"as a checklist for a hand-written scenario if the endpoints should be chained.",
+		Description: "Generate a runnable load-test scenario from a JSON OpenAPI spec, and a runbook. The scenario " +
+			"(JavaScript, or Python with python) calls every operation of the spec once per iteration, each as a " +
+			"named step, so the run shows each endpoint's latency and errors and a threshold can target one. " +
+			"Creates run first, then reads, updates and deletes; an id a create returns is used by the calls " +
+			"under it. Example bodies, required query parameters and credentials (read from env) come from the " +
+			"spec. Because a spec describes each endpoint on its own, the order is a guess: validate the scenario " +
+			"(validate_scenario) and edit it to fit the real flow. The runbook has one ready-to-run " +
+			"`vegaload run` command per endpoint, for loading one endpoint at a time. Equivalent to " +
+			"`vegaload new -from-openapi <spec>`. YAML specs are not supported: convert to JSON first. " +
+			"The result has path (the runbook) and scenario_path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"spec_path": map[string]any{"type": "string", "description": "path to a JSON OpenAPI document"},
-				"name":      map[string]any{"type": "string", "description": "base name for the generated runbook file (default: \"scenario\")"},
-				"force":     map[string]any{"type": "boolean", "description": "overwrite the runbook file if it already exists"},
+				"name":      map[string]any{"type": "string", "description": "base name for the generated files (default: \"scenario\")"},
+				"force":     map[string]any{"type": "boolean", "description": "overwrite the files if they already exist"},
+				"python":    map[string]any{"type": "boolean", "description": "write a Python scenario instead of JavaScript"},
 			},
 			"required": []string{"spec_path"},
 		},
@@ -482,6 +488,9 @@ func generateFromSpecTool(exePath string) Tool {
 			args := []string{"new", "-from-openapi", in.SpecPath, "-output", "json"}
 			if in.Force {
 				args = append(args, "-force")
+			}
+			if in.Python {
+				args = append(args, "-python")
 			}
 			if in.Name != "" {
 				args = append(args, in.Name)

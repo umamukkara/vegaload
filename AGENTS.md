@@ -55,7 +55,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 ## Commands an agent should know
 
 - `vegaload run <file>` — run a scenario.
-- `vegaload new --from-openapi <spec>` — generate a starter scenario from an OpenAPI spec.
+- `vegaload new -from-openapi <spec> [name]` — write a runnable scenario from a JSON OpenAPI spec (`-python` for Python), with every operation as a named step, plus a runbook of one `vegaload run` command per endpoint. Flags go before the name. The generator is `internal/openapi/scenario.go`; the order (creates, reads, updates, deletes) and the id wiring are rules, not something the spec says, so the file tells the user to edit it.
 - `vegaload run -threshold "p95 < 300ms" ...` — make a run pass or fail on its own numbers. A breach exits 3; `-thresholds <file>` loads them from JSON.
 - In scenarios, `check(value, {name: test})` counts named assertions without failing the iteration; gate with `-threshold "check_rate >= 99%"`.
 - In scenarios, `step(name, fn)` (Python: `with step(name):`) names a stage; the summary, JSON and HTML show latency and error rate per step, and `-threshold 'p95{step="login"} < 300ms'` gates one step.
