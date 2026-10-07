@@ -13,7 +13,18 @@ permissions:
   contents: write
 
 jobs:
+  # Stops the release before anything is published if the Helm chart's
+  # default image would not be the one this tag publishes.
+  check-chart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-chart-version.sh "${GITHUB_REF_NAME}"
+
   release:
+    needs: check-chart
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +44,7 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   image:
+    needs: check-chart
     runs-on: ubuntu-latest
     permissions:
       contents: read
