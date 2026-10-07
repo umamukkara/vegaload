@@ -104,6 +104,8 @@ type runTestArgs struct {
 	NoReport      bool     `json:"no_report,omitempty"`
 	Options       []string `json:"options,omitempty"`
 	Thresholds    []string `json:"thresholds,omitempty"`
+	AbortOnBreach bool     `json:"abort_on_breach,omitempty"`
+	AbortGrace    string   `json:"abort_grace,omitempty"`
 	BaselinePath  string   `json:"baseline_path,omitempty"`
 	MaxRegression *float64 `json:"max_regression,omitempty"`
 	JUnitPath     string   `json:"junit_path,omitempty"`
@@ -127,27 +129,29 @@ func runTestTool(exePath string) Tool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"scenario_path":  map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
-				"target":         map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
-				"protocol":       map[string]any{"type": "string", "description": "http1, http2, grpc, websocket, mqtt, kafka, tcp, or udp (protocol-direct mode)"},
-				"options":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "driver options, each \"key=value\" (protocol-direct mode). Each protocol has its own keys"},
-				"executor":       map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
-				"vus":            map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
-				"duration":       map[string]any{"type": "string", "description": "run duration, e.g. \"30s\" (fixed-vus, constant-arrival-rate)"},
-				"stages":         map[string]any{"type": "string", "description": "comma-separated target:duration stages for ramp/step, e.g. \"10:30s,0:10s\""},
-				"rate":           map[string]any{"type": "number", "description": "iterations per second (constant-arrival-rate)"},
-				"max_vus":        map[string]any{"type": "integer", "description": "max concurrent VUs (constant-arrival-rate)"},
-				"allow_targets":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "additional hosts allowed without confirmation"},
-				"yes":            map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
-				"report_path":    map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
-				"no_report":      map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
-				"thresholds":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed). To target one named step() of a scenario, add a selector, e.g. \"p95{step=\\\"login\\\"} < 300ms\""},
-				"baseline_path":  map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
-				"data_files":     dataFilesSchema,
-				"env":            envSchema,
-				"secret_env":     secretEnvSchema,
-				"junit_path":     map[string]any{"type": "string", "description": "also write a JUnit XML file here: each threshold, check and the baseline gate is one test case"},
-				"max_regression": map[string]any{"type": "number", "description": "with baseline_path: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)"},
+				"scenario_path":   map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
+				"target":          map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
+				"protocol":        map[string]any{"type": "string", "description": "http1, http2, grpc, websocket, mqtt, kafka, tcp, or udp (protocol-direct mode)"},
+				"options":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "driver options, each \"key=value\" (protocol-direct mode). Each protocol has its own keys"},
+				"executor":        map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
+				"vus":             map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
+				"duration":        map[string]any{"type": "string", "description": "run duration, e.g. \"30s\" (fixed-vus, constant-arrival-rate)"},
+				"stages":          map[string]any{"type": "string", "description": "comma-separated target:duration stages for ramp/step, e.g. \"10:30s,0:10s\""},
+				"rate":            map[string]any{"type": "number", "description": "iterations per second (constant-arrival-rate)"},
+				"max_vus":         map[string]any{"type": "integer", "description": "max concurrent VUs (constant-arrival-rate)"},
+				"allow_targets":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "additional hosts allowed without confirmation"},
+				"yes":             map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
+				"report_path":     map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
+				"no_report":       map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
+				"thresholds":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed). To target one named step() of a scenario, add a selector, e.g. \"p95{step=\\\"login\\\"} < 300ms\""},
+				"abort_on_breach": map[string]any{"type": "boolean", "description": "needs thresholds. Stop the run early, as soon as a threshold is broken beyond recovery (such as \"failed < 5\", or a p95 or error_rate that stays broken after a warm-up). The result then has aborted with the threshold and the time, and thresholds_passed false. Thresholds that need the whole run (rps, total >=) wait for the end"},
+				"abort_grace":     map[string]any{"type": "string", "description": "with abort_on_breach: a duration like \"5s\". The warm-up in which p95, error_rate and other statistics are not judged (default 5s, or a quarter of the run if shorter)"},
+				"baseline_path":   map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
+				"data_files":      dataFilesSchema,
+				"env":             envSchema,
+				"secret_env":      secretEnvSchema,
+				"junit_path":      map[string]any{"type": "string", "description": "also write a JUnit XML file here: each threshold, check and the baseline gate is one test case"},
+				"max_regression":  map[string]any{"type": "number", "description": "with baseline_path: how many percent worse than the baseline p95 and error rate may be (default 0: any increase fails)"},
 			},
 		},
 		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -200,6 +204,12 @@ func runTestTool(exePath string) Tool {
 			}
 			for _, t := range in.Thresholds {
 				args = append(args, "-threshold", t)
+			}
+			if in.AbortOnBreach {
+				args = append(args, "-abort-on-breach")
+			}
+			if in.AbortGrace != "" {
+				args = append(args, "-abort-grace", in.AbortGrace)
 			}
 			if in.Yes {
 				args = append(args, "-yes")

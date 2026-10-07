@@ -149,6 +149,15 @@ type runConfig struct {
 	// FR-CLI-11: pass/fail thresholds judged on the finished run.
 	Thresholds []threshold.Threshold
 
+	// FR-CLI-13: stop the run as soon as a threshold is broken beyond
+	// recovery. AbortGrace is the warm-up in which statistics are not
+	// judged. It counts only when AbortGraceSet is true (-abort-grace was
+	// given), and then zero means no warm-up. Otherwise the warm-up is
+	// automatic (see autoGrace).
+	AbortOnBreach bool
+	AbortGrace    time.Duration
+	AbortGraceSet bool
+
 	// FR-CLI-14: judge the finished run against a baseline report the
 	// user supplies. Baseline is loaded when the flags are parsed, so a
 	// bad path fails before any load is sent.
@@ -221,6 +230,8 @@ func parseRunArgs(args []string) (*runConfig, error) {
 
 	// FR-CLI-11: pass/fail thresholds.
 	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\" or \"fast: error_rate < 1%\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
+	fs.BoolVar(&cfg.AbortOnBreach, "abort-on-breach", false, "stop the run as soon as a threshold is broken beyond recovery, and exit 3. Needs -threshold or -thresholds. Thresholds like \"failed < 5\" stop it at once; statistics like p95 or error_rate must stay broken for three seconds, after a warm-up. Thresholds that need the whole run (rps, total >=) wait for the end")
+	fs.DurationVar(&cfg.AbortGrace, "abort-grace", 0, "with -abort-on-breach: the warm-up in which p95, error_rate and other statistics are not judged (default: 5s, or a quarter of the run if shorter; 0 means no warm-up)")
 	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, or the output of `vegaload diagnose -output json`)")
 
 	// FR-CLI-14: baseline gate.
@@ -284,6 +295,21 @@ func parseRunArgs(args []string) (*runConfig, error) {
 			return nil, fmt.Errorf("-threshold: %w", err)
 		}
 		cfg.Thresholds = append(cfg.Thresholds, ts...)
+	}
+
+	if cfg.AbortOnBreach && len(cfg.Thresholds) == 0 {
+		return nil, fmt.Errorf("-abort-on-breach needs at least one -threshold or -thresholds")
+	}
+	if cfg.AbortGrace < 0 {
+		return nil, fmt.Errorf("-abort-grace %s: want zero or more", cfg.AbortGrace)
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "abort-grace" {
+			cfg.AbortGraceSet = true
+		}
+	})
+	if cfg.AbortGraceSet && !cfg.AbortOnBreach {
+		return nil, fmt.Errorf("-abort-grace needs -abort-on-breach")
 	}
 
 	if !cfg.NoStepSummary {
@@ -561,14 +587,39 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	}
 	defer closeFn() //nolint:errcheck // best-effort cleanup; a close failure shouldn't mask the run's own result
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	start := time.Now()
-	if err := ex.Run(context.Background(), iter, collector); err != nil {
-		return nil, err
+	// FR-CLI-13: a watcher looks at the run as it goes, and cancels ctx
+	// when a threshold is broken beyond recovery.
+	var aborted *report.AbortInfo
+	var watcherDone chan struct{}
+	stopWatcher := func() {}
+	if cfg.AbortOnBreach {
+		grace := cfg.AbortGrace
+		if !cfg.AbortGraceSet {
+			grace = autoGrace(ex.Duration())
+		}
+		w := newBreachWatcher(cfg.Thresholds, collector, ex.Name(), start, grace)
+		stop := make(chan struct{})
+		watcherDone = make(chan struct{})
+		go func() {
+			defer close(watcherDone)
+			aborted = w.watch(stop, cancel)
+		}()
+		stopWatcher = func() { close(stop); <-watcherDone }
+	}
+	runErr := ex.Run(ctx, iter, collector)
+	stopWatcher()
+	if runErr != nil {
+		return nil, runErr
 	}
 	elapsed := time.Since(start)
 
 	result := collector.Finish(ex.Name(), elapsed)
 	applyThresholds(cfg, result)
+	applyAbort(result, aborted)
 	applyBaseline(cfg, result)
 	return result, nil
 }
@@ -664,6 +715,10 @@ func cmdRun(args []string) int {
 	if err := enforceSafety(cfg, os.Stdin, os.Stdout, promptConfirm); err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload run: %v\n", err)
 		return 2
+	}
+
+	if cfg.AbortOnBreach {
+		abortNote(os.Stderr, cfg.Thresholds)
 	}
 
 	var result *report.Result
@@ -870,6 +925,9 @@ func printResult(w io.Writer, r *report.Result) {
 	fmt.Fprintf(w, "  total:    %d\n", r.Total)
 	fmt.Fprintf(w, "  failed:   %d\n", r.Failed)
 	fmt.Fprintf(w, "  mean:     %s\n", r.Latency.Mean)
+	if a := r.Aborted; a != nil {
+		fmt.Fprintf(w, "  ABORTED:  stopped at %s because %s was broken (observed %s)\n", a.At.Round(time.Millisecond), a.Threshold, a.Observed)
+	}
 	printChecks(w, r)
 	printSteps(w, r)
 	printThresholds(w, r)

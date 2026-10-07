@@ -34,6 +34,11 @@ type Result struct {
 	Thresholds       []ThresholdResult `json:"thresholds,omitempty"`
 	ThresholdsPassed *bool             `json:"thresholds_passed,omitempty"`
 
+	// Aborted is set when the run was stopped early because a threshold
+	// was broken (-abort-on-breach, FR-CLI-13). It is omitted for a run
+	// that ran to its end.
+	Aborted *AbortInfo `json:"aborted,omitempty"`
+
 	// Baseline is the verdict of the baseline gate (FR-CLI-14): this run
 	// compared with a baseline report the user supplied. It is omitted
 	// when the run had no baseline.
@@ -53,6 +58,16 @@ type Result struct {
 	// is its own measure, which a threshold can judge through the
 	// check_rate metric.
 	Checks []CheckResult `json:"checks,omitempty"`
+}
+
+// AbortInfo says why and when a run was stopped early (FR-CLI-13).
+type AbortInfo struct {
+	// Threshold is the name of the threshold that stopped the run.
+	Threshold string `json:"threshold"`
+	// Observed is what the run measured when it was stopped.
+	Observed string `json:"observed"`
+	// At is how far into the run it was stopped.
+	At time.Duration `json:"at_ns"`
 }
 
 // StepResult is one named step's totals across the whole run: how many

@@ -24,6 +24,10 @@ func MarkdownSummary(res *Result) string {
 		res.Latency.P50.Round(time.Microsecond), res.Latency.P95.Round(time.Microsecond),
 		res.Latency.P99.Round(time.Microsecond), rps)
 
+	if a := res.Aborted; a != nil {
+		fmt.Fprintf(&b, "\n**Aborted:** the run was stopped at %s because %s was broken (observed %s).\n",
+			a.At.Round(time.Millisecond), mdCell(a.Threshold), mdCell(a.Observed))
+	}
 	if len(res.Thresholds) > 0 {
 		verdict := "all passed"
 		if res.ThresholdsPassed == nil || !*res.ThresholdsPassed {
