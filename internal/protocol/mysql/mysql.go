@@ -27,12 +27,17 @@
 //	              that writes then fails, and the error says how to allow it.
 //	              This is a safety net, not a lock: the SQL can still ask for
 //	              a read-write transaction itself (START TRANSACTION READ WRITE).
+//	              "set session transaction read write; insert ..." in one text
+//	              works. The next call is blocked, because SET discards the
+//	              connection.
 //	query_mode    simple (default) or prepared. simple sends the SQL as one
 //	              text, so it can hold several statements such as
 //	              "begin; update ... where id = ?; select ...; commit",
 //	              with or without args. VegaLoad puts the args into the text
 //	              as quoted values. prepared prepares the statement once and
-//	              reuses it, as most applications do. It runs one statement.
+//	              reuses it, as most applications do. It runs one statement
+//	              and does not keep a connection for the call, so it cannot
+//	              run set, use, lock, xa, unlock, begin, or start.
 //	args          A JSON array of values for the ? placeholders, such as
 //	              '[42, "abc"]'.
 //	min_rows      The result must have at least this many rows.
@@ -462,8 +467,17 @@ func (d *Driver) readJob() error {
 	if err != nil {
 		return err
 	}
-	if !d.simple && info.statements != 1 {
-		return errors.New("mysql: query_mode=prepared runs one statement")
+	if !d.simple {
+		if info.statements != 1 {
+			return errors.New("mysql: query_mode=prepared runs one statement")
+		}
+		kw := ""
+		if len(info.keywords) > 0 {
+			kw = info.keywords[0]
+		}
+		if preparedRefused(kw) {
+			return fmt.Errorf("mysql: query_mode=prepared cannot run %q; use query_mode=simple for set, use, lock, xa, unlock, begin, and start", kw)
+		}
 	}
 	return nil
 }
@@ -521,34 +535,21 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 
 	var rep Reply
 	sent := int64(len(d.sql))
-	conn, err := d.db.Conn(ctx)
-	if err != nil {
-		return protocol.Result{BytesSent: sent, Err: d.explain(parent, ctx, err, true)}, rep
-	}
-	defer conn.Close()
-
-	mode := sqlMode{}
-	if p := d.modes.Load(); p != nil {
-		mode = *p
-	}
-	text, info, err := d.cachedScan(mode)
-	if err != nil {
-		return protocol.Result{BytesSent: sent, Err: d.explain(parent, ctx, err, false)}, rep
-	}
-	if !d.simple && info.statements != 1 {
-		err = errors.New("mysql: query_mode=prepared runs one statement")
-		return protocol.Result{BytesSent: sent, Err: d.explain(parent, ctx, err, false)}, rep
-	}
-
-	var got int64
-	if info.statements == 1 && !returnsRows(info.keywords[0]) {
-		got, err = d.execOne(ctx, conn, text, &rep)
+	var (
+		got     int64
+		err     error
+		connect bool
+	)
+	if d.simple {
+		got, connect, err = d.runSimple(ctx, &rep)
 	} else {
-		got, err = d.query(ctx, conn, text, &rep)
+		// A prepared statement takes a connection from the pool when it
+		// runs. Holding one here would make it wait for a connection this
+		// call already has, and finish would clean that other connection.
+		got, connect, err = d.runPrepared(ctx, &rep)
 	}
-	d.finish(ctx, conn, info, err != nil)
 	if err != nil {
-		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err, false)}, rep
+		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err, connect)}, rep
 	}
 	if err = sqlcommon.Check("mysql", d.minRows, rep.RowCount, d.expect, rep.Rows); err != nil {
 		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err, false)}, rep
@@ -577,23 +578,78 @@ func (d *Driver) cachedScan(mode sqlMode) (string, scanInfo, error) {
 	return out, info, nil
 }
 
-func (d *Driver) execOne(ctx context.Context, conn *sql.Conn, text string, rep *Reply) (int64, error) {
-	var (
-		res sql.Result
-		err error
-	)
-	if d.simple {
-		res, err = conn.ExecContext(ctx, text)
-	} else {
-		stmt, perr := d.prepare(ctx)
-		if perr != nil {
-			return 0, perr
-		}
-		res, err = stmt.ExecContext(ctx, d.args...)
+// runSimple holds one pool connection for the whole call, then puts the
+// session back or discards the connection.
+func (d *Driver) runSimple(ctx context.Context, rep *Reply) (int64, bool, error) {
+	conn, err := d.db.Conn(ctx)
+	if err != nil {
+		return 0, true, err
 	}
+	defer conn.Close()
+
+	text, info, err := d.cachedScan(d.sessionMode())
+	if err != nil {
+		return 0, false, err
+	}
+	var got int64
+	if info.statements == 1 && !returnsRows(info.keywords[0]) {
+		got, err = execOn(ctx, conn, text, rep)
+	} else {
+		got, err = queryOn(ctx, conn, text, rep, d.maxRows)
+	}
+	d.finish(ctx, conn, info, err != nil)
+	return got, false, err
+}
+
+// runPrepared uses the shared prepared statement. The statement borrows a
+// pool connection for the query and returns it, so this call must not hold
+// one of its own. Session statements are refused in readJob, and finish is
+// not used here.
+func (d *Driver) runPrepared(ctx context.Context, rep *Reply) (int64, bool, error) {
+	stmt, err := d.prepare(ctx)
+	if err != nil {
+		// The first connection learns sql_mode. No mode means it never connected.
+		return 0, d.modes.Load() == nil, err
+	}
+	_, info, err := d.cachedScan(d.sessionMode())
+	if err != nil {
+		return 0, false, err
+	}
+	if info.statements != 1 {
+		return 0, false, errors.New("mysql: query_mode=prepared runs one statement")
+	}
+	if !returnsRows(info.keywords[0]) {
+		n, err := execPrepared(ctx, stmt, d.args, rep)
+		return n, false, err
+	}
+	n, err := queryPrepared(ctx, stmt, d.args, rep, d.maxRows)
+	return n, false, err
+}
+
+func (d *Driver) sessionMode() sqlMode {
+	if p := d.modes.Load(); p != nil {
+		return *p
+	}
+	return sqlMode{}
+}
+
+func execOn(ctx context.Context, conn *sql.Conn, text string, rep *Reply) (int64, error) {
+	res, err := conn.ExecContext(ctx, text)
 	if err != nil {
 		return 0, err
 	}
+	return readResult(res, rep)
+}
+
+func execPrepared(ctx context.Context, stmt *sql.Stmt, args []any, rep *Reply) (int64, error) {
+	res, err := stmt.ExecContext(ctx, args...)
+	if err != nil {
+		return 0, err
+	}
+	return readResult(res, rep)
+}
+
+func readResult(res sql.Result, rep *Reply) (int64, error) {
 	if n, e := res.RowsAffected(); e == nil {
 		rep.RowsAffected = n
 	}
@@ -603,30 +659,30 @@ func (d *Driver) execOne(ctx context.Context, conn *sql.Conn, text string, rep *
 	return 0, nil
 }
 
-func (d *Driver) query(ctx context.Context, conn *sql.Conn, text string, rep *Reply) (int64, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if d.simple {
-		rows, err = conn.QueryContext(ctx, text)
-	} else {
-		stmt, perr := d.prepare(ctx)
-		if perr != nil {
-			return 0, perr
-		}
-		rows, err = stmt.QueryContext(ctx, d.args...)
-	}
+func queryOn(ctx context.Context, conn *sql.Conn, text string, rep *Reply, maxRows int) (int64, error) {
+	rows, err := conn.QueryContext(ctx, text)
 	if err != nil {
 		return 0, err
 	}
+	return readRows(rows, rep, maxRows)
+}
+
+func queryPrepared(ctx context.Context, stmt *sql.Stmt, args []any, rep *Reply, maxRows int) (int64, error) {
+	rows, err := stmt.QueryContext(ctx, args...)
+	if err != nil {
+		return 0, err
+	}
+	return readRows(rows, rep, maxRows)
+}
+
+func readRows(rows *sql.Rows, rep *Reply, maxRows int) (int64, error) {
 	defer rows.Close()
-	got, err := readSet(rows, rep, d.maxRows)
+	got, err := readSet(rows, rep, maxRows)
 	if err != nil {
 		return got, err
 	}
 	for rows.NextResultSet() {
-		n, err := readSet(rows, rep, d.maxRows)
+		n, err := readSet(rows, rep, maxRows)
 		got += n
 		if err != nil {
 			return got, err

@@ -514,6 +514,7 @@ func TestNew_ConfigMistakes(t *testing.T) {
 		"bad tls":           target("mysql://h/db", "select 1", map[string]string{"tls": "maybe"}),
 		"bad query_mode":    target("mysql://h/db", "select 1", map[string]string{"query_mode": "fast"}),
 		"prepared multi":    target("mysql://h/db", "select 1; select 2", map[string]string{"query_mode": "prepared"}),
+		"prepared set":      target("mysql://h/db", "set @a = 1", map[string]string{"query_mode": "prepared"}),
 		"pool zero":         target("mysql://h/db", "select 1", map[string]string{"pool": "0"}),
 		"pool text":         target("mysql://h/db", "select 1", map[string]string{"pool": "many"}),
 		"allow_writes text": target("mysql://h/db", "select 1", map[string]string{"allow_writes": "sure"}),
@@ -540,6 +541,26 @@ func TestNew_ConfigMistakes(t *testing.T) {
 	}
 	if _, err := New(target("mysql://h/db", "select 1", map[string]string{"read_only": "true"}), time.Second); err == nil || !strings.Contains(err.Error(), "allow_writes") {
 		t.Errorf("read_only: %v", err)
+	}
+}
+
+func TestPrepared_RefusesSessionStatements(t *testing.T) {
+	for _, sql := range []string{
+		"set @a = 1",
+		"use otherdb",
+		"lock tables t read",
+		"xa start 'x'",
+		"unlock tables",
+		"begin",
+		"start transaction",
+	} {
+		_, err := New(target("mysql://h/db", sql, map[string]string{"query_mode": "prepared"}), time.Second)
+		if err == nil || !strings.Contains(err.Error(), "query_mode=prepared cannot run") {
+			t.Errorf("%s: %v", sql, err)
+		}
+	}
+	if _, err := New(target("mysql://h/db", "select 1", map[string]string{"query_mode": "prepared"}), time.Second); err != nil {
+		t.Fatal(err)
 	}
 }
 

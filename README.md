@@ -338,9 +338,11 @@ The options are `username`, `password_env`, `database`, `tls`
 - `query_mode=simple` (the default) sends the SQL as one text, so it can hold
   several statements, such as a transaction. `query_mode=prepared` prepares
   the statement once and reuses it, as most applications do. It runs one
-  statement. With `args` in simple mode, VegaLoad puts the values into the
-  text as quoted values (a value is never read as SQL), so several statements
-  and `args` work together:
+  statement, and it does not keep a connection for the call. `set`, `use`,
+  `lock`, `xa`, `unlock`, `begin` and `start` are refused in that mode.
+  With `args` in simple mode, VegaLoad puts the values into the text as
+  quoted values (a value is never read as SQL), so several statements and
+  `args` work together:
   `begin; update t set a = ? where id = ?; select a from t where id = ?; commit`.
   The result is the last statement that returned rows. Each `?` must have a
   value, and each value must be used. A text of several statements reports
@@ -349,7 +351,9 @@ The options are `username`, `password_env`, `database`, `tls`
 - Read-only is the default. An `insert`, `update`, `delete` or DDL statement
   fails, and the error says how to allow it. `allow_writes=true` lets the SQL
   write. This is a safety net, not a lock: the SQL can still ask for a
-  read-write transaction itself (`START TRANSACTION READ WRITE`). Use a
+  read-write transaction itself (`START TRANSACTION READ WRITE`).
+  `set session transaction read write; insert ...` in one text works too.
+  The next call is blocked, because SET discards the connection. Use a
   read-only database role when you need a real lock.
 - An iteration passes when the SQL ran without a server error and the result
   has at least `min_rows` rows. With `expect`, some value in the result must

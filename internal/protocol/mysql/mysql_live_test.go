@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -296,5 +297,59 @@ func TestLive_NoBackslashEscapes(t *testing.T) {
 	res, _ = d.Run(context.Background())
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "more ? placeholders") {
 		t.Fatalf("new pool did not use NO_BACKSLASH_ESCAPES: %v", res.Err)
+	}
+}
+
+// A prepared call must not hold a pool connection while the statement takes
+// another one. pool=1 used to wait until the timeout. pool=2 with more
+// callers than connections used to fail every call.
+func TestLive_PreparedPoolOneSucceeds(t *testing.T) {
+	res, rep := liveRun(t, "select ?", map[string]string{
+		"query_mode": "prepared", "pool": "1", "args": "[1]",
+	})
+	if !res.Success {
+		t.Fatal(res.Err)
+	}
+	if len(rep.Rows) != 1 || fmt.Sprint(rep.Rows[0][0]) != "1" {
+		t.Fatalf("rows = %#v", rep.Rows)
+	}
+}
+
+func TestLive_PreparedManyCallersShareThePool(t *testing.T) {
+	d, err := New(liveTarget(t, "select ?", map[string]string{
+		"query_mode": "prepared", "pool": "2", "args": "[1]",
+	}), 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var wg sync.WaitGroup
+	errc := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, _ := d.Run(context.Background())
+			if !res.Success {
+				errc <- res.Err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errc)
+	n := 0
+	for err := range errc {
+		n++
+		t.Errorf("call failed: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("%d of 16 calls failed", n)
+	}
+}
+
+func TestLive_PreparedSetIsRefused(t *testing.T) {
+	_, err := New(liveTarget(t, "set @a = 1", map[string]string{"query_mode": "prepared"}), 10*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "prepared") || !strings.Contains(err.Error(), "set") {
+		t.Fatalf("error = %v", err)
 	}
 }
