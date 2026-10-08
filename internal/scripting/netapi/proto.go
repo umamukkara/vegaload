@@ -17,6 +17,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/kafka"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
+	"github.com/vegaload/vegaload/internal/protocol/mysql"
 	"github.com/vegaload/vegaload/internal/protocol/postgres"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 )
@@ -24,7 +25,7 @@ import (
 // defaultProtoTimeout is used when the caller gives no timeout at all.
 const defaultProtoTimeout = 10 * time.Second
 
-// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc or postgres target.
+// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres or mysql target.
 type ProtoCall struct {
 	// URL is the target. tcp and udp accept a bare host:port too.
 	URL string
@@ -36,7 +37,7 @@ type ProtoCall struct {
 	Insecure bool
 	// Timeout bounds the whole call. Zero means the client's default.
 	Timeout time.Duration
-	// Password is the MQTT, Kafka or PostgreSQL password. nil means none. A script passes it
+	// Password is the MQTT, Kafka, PostgreSQL or MySQL password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
 	// Headers are the gRPC metadata of a grpc.call.
@@ -54,6 +55,7 @@ func ProtoFunctions() map[string][]string {
 		"kafka":    {"produce", "consume", "roundtrip", "admin"},
 		"grpc":     {"call"},
 		"postgres": {"query"},
+		"mysql":    {"query"},
 	}
 }
 
@@ -73,6 +75,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.GRPC(ctx, call)
 	case "postgres":
 		return c.Postgres(ctx, call)
+	case "mysql":
+		return c.MySQL(ctx, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -87,7 +91,7 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 	pc := ProtoCall{URL: rawURL}
 	valueIsBody := strings.HasPrefix(name, "kafka.")
 	isGRPC := strings.HasPrefix(name, "grpc.")
-	isPostgres := strings.HasPrefix(name, "postgres.")
+	isSQL := strings.HasPrefix(name, "postgres.") || strings.HasPrefix(name, "mysql.")
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)
@@ -99,9 +103,9 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 			continue
 		}
 		key := strings.TrimSuffix(k, "_")
-		if key == "args" && isPostgres {
-			// The values for $1, $2 and so on: a list, or JSON text of one.
-			s, err := postgresArgs(val)
+		if key == "args" && isSQL {
+			// The values for $1, $2 or ?: a list, or JSON text of one.
+			s, err := sqlArgs(val)
 			if err != nil {
 				return pc, err
 			}
@@ -186,9 +190,9 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 	return pc, nil
 }
 
-// postgresArgs turns the args of a postgres.query into the JSON text the
-// driver reads.
-func postgresArgs(val any) (string, error) {
+// sqlArgs turns the args of a postgres.query or mysql.query into the JSON
+// text the driver reads.
+func sqlArgs(val any) (string, error) {
 	switch x := val.(type) {
 	case string:
 		return x, nil
@@ -270,26 +274,31 @@ func (r *ProtoReply) Fields() map[string]any {
 		f["statusName"] = r.GRPCStatusName
 		f["json"] = r.JSON
 	}
-	if r.IsPostgres {
-		rows := make([]any, 0, len(r.PGRows))
-		for _, row := range r.PGRows {
-			m := make(map[string]any, len(r.PGColumns))
-			for i, col := range r.PGColumns {
+	if r.IsSQL {
+		rows := make([]any, 0, len(r.SQLRows))
+		for _, row := range r.SQLRows {
+			m := make(map[string]any, len(r.SQLColumns))
+			for i, col := range r.SQLColumns {
 				if i < len(row) {
 					m[col] = row[i]
 				}
 			}
 			rows = append(rows, m)
 		}
-		cols := make([]any, len(r.PGColumns))
-		for i, c := range r.PGColumns {
+		cols := make([]any, len(r.SQLColumns))
+		for i, c := range r.SQLColumns {
 			cols[i] = c
 		}
 		f["rows"] = rows
 		f["columns"] = cols
-		f["rowCount"] = r.PGRowCount
-		f["rowsAffected"] = r.PGRowsAffected
-		f["commandTag"] = r.PGCommandTag
+		f["rowCount"] = r.SQLRowCount
+		f["rowsAffected"] = r.SQLRowsAffected
+		if r.SQLHasCommandTag {
+			f["commandTag"] = r.SQLCommandTag
+		}
+		if r.SQLHasLastInsert {
+			f["lastInsertId"] = r.SQLLastInsertID
+		}
 	}
 	if r.IsKafka {
 		recs := make([]any, 0, len(r.Records))
@@ -348,14 +357,18 @@ type ProtoReply struct {
 	GRPCStatus     int
 	GRPCStatusName string
 	JSON           any
-	// IsPostgres is true for a PostgreSQL reply. PGRows hold the first
-	// max_rows rows in the order of PGColumns. PGRowCount counts them all.
-	IsPostgres     bool
-	PGColumns      []string
-	PGRows         [][]any
-	PGRowCount     int
-	PGRowsAffected int64
-	PGCommandTag   string
+	// IsSQL is true for a PostgreSQL or MySQL reply. SQLRows hold the first
+	// max_rows rows in the order of SQLColumns. SQLRowCount counts them all.
+	// commandTag is set only for PostgreSQL. lastInsertId is set only for MySQL.
+	IsSQL            bool
+	SQLColumns       []string
+	SQLRows          [][]any
+	SQLRowCount      int
+	SQLRowsAffected  int64
+	SQLCommandTag    string
+	SQLHasCommandTag bool
+	SQLLastInsertID  int64
+	SQLHasLastInsert bool
 }
 
 // ProtoClient makes tcp, udp and mqtt calls for one VU. Each call opens
@@ -372,6 +385,7 @@ type ProtoClient struct {
 	kafkaConns map[string]*kafka.Driver
 	grpcConns  map[string]*grpc.Conn
 	pgConns    map[string]*postgres.Driver
+	myConns    map[string]*mysql.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -529,12 +543,13 @@ func (c *ProtoClient) Postgres(ctx context.Context, call ProtoCall) (*ProtoReply
 	}
 	res, rep := d.Run(ctx)
 	r := fromResult(res)
-	r.IsPostgres = true
-	r.PGColumns = rep.Columns
-	r.PGRows = rep.Rows
-	r.PGRowCount = rep.RowCount
-	r.PGRowsAffected = rep.RowsAffected
-	r.PGCommandTag = rep.CommandTag
+	r.IsSQL = true
+	r.SQLHasCommandTag = true
+	r.SQLColumns = rep.Columns
+	r.SQLRows = rep.Rows
+	r.SQLRowCount = rep.RowCount
+	r.SQLRowsAffected = rep.RowsAffected
+	r.SQLCommandTag = rep.CommandTag
 	return r, nil
 }
 
@@ -641,7 +656,86 @@ func (c *ProtoClient) grpcConn(call ProtoCall) (*grpc.Conn, error) {
 	return g, nil
 }
 
-// Close closes the Kafka and gRPC clients and the PostgreSQL pools. Safe to call more than once.
+// mysqlConnOptions are the options that make up a MySQL pool. They are
+// the same for every call of one client. The rest of a call's options
+// describe the job.
+var mysqlConnOptions = []string{"username", "database", "tls", "pool", "allow_writes", "query_mode"}
+
+// MySQL runs one SQL text. The pool is kept for the next call with the
+// same connection options, as an application keeps its pool. It has one
+// connection, because a script is one user, unless pool says more.
+func (c *ProtoClient) MySQL(ctx context.Context, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "mysql"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("mysql: password_env is for the command line, pass password: env.NAME instead")
+	}
+	conn, err := c.mysqlConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	r.IsSQL = true
+	r.SQLHasLastInsert = true
+	r.SQLColumns = rep.Columns
+	r.SQLRows = rep.Rows
+	r.SQLRowCount = rep.RowCount
+	r.SQLRowsAffected = rep.RowsAffected
+	r.SQLLastInsertID = rep.LastInsertID
+	return r, nil
+}
+
+// mysqlConn returns the pool for call's connection options, making it the
+// first time.
+func (c *ProtoClient) mysqlConn(call ProtoCall, opts map[string]string) (*mysql.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range mysqlConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	if _, ok := connOpts["pool"]; !ok {
+		connOpts["pool"] = "1"
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%q|", *call.Password)
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.myConns[key]; ok {
+		return d, nil
+	}
+	d, err := mysql.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password)
+	if err != nil {
+		return nil, err
+	}
+	if c.myConns == nil {
+		c.myConns = map[string]*mysql.Driver{}
+	}
+	c.myConns[key] = d
+	return d, nil
+}
+
+// Close closes the Kafka and gRPC clients and the SQL pools. Safe to call more than once.
 func (c *ProtoClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -656,6 +750,10 @@ func (c *ProtoClient) Close() {
 	for k, d := range c.pgConns {
 		_ = d.Close()
 		delete(c.pgConns, k)
+	}
+	for k, d := range c.myConns {
+		_ = d.Close()
+		delete(c.myConns, k)
 	}
 }
 

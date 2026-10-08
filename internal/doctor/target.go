@@ -41,6 +41,8 @@ var schemes = map[string]scheme{
 	"kafkas":     {port: "9093", protocol: "kafka"},
 	"postgres":   {port: "5432", protocol: "postgres"},
 	"postgresql": {port: "5432", protocol: "postgres"},
+	"mysql":      {port: "3306", protocol: "mysql"},
+	"mariadb":    {port: "3306", protocol: "mysql"},
 	"tcp":        {protocol: "tcp"},
 	"udp":        {protocol: "udp", udp: true},
 }
