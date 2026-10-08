@@ -29,18 +29,20 @@ type scheme struct {
 }
 
 var schemes = map[string]scheme{
-	"http":   {port: "80", protocol: "http1", http: true},
-	"https":  {port: "443", protocol: "http1", http: true},
-	"ws":     {port: "80", protocol: "websocket", http: true},
-	"wss":    {port: "443", protocol: "websocket", http: true},
-	"grpc":   {protocol: "grpc"},
-	"grpcs":  {port: "443", protocol: "grpc"},
-	"mqtt":   {port: "1883", protocol: "mqtt"},
-	"mqtts":  {port: "8883", protocol: "mqtt"},
-	"kafka":  {port: "9092", protocol: "kafka"},
-	"kafkas": {port: "9093", protocol: "kafka"},
-	"tcp":    {protocol: "tcp"},
-	"udp":    {protocol: "udp", udp: true},
+	"http":       {port: "80", protocol: "http1", http: true},
+	"https":      {port: "443", protocol: "http1", http: true},
+	"ws":         {port: "80", protocol: "websocket", http: true},
+	"wss":        {port: "443", protocol: "websocket", http: true},
+	"grpc":       {protocol: "grpc"},
+	"grpcs":      {port: "443", protocol: "grpc"},
+	"mqtt":       {port: "1883", protocol: "mqtt"},
+	"mqtts":      {port: "8883", protocol: "mqtt"},
+	"kafka":      {port: "9092", protocol: "kafka"},
+	"kafkas":     {port: "9093", protocol: "kafka"},
+	"postgres":   {port: "5432", protocol: "postgres"},
+	"postgresql": {port: "5432", protocol: "postgres"},
+	"tcp":        {protocol: "tcp"},
+	"udp":        {protocol: "udp", udp: true},
 }
 
 // parseTarget accepts the same forms as `vegaload run -target`: a full

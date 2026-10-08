@@ -414,6 +414,12 @@ func TestSchemeTable(t *testing.T) {
 			t.Errorf("%s = %+v, %v; want port %s and protocol kafka", in, got, err, want)
 		}
 	}
+	for _, in := range []string{"postgres://h", "postgresql://h/db"} {
+		got, err := parseTarget(in)
+		if err != nil || got.Port != "5432" || got.protocol() != "postgres" {
+			t.Errorf("%s = %+v, %v; want port 5432 and protocol postgres", in, got, err)
+		}
+	}
 	got, err := parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)

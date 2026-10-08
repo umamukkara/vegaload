@@ -12,6 +12,7 @@ import (
 	"github.com/vegaload/vegaload/internal/inputs"
 	"github.com/vegaload/vegaload/internal/protocol/kafka/kafkatest"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt/mqtttest"
+	"github.com/vegaload/vegaload/internal/protocol/postgres/postgrestest"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 )
 
@@ -215,4 +216,63 @@ assert not r.ok, "from end sees nothing old, so it must time out"
 r2 = kafka.consume("`+b.URL()+`", topic="t", from_="start")
 assert r2.ok and r2.records[0].value == "old", r2.error
 `)
+}
+
+func pgRows(string) []postgrestest.Result {
+	return []postgrestest.Result{{
+		Columns: []postgrestest.Column{postgrestest.Int("id"), postgrestest.Text("name")},
+		Rows:    [][]any{{"1", "ann"}, {"2", nil}},
+	}}
+}
+
+func TestPostgres_QueryReturnsRows(t *testing.T) {
+	s := postgrestest.Start(t, pgRows)
+	must(t, nil, `
+r = postgres.query("`+s.URL()+`", sslmode="disable", username="app", body="select id, name from t where id > $1", args=[0])
+assert r.ok, r.error
+assert r.rowCount == 2 and len(r.rows) == 2, r
+assert r.rows[0].id == 1 and r.rows[0].name == "ann", r.rows[0]
+assert r.rows[1]["name"] is None
+assert r.columns == ["id", "name"], r.columns
+assert r.commandTag == "SELECT 2", r.commandTag
+`)
+	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "id >  0 ") {
+		t.Errorf("queries = %q", q)
+	}
+}
+
+func TestPostgres_OneConnectionForManyCalls(t *testing.T) {
+	s := postgrestest.Start(t, pgRows)
+	must(t, nil, `
+for i in range(4):
+    r = postgres.query("`+s.URL()+`", sslmode="disable", body="select 1")
+    assert r.ok, r.error
+`)
+	if n := s.ConnCount(); n != 1 {
+		t.Errorf("%d connections for 4 calls, want 1", n)
+	}
+}
+
+func TestPostgres_FailureIsAReplyNotAnException(t *testing.T) {
+	s := postgrestest.Start(t, func(string) []postgrestest.Result {
+		return []postgrestest.Result{{ErrCode: "42P01", ErrMessage: "no such table"}}
+	})
+	must(t, nil, `
+r = postgres.query("`+s.URL()+`", sslmode="disable", body="select * from nosuch")
+assert r.ok is False
+assert "42P01" in r.error, r.error
+assert r.rows == []
+`)
+}
+
+func TestPostgres_SetupMistakesRaise(t *testing.T) {
+	for name, body := range map[string]string{
+		"no sql":         `postgres.query("postgres://127.0.0.1:9/db", sslmode="disable")`,
+		"unknown option": `postgres.query("postgres://127.0.0.1:9/db", body="select 1", bogus=1)`,
+		"args not list":  `postgres.query("postgres://127.0.0.1:9/db", body="select 1", args=5)`,
+	} {
+		if err := runIteration(t, nil, body); err == nil {
+			t.Errorf("%s: want an exception", name)
+		}
+	}
 }

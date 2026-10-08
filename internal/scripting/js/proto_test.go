@@ -15,6 +15,7 @@ import (
 	"github.com/vegaload/vegaload/internal/inputs"
 	"github.com/vegaload/vegaload/internal/protocol/kafka/kafkatest"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt/mqtttest"
+	"github.com/vegaload/vegaload/internal/protocol/postgres/postgrestest"
 	"github.com/vegaload/vegaload/internal/scripting/netapi"
 )
 
@@ -462,4 +463,99 @@ func TestMQTT_MessagesIsARealArray(t *testing.T) {
 		assert(r.messages.map((m) => m.topic).length === 1, "map works");
 		assert(r.messages.length === 1 && JSON.stringify(r.messages[0]).indexOf("topic") > 0, "plain objects");
 	`)
+}
+
+func pgRows(string) []postgrestest.Result {
+	return []postgrestest.Result{{
+		Columns: []postgrestest.Column{postgrestest.Int("id"), postgrestest.Text("name")},
+		Rows:    [][]any{{"1", "ann"}, {"2", nil}},
+	}}
+}
+
+func TestPostgres_QueryReturnsRows(t *testing.T) {
+	s := postgrestest.Start(t, pgRows)
+	must(t, nil, assertFn+`
+		const r = postgres.query("`+s.URL()+`", {sslmode: "disable", username: "app", body: "select id, name from t where id > $1", args: [0]});
+		assert(r.ok, r.error);
+		assert(r.rowCount === 2 && r.rows.length === 2, "rows");
+		assert(r.rows[0].id === 1 && r.rows[0].name === "ann", JSON.stringify(r.rows[0]));
+		assert(r.rows[1].name === null, "NULL is null");
+		assert(r.columns.join() === "id,name", "columns");
+		assert(r.commandTag === "SELECT 2", r.commandTag);
+	`)
+	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "id >  0 ") {
+		t.Errorf("queries = %q", q)
+	}
+}
+
+func TestPostgres_OneConnectionForManyCalls(t *testing.T) {
+	s := postgrestest.Start(t, pgRows)
+	must(t, nil, assertFn+`
+		for (let i = 0; i < 4; i++) {
+			const r = postgres.query("`+s.URL()+`", {sslmode: "disable", body: "select 1"});
+			assert(r.ok, r.error);
+		}
+	`)
+	if n := s.ConnCount(); n != 1 {
+		t.Errorf("%d connections for 4 calls, want 1", n)
+	}
+}
+
+func TestPostgres_FailureIsAReplyNotAnException(t *testing.T) {
+	s := postgrestest.Start(t, func(string) []postgrestest.Result {
+		return []postgrestest.Result{{ErrCode: "42P01", ErrMessage: "no such table"}}
+	})
+	must(t, nil, assertFn+`
+		const r = postgres.query("`+s.URL()+`", {sslmode: "disable", body: "select * from nosuch"});
+		assert(r.ok === false, "ok is false");
+		assert(r.error.indexOf("42P01") >= 0, r.error);
+		assert(r.rows.length === 0, "no rows");
+	`)
+}
+
+func TestPostgres_SetupMistakesThrow(t *testing.T) {
+	for name, body := range map[string]string{
+		"no sql":         `postgres.query("postgres://127.0.0.1:9/db", {sslmode: "disable"});`,
+		"unknown option": `postgres.query("postgres://127.0.0.1:9/db", {body: "select 1", bogus: 1});`,
+		"args not list":  `postgres.query("postgres://127.0.0.1:9/db", {body: "select 1", args: 5});`,
+		"password_env":   `postgres.query("postgres://127.0.0.1:9/db", {body: "select 1", password_env: "X"});`,
+	} {
+		if err := runScript(t, nil, body); err == nil {
+			t.Errorf("%s: want the script to throw", name)
+		}
+	}
+}
+
+func TestPostgres_PasswordFromEnv(t *testing.T) {
+	s := postgrestest.StartWithPassword(t, pgRows, "from-env")
+	path := writeScript(t, "s.js", "export default function () {\n"+assertFn+`
+		const r = postgres.query("`+s.URL()+`", {sslmode: "disable", username: "app", password: env.DB_PASSWORD, body: "select 1"});
+		assert(r.ok, r.error);
+	}
+	`)
+	script, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := inputs.New(map[string]string{"DB_PASSWORD": "from-env"}, nil)
+	vu, err := script.NewVU(nil, 3*time.Second, WithInputs(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vu.Close()
+	if err := vu.Iteration(context.Background()); err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+}
+
+func TestPostgres_SafetyCheckRefusesTheHost(t *testing.T) {
+	check := func(h string) error {
+		if h == "db.example.com" {
+			return errors.New("host not allowed")
+		}
+		return nil
+	}
+	if err := runScript(t, check, `postgres.query("postgres://db.example.com/app", {body: "select 1"});`); err == nil || !strings.Contains(err.Error(), "host not allowed") {
+		t.Errorf("err = %v", err)
+	}
 }

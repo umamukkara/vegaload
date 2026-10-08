@@ -17,13 +17,14 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/kafka"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
+	"github.com/vegaload/vegaload/internal/protocol/postgres"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 )
 
 // defaultProtoTimeout is used when the caller gives no timeout at all.
 const defaultProtoTimeout = 10 * time.Second
 
-// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka or grpc target.
+// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc or postgres target.
 type ProtoCall struct {
 	// URL is the target. tcp and udp accept a bare host:port too.
 	URL string
@@ -35,7 +36,7 @@ type ProtoCall struct {
 	Insecure bool
 	// Timeout bounds the whole call. Zero means the client's default.
 	Timeout time.Duration
-	// Password is the MQTT password. nil means none. A script passes it
+	// Password is the MQTT, Kafka or PostgreSQL password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
 	// Headers are the gRPC metadata of a grpc.call.
@@ -47,11 +48,12 @@ type ProtoCall struct {
 // this list, so they cannot differ.
 func ProtoFunctions() map[string][]string {
 	return map[string][]string{
-		"tcp":   {"send"},
-		"udp":   {"send"},
-		"mqtt":  {"publish", "subscribe", "roundtrip"},
-		"kafka": {"produce", "consume", "roundtrip", "admin"},
-		"grpc":  {"call"},
+		"tcp":      {"send"},
+		"udp":      {"send"},
+		"mqtt":     {"publish", "subscribe", "roundtrip"},
+		"kafka":    {"produce", "consume", "roundtrip", "admin"},
+		"grpc":     {"call"},
+		"postgres": {"query"},
 	}
 }
 
@@ -69,6 +71,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.Kafka(ctx, fn, call)
 	case "grpc":
 		return c.GRPC(ctx, call)
+	case "postgres":
+		return c.Postgres(ctx, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -83,6 +87,7 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 	pc := ProtoCall{URL: rawURL}
 	valueIsBody := strings.HasPrefix(name, "kafka.")
 	isGRPC := strings.HasPrefix(name, "grpc.")
+	isPostgres := strings.HasPrefix(name, "postgres.")
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)
@@ -94,6 +99,18 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 			continue
 		}
 		key := strings.TrimSuffix(k, "_")
+		if key == "args" && isPostgres {
+			// The values for $1, $2 and so on: a list, or JSON text of one.
+			s, err := postgresArgs(val)
+			if err != nil {
+				return pc, err
+			}
+			if pc.Options == nil {
+				pc.Options = map[string]string{}
+			}
+			pc.Options["args"] = s
+			continue
+		}
 		switch key {
 		case "body", "value":
 			if key == "value" && !valueIsBody {
@@ -169,6 +186,22 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 	return pc, nil
 }
 
+// postgresArgs turns the args of a postgres.query into the JSON text the
+// driver reads.
+func postgresArgs(val any) (string, error) {
+	switch x := val.(type) {
+	case string:
+		return x, nil
+	case []any:
+		b, err := json.Marshal(x)
+		if err != nil {
+			return "", fmt.Errorf("option args: %w", err)
+		}
+		return string(b), nil
+	}
+	return "", errors.New("option args must be a list of values, such as [42, \"abc\"]")
+}
+
 // optionText turns a script value into the text a driver option holds.
 func optionText(key string, val any) (string, error) {
 	switch x := val.(type) {
@@ -237,6 +270,27 @@ func (r *ProtoReply) Fields() map[string]any {
 		f["statusName"] = r.GRPCStatusName
 		f["json"] = r.JSON
 	}
+	if r.IsPostgres {
+		rows := make([]any, 0, len(r.PGRows))
+		for _, row := range r.PGRows {
+			m := make(map[string]any, len(r.PGColumns))
+			for i, col := range r.PGColumns {
+				if i < len(row) {
+					m[col] = row[i]
+				}
+			}
+			rows = append(rows, m)
+		}
+		cols := make([]any, len(r.PGColumns))
+		for i, c := range r.PGColumns {
+			cols[i] = c
+		}
+		f["rows"] = rows
+		f["columns"] = cols
+		f["rowCount"] = r.PGRowCount
+		f["rowsAffected"] = r.PGRowsAffected
+		f["commandTag"] = r.PGCommandTag
+	}
 	if r.IsKafka {
 		recs := make([]any, 0, len(r.Records))
 		for _, rec := range r.Records {
@@ -294,6 +348,14 @@ type ProtoReply struct {
 	GRPCStatus     int
 	GRPCStatusName string
 	JSON           any
+	// IsPostgres is true for a PostgreSQL reply. PGRows hold the first
+	// max_rows rows in the order of PGColumns. PGRowCount counts them all.
+	IsPostgres     bool
+	PGColumns      []string
+	PGRows         [][]any
+	PGRowCount     int
+	PGRowsAffected int64
+	PGCommandTag   string
 }
 
 // ProtoClient makes tcp, udp and mqtt calls for one VU. Each call opens
@@ -309,6 +371,7 @@ type ProtoClient struct {
 	mu         sync.Mutex
 	kafkaConns map[string]*kafka.Driver
 	grpcConns  map[string]*grpc.Conn
+	pgConns    map[string]*postgres.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -440,6 +503,84 @@ func (c *ProtoClient) kafkaConn(call ProtoCall, opts map[string]string) (*kafka.
 	return d, nil
 }
 
+// postgresConnOptions are the options that make up a PostgreSQL pool. They
+// are the same for every call of one client. The rest of a call's options
+// describe the job.
+var postgresConnOptions = []string{"username", "database", "sslmode", "application_name", "pool", "read_only", "query_mode"}
+
+// Postgres runs one SQL text. The pool is kept for the next call with the
+// same connection options, as an application keeps its pool. It has one
+// connection, because a script is one user, unless pool says more.
+func (c *ProtoClient) Postgres(ctx context.Context, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "postgres"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("postgres: password_env is for the command line, pass password: env.NAME instead")
+	}
+	conn, err := c.postgresConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	r.IsPostgres = true
+	r.PGColumns = rep.Columns
+	r.PGRows = rep.Rows
+	r.PGRowCount = rep.RowCount
+	r.PGRowsAffected = rep.RowsAffected
+	r.PGCommandTag = rep.CommandTag
+	return r, nil
+}
+
+// postgresConn returns the pool for call's connection options, making it
+// the first time.
+func (c *ProtoClient) postgresConn(call ProtoCall, opts map[string]string) (*postgres.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range postgresConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	if _, ok := connOpts["pool"]; !ok {
+		connOpts["pool"] = "1"
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%q|", *call.Password)
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.pgConns[key]; ok {
+		return d, nil
+	}
+	d, err := postgres.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password)
+	if err != nil {
+		return nil, err
+	}
+	if c.pgConns == nil {
+		c.pgConns = map[string]*postgres.Driver{}
+	}
+	c.pgConns[key] = d
+	return d, nil
+}
+
 // GRPC makes one unary gRPC call. Its connection is kept for the next call
 // to the same target, as a real client keeps its channel.
 func (c *ProtoClient) GRPC(ctx context.Context, call ProtoCall) (*ProtoReply, error) {
@@ -500,7 +641,7 @@ func (c *ProtoClient) grpcConn(call ProtoCall) (*grpc.Conn, error) {
 	return g, nil
 }
 
-// Close closes the Kafka and gRPC clients. Safe to call more than once.
+// Close closes the Kafka and gRPC clients and the PostgreSQL pools. Safe to call more than once.
 func (c *ProtoClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -511,6 +652,10 @@ func (c *ProtoClient) Close() {
 	for k, d := range c.kafkaConns {
 		_ = d.Close()
 		delete(c.kafkaConns, k)
+	}
+	for k, d := range c.pgConns {
+		_ = d.Close()
+		delete(c.pgConns, k)
 	}
 }
 
