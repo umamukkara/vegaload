@@ -222,3 +222,29 @@ func TestLive_URLSslmodeIsUsed(t *testing.T) {
 		t.Fatalf("failed: %v", res.Err)
 	}
 }
+
+// SQL that turns the read-only setting off must not leave writes on for the
+// next call on the same connection (pool=1 forces the reuse).
+func TestLive_ReadOnlyComesBackAfterSetOff(t *testing.T) {
+	for _, mode := range []string{"simple", "extended"} {
+		t.Run(mode, func(t *testing.T) {
+			opts := map[string]string{"pool": "1", "query_mode": mode}
+			d, err := New(liveTarget(t, "set default_transaction_read_only = off", opts), 10*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			if res, _ := d.Run(context.Background()); !res.Success {
+				t.Fatal(res.Err)
+			}
+			w, err := d.Call(map[string]string{"sslmode": "disable", "query_mode": mode}, []byte("create temp table vegaload_ro_probe(a int)"), 10*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, _ := w.Run(context.Background())
+			if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "25006") {
+				t.Errorf("the next call could write: %+v", res)
+			}
+		})
+	}
+}

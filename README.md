@@ -270,7 +270,11 @@ The options are `username`, `password_env`, `database`, `sslmode`
   read-only, so an `insert`, `update`, `delete` or DDL statement fails with
   SQLSTATE 25006, and the error says how to allow it. `allow_writes=true`
   lets the SQL write. This is a safety net, not a lock: the SQL can still ask
-  for a read-write transaction itself (`begin read write`).
+  for a read-write transaction itself (`begin read write`), or turn the
+  setting off and write in the same text (`set default_transaction_read_only
+  = off; ...`). Each call puts the setting back before its SQL runs, so one
+  call cannot leave writes on for the next. Use a read-only database role
+  when you need a real lock.
 - An iteration passes when the SQL ran without a server error and the result
   has at least `min_rows` rows. With `expect`, some value in the result must also contain the
   text (only the first `max_rows` rows are checked). A server error fails the

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -365,6 +366,84 @@ func TestReadOnlyRefusal_SaysHowToAllowWrites(t *testing.T) {
 	res, _ := run(t, target(s.URL(), "update t set a = 1", nil), 3*time.Second)
 	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "allow_writes=true") || !strings.Contains(res.Err.Error(), "25006") {
 		t.Errorf("error = %v", res.Err)
+	}
+}
+
+// SQL can turn the read-only setting off for the session. The next call must
+// not inherit that: the pool puts the setting back first.
+func TestReadOnly_IsPutBackOnTheNextCall(t *testing.T) {
+	s := postgrestest.Start(t, people)
+	d, err := New(target(s.URL(), "set default_transaction_read_only = off", map[string]string{"pool": "1"}), 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if res, _ := d.Run(context.Background()); !res.Success {
+		t.Fatal(res.Err)
+	}
+	next, err := d.Call(map[string]string{"pool": "1", "sslmode": "disable"}, []byte("select 1"), 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := next.Run(context.Background()); !res.Success {
+		t.Fatal(res.Err)
+	}
+	want := []string{"set default_transaction_read_only = off", "set default_transaction_read_only = on", "select 1"}
+	if got := s.Queries(); !reflect.DeepEqual(got, want) {
+		t.Errorf("queries = %q, want %q", got, want)
+	}
+	if s.ConnCount() != 1 {
+		t.Errorf("connections = %d, want 1 (the test needs the pool to reuse it)", s.ConnCount())
+	}
+}
+
+// A normal call sends nothing extra: the server already reports read-only.
+func TestReadOnly_NoExtraQueryWhenAlreadyOn(t *testing.T) {
+	s := postgrestest.Start(t, people)
+	if res, _ := run(t, target(s.URL(), "select 1", nil), 3*time.Second); !res.Success {
+		t.Fatal(res.Err)
+	}
+	if got := s.Queries(); len(got) != 1 {
+		t.Errorf("queries = %q, want only the user's SQL", got)
+	}
+}
+
+// With allow_writes the driver never touches the setting.
+func TestAllowWrites_NeverSetsReadOnly(t *testing.T) {
+	s := postgrestest.Start(t, people)
+	if res, _ := run(t, target(s.URL(), "select 1", map[string]string{"allow_writes": "true"}), 3*time.Second); !res.Success {
+		t.Fatal(res.Err)
+	}
+	if got := s.Queries(); len(got) != 1 {
+		t.Errorf("queries = %q, want only the user's SQL", got)
+	}
+}
+
+// The hint fits how the call was made, and is left out when writes were
+// already allowed (a replica, or a read-only role).
+func TestReadOnlyRefusal_HintFitsTheCaller(t *testing.T) {
+	refuse := func(string) []postgrestest.Result {
+		return []postgrestest.Result{{ErrCode: "25006", ErrMessage: "cannot execute UPDATE in a read-only transaction"}}
+	}
+	s := postgrestest.Start(t, refuse)
+
+	res, _ := run(t, target(s.URL(), "update t set a = 1", map[string]string{"allow_writes": "true"}), 3*time.Second)
+	if res.Err == nil || strings.Contains(res.Err.Error(), "allow_writes") || !strings.Contains(res.Err.Error(), "25006") {
+		t.Errorf("allow_writes already true: error = %v", res.Err)
+	}
+
+	conn, err := NewConn(target(s.URL(), "", nil), 3*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	call, err := conn.Call(map[string]string{"sslmode": "disable"}, []byte("update t set a = 1"), 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _ = call.Run(context.Background())
+	if res.Err == nil || strings.Contains(res.Err.Error(), "-opt") || !strings.Contains(res.Err.Error(), "allow_writes: true") {
+		t.Errorf("script: error = %v", res.Err)
 	}
 }
 

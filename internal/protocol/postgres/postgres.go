@@ -28,7 +28,11 @@
 //	                  test cannot change data by mistake. A statement that
 //	                  writes then fails with SQLSTATE 25006. This is a
 //	                  safety net, not a lock: the SQL can still ask for a
-//	                  read-write transaction itself (begin read write).
+//	                  read-write transaction itself (begin read write), or
+//	                  turn the setting off and write in the same text (set
+//	                  default_transaction_read_only = off; ...). Each call
+//	                  puts the setting back before its SQL runs, so one call
+//	                  cannot leave writes on for the next.
 //	query_mode        simple (default) or extended. simple sends the SQL
 //	                  as one text, so it can hold several statements such as
 //	                  "begin; update ... where id = $1; select ...; commit",
@@ -100,6 +104,12 @@ type Driver struct {
 
 	simple bool // query_mode=simple
 
+	// allowWrites is the allow_writes option. script is true for a
+	// connection made for a scenario script (NewConn). Both only decide the
+	// words of an error hint and whether each call puts read-only back.
+	allowWrites bool
+	script      bool
+
 	// The job of the call. Empty on a connection made for a script, until
 	// Call sets them.
 	sql  string
@@ -150,7 +160,7 @@ func (d *Driver) Call(opts map[string]string, body []byte, timeout time.Duration
 }
 
 func build(target protocol.Target, timeout time.Duration, password *string, connOnly bool) (*Driver, error) {
-	d := &Driver{target: target, timeout: timeout}
+	d := &Driver{target: target, timeout: timeout, script: connOnly}
 
 	u, err := url.Parse(target.URL)
 	if err != nil {
@@ -269,6 +279,8 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	if err != nil {
 		return nil, fmt.Errorf("postgres: %w", err)
 	}
+
+	d.allowWrites = allowWrites
 
 	if !connOnly {
 		if err := d.readJob(); err != nil {
@@ -454,6 +466,15 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	// closed by the pool when it is released, never reused.
 	defer conn.Release()
 
+	// The read-only setting is only a default of the session, so SQL can
+	// turn it off (set default_transaction_read_only = off) and the pool
+	// would keep that connection. Put it back before the SQL runs.
+	if !d.allowWrites {
+		if err = d.restoreReadOnly(ctx, conn.Conn()); err != nil {
+			return protocol.Result{BytesSent: sent, Err: d.explain(parent, ctx, err)}, rep
+		}
+	}
+
 	var got int64
 	if d.simple {
 		got, err = d.runSimple(ctx, conn.Conn(), &rep)
@@ -467,6 +488,17 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err)}, rep
 	}
 	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, rep
+}
+
+// restoreReadOnly sets default_transaction_read_only back to on when the
+// session no longer has it. The server reports the value of this setting
+// (PostgreSQL 14 and later), so the usual call costs no round trip. An older
+// server, or one that does not report it, gets the SET on every call.
+func (d *Driver) restoreReadOnly(ctx context.Context, c *pgx.Conn) error {
+	if c.PgConn().ParameterStatus("default_transaction_read_only") == "on" {
+		return nil
+	}
+	return c.PgConn().Exec(ctx, "set default_transaction_read_only = on").Close()
 }
 
 // runSimple sends the SQL (with the args put in, see interpolate) as one
@@ -574,8 +606,12 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 	}
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) {
-		if pe.Code == "25006" {
-			return fmt.Errorf("postgres: %s (SQLSTATE %s). VegaLoad is read-only by default: use -opt allow_writes=true to allow writes", pe.Message, pe.Code)
+		if pe.Code == "25006" && !d.allowWrites {
+			way := "use -opt allow_writes=true"
+			if d.script {
+				way = "pass allow_writes: true in the connection options"
+			}
+			return fmt.Errorf("postgres: %s (SQLSTATE %s). VegaLoad is read-only by default: %s to allow writes", pe.Message, pe.Code, way)
 		}
 		return fmt.Errorf("postgres: %s (SQLSTATE %s)", pe.Message, pe.Code)
 	}
