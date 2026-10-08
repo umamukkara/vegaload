@@ -336,15 +336,43 @@ func TestNewWithPassword_ForScripts(t *testing.T) {
 	}
 }
 
-func TestReadOnlyAndApplicationName_ReachTheServer(t *testing.T) {
+func TestReadOnlyIsTheDefault(t *testing.T) {
 	s := postgrestest.Start(t, people)
-	res, _ := run(t, target(s.URL(), "select 1", map[string]string{"read_only": "true", "application_name": "lt-7"}), 3*time.Second)
-	if !res.Success {
+	if res, _ := run(t, target(s.URL(), "select 1", map[string]string{"application_name": "lt-7"}), 3*time.Second); !res.Success {
 		t.Fatal(res.Err)
 	}
 	st := s.Startups()[0]
 	if st["default_transaction_read_only"] != "on" || st["application_name"] != "lt-7" {
 		t.Errorf("startup = %v", st)
+	}
+}
+
+func TestAllowWrites_LeavesTheServerDefault(t *testing.T) {
+	s := postgrestest.Start(t, people)
+	if res, _ := run(t, target(s.URL(), "select 1", map[string]string{"allow_writes": "true"}), 3*time.Second); !res.Success {
+		t.Fatal(res.Err)
+	}
+	if v, ok := s.Startups()[0]["default_transaction_read_only"]; ok {
+		t.Errorf("allow_writes=true still sent default_transaction_read_only=%s", v)
+	}
+}
+
+// A write refused by the server's read-only setting says how to allow it.
+func TestReadOnlyRefusal_SaysHowToAllowWrites(t *testing.T) {
+	s := postgrestest.Start(t, func(string) []postgrestest.Result {
+		return []postgrestest.Result{{ErrCode: "25006", ErrMessage: "cannot execute UPDATE in a read-only transaction"}}
+	})
+	res, _ := run(t, target(s.URL(), "update t set a = 1", nil), 3*time.Second)
+	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), "allow_writes=true") || !strings.Contains(res.Err.Error(), "25006") {
+		t.Errorf("error = %v", res.Err)
+	}
+}
+
+// The old option name is gone, and it says what the options are.
+func TestReadOnlyOptionIsGone(t *testing.T) {
+	_, err := New(target("postgres://h/db", "select 1", map[string]string{"read_only": "true"}), time.Second)
+	if err == nil || !strings.Contains(err.Error(), "allow_writes") {
+		t.Errorf("error = %v", err)
 	}
 }
 
@@ -360,7 +388,7 @@ func TestNew_ConfigMistakes(t *testing.T) {
 		"bad query_mode":    target("postgres://h/db", "select 1", map[string]string{"query_mode": "fast"}),
 		"pool zero":         target("postgres://h/db", "select 1", map[string]string{"pool": "0"}),
 		"pool text":         target("postgres://h/db", "select 1", map[string]string{"pool": "many"}),
-		"read_only text":    target("postgres://h/db", "select 1", map[string]string{"read_only": "sure"}),
+		"allow_writes text": target("postgres://h/db", "select 1", map[string]string{"allow_writes": "sure"}),
 		"min_rows negative": target("postgres://h/db", "select 1", map[string]string{"min_rows": "-1"}),
 		"max_rows zero":     target("postgres://h/db", "select 1", map[string]string{"max_rows": "0"}),
 		"args not a list":   target("postgres://h/db", "select 1", map[string]string{"args": `{"a":1}`}),

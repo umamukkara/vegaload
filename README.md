@@ -217,7 +217,9 @@ Some points to know:
 
 The `postgres` driver runs one SQL text for each iteration, read from `-body`,
 and reads every row it returns. It uses a pure Go client, so there is nothing
-to install. The target is `postgres://host[:port][/database]` (or
+to install. It is **read-only by default**: every transaction is read-only,
+so a load test cannot change data by mistake. Add `-opt allow_writes=true`
+to let the SQL write. The target is `postgres://host[:port][/database]` (or
 `postgresql://`), with port 5432 by default. The URL may end with
 `?sslmode=...` and `?application_name=...`, as in `psql`. Any other setting
 after the `?` is refused, and a password there is refused too. It also works with servers that
@@ -235,15 +237,16 @@ speak the PostgreSQL protocol, such as CockroachDB, YugabyteDB and Aurora.
   -body 'select * from orders where customer_id = $1 and status = $2' \
   -opt 'args=[42, "paid"]' -opt query_mode=extended -opt username=app
 
-# A transaction. Several statements in one text work in the default mode.
+# A transaction that writes. Several statements in one text work in the
+# default mode, and writes need allow_writes.
 ./vegaload run -target postgres://127.0.0.1:5432/app -protocol postgres \
   -body 'begin; update accounts set n = n + 1 where id = 1; select n from accounts where id = 1; commit' \
-  -opt username=app -opt expect=1
+  -opt username=app -opt allow_writes=true -opt expect=1
 ```
 
 The options are `username`, `password_env`, `database`, `sslmode`
 (`disable`, `prefer`, `require`, `verify-full`), `application_name`, `pool`,
-`read_only`, `query_mode`, `args`, `min_rows`, `expect` and `max_rows`.
+`allow_writes`, `query_mode`, `args`, `min_rows`, `expect` and `max_rows`.
 
 - The connections are kept in a pool that all users share, like an
   application's pool. `pool` is the most connections to open (default 10).
@@ -263,9 +266,11 @@ The options are `username`, `password_env`, `database`, `sslmode`
   `begin; update t set a = $2 where id = $1; select a from t where id = $1; commit`.
   The result is the last statement that returned rows. Each `$n` must have
   a value, and each value must be used.
-- `read_only=true` makes every transaction read-only, so a load test cannot
-  change data by mistake. A statement can still override it with
-  `begin read write`.
+- Read-only is the default. VegaLoad asks the server to make every transaction
+  read-only, so an `insert`, `update`, `delete` or DDL statement fails with
+  SQLSTATE 25006, and the error says how to allow it. `allow_writes=true`
+  lets the SQL write. This is a safety net, not a lock: the SQL can still ask
+  for a read-write transaction itself (`begin read write`).
 - An iteration passes when the SQL ran without a server error and the result
   has at least `min_rows` rows. With `expect`, some value in the result must also contain the
   text (only the first `max_rows` rows are checked). A server error fails the
@@ -386,7 +391,7 @@ export default function () {
   the first call and kept for the rest of that virtual user's run.
 - `postgres.query(url, options)` runs one SQL text, given as `body`, and takes
   the other PostgreSQL `-opt` keys (`username`, `database`, `sslmode`, `args`,
-  `min_rows`, `expect`, `max_rows`, `query_mode`, `read_only`, `pool`). `args`
+  `min_rows`, `expect`, `max_rows`, `query_mode`, `allow_writes`, `pool`). `args`
   is a list: `args: [42, "paid"]`. The reply has `rows` (a list of objects, one
   per row, keyed by column name, up to `max_rows`), `columns` (the names, in
   order), `rowCount` (all the rows, also those past `max_rows`),
@@ -399,7 +404,8 @@ export default function () {
   with one connection is made on the first call and kept for the rest of that
   virtual user's run, so each call does not connect again. A server error
   (a bad SQL, a failed constraint) is a reply with `ok` false and the
-  SQLSTATE code in `error`, not an exception.
+  SQLSTATE code in `error`, not an exception. Scripts are read-only like the
+  command line: a script that writes passes `allow_writes: true`.
 - Every function also accepts `insecure` (skip TLS checks) and `timeout`
   (milliseconds, or text such as `"2s"`).
 - Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`, gRPC calls return `status`, `statusName` and `json`, and PostgreSQL calls return `rows`, `columns`, `rowCount`, `rowsAffected` and `commandTag`.

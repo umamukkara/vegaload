@@ -506,7 +506,7 @@ func (c *ProtoClient) kafkaConn(call ProtoCall, opts map[string]string) (*kafka.
 // postgresConnOptions are the options that make up a PostgreSQL pool. They
 // are the same for every call of one client. The rest of a call's options
 // describe the job.
-var postgresConnOptions = []string{"username", "database", "sslmode", "application_name", "pool", "read_only", "query_mode"}
+var postgresConnOptions = []string{"username", "database", "sslmode", "application_name", "pool", "allow_writes", "query_mode"}
 
 // Postgres runs one SQL text. The pool is kept for the next call with the
 // same connection options, as an application keeps its pool. It has one

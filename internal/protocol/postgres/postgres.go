@@ -23,8 +23,12 @@
 //	application_name  The name the server shows for these connections
 //	                  (default "vegaload").
 //	pool              The most connections the run opens (default 10).
-//	read_only         true to make every transaction read-only, so a load
-//	                  test cannot change data by mistake.
+//	allow_writes      true to let the SQL change data. The default is
+//	                  read-only: every transaction is read-only, so a load
+//	                  test cannot change data by mistake. A statement that
+//	                  writes then fails with SQLSTATE 25006. This is a
+//	                  safety net, not a lock: the SQL can still ask for a
+//	                  read-write transaction itself (begin read write).
 //	query_mode        simple (default) or extended. simple sends the SQL
 //	                  as one text, so it can hold several statements such as
 //	                  "begin; update ... where id = $1; select ...; commit",
@@ -72,14 +76,14 @@ import (
 // table uses the same list, so the two cannot differ.
 var Options = []string{
 	"username", "password_env", "database", "sslmode", "application_name",
-	"pool", "read_only", "query_mode", "args", "min_rows", "expect", "max_rows",
+	"pool", "allow_writes", "query_mode", "args", "min_rows", "expect", "max_rows",
 }
 
 // connOptions are the keys that make up the connection. The rest describe
 // the job of one call.
 var connOptions = []string{
 	"username", "password_env", "database", "sslmode", "application_name",
-	"pool", "read_only", "query_mode",
+	"pool", "allow_writes", "query_mode",
 }
 
 const (
@@ -261,7 +265,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	if poolSize < 1 || poolSize > maxPool {
 		return nil, fmt.Errorf("postgres: pool=%d, want 1 to %d", poolSize, maxPool)
 	}
-	readOnly, err := target.OptionBool("read_only", false)
+	allowWrites, err := target.OptionBool("allow_writes", false)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: %w", err)
 	}
@@ -302,7 +306,9 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	} else {
 		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
 	}
-	if readOnly {
+	if !allowWrites {
+		// Read-only is the default (FR-PROTO-04). With allow_writes the
+		// setting is left alone, so the server's own default applies.
 		cfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
 	}
 	if target.InsecureSkipVerify {
@@ -568,6 +574,9 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 	}
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) {
+		if pe.Code == "25006" {
+			return fmt.Errorf("postgres: %s (SQLSTATE %s). VegaLoad is read-only by default: use -opt allow_writes=true to allow writes", pe.Message, pe.Code)
+		}
 		return fmt.Errorf("postgres: %s (SQLSTATE %s)", pe.Message, pe.Code)
 	}
 	var ce *pgconn.ConnectError

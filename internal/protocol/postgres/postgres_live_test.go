@@ -56,13 +56,23 @@ func liveRun(t *testing.T, sql string, opts map[string]string) (protocol.Result,
 	return d.Run(context.Background())
 }
 
+// liveWrite is liveRun for SQL that changes data, which needs allow_writes.
+func liveWrite(t *testing.T, sql string, opts map[string]string) (protocol.Result, Reply) {
+	t.Helper()
+	o := map[string]string{"allow_writes": "true"}
+	for k, v := range opts {
+		o[k] = v
+	}
+	return liveRun(t, sql, o)
+}
+
 func TestLive_TypesArgsAndModes(t *testing.T) {
-	setup, _ := liveRun(t, "drop table if exists vegaload_live; create table vegaload_live(id int primary key, name text, price numeric(8,2), ok boolean, at timestamptz, doc jsonb, raw bytea); "+
+	setup, _ := liveWrite(t, "drop table if exists vegaload_live; create table vegaload_live(id int primary key, name text, price numeric(8,2), ok boolean, at timestamptz, doc jsonb, raw bytea); "+
 		"insert into vegaload_live values (1,'ann',9.50,true,'2026-01-02 03:04:05+00','{\"k\":[1,2]}','\\x6869'), (2,'bob',null,false,null,null,null)", nil)
 	if !setup.Success {
 		t.Fatal(setup.Err)
 	}
-	t.Cleanup(func() { liveRun(t, "drop table if exists vegaload_live", nil) })
+	t.Cleanup(func() { liveWrite(t, "drop table if exists vegaload_live", nil) })
 
 	for _, mode := range []string{"simple", "extended"} {
 		t.Run(mode, func(t *testing.T) {
@@ -94,7 +104,7 @@ func TestLive_TypesArgsAndModes(t *testing.T) {
 }
 
 func TestLive_TransactionAndRowsAffected(t *testing.T) {
-	res, rep := liveRun(t, "create temp table x(a int); begin; insert into x values (1),(2); select count(*) as c from x; commit", nil)
+	res, rep := liveWrite(t, "create temp table x(a int); begin; insert into x values (1),(2); select count(*) as c from x; commit", nil)
 	if !res.Success {
 		t.Fatal(res.Err)
 	}
@@ -103,14 +113,22 @@ func TestLive_TransactionAndRowsAffected(t *testing.T) {
 	}
 }
 
-func TestLive_ReadOnlyRefusesAWrite(t *testing.T) {
-	res, _ := liveRun(t, "create table vegaload_ro(a int)", map[string]string{"read_only": "true"})
+// Read-only is the default: a write is refused, and the error says how to
+// allow it. With allow_writes the same SQL works.
+func TestLive_ReadOnlyByDefault(t *testing.T) {
+	res, _ := liveRun(t, "create table vegaload_ro(a int)", nil)
 	if res.Success {
-		liveRun(t, "drop table if exists vegaload_ro", nil)
-		t.Fatal("read_only allowed a write")
+		liveWrite(t, "drop table if exists vegaload_ro", nil)
+		t.Fatal("the default allowed a write")
 	}
-	if !strings.Contains(res.Err.Error(), "read-only") {
+	if !strings.Contains(res.Err.Error(), "read-only") || !strings.Contains(res.Err.Error(), "allow_writes=true") {
 		t.Errorf("error = %v", res.Err)
+	}
+	if res, _ := liveRun(t, "select 1", nil); !res.Success {
+		t.Errorf("a read failed: %v", res.Err)
+	}
+	if res, _ := liveWrite(t, "create table vegaload_ro(a int); drop table vegaload_ro", nil); !res.Success {
+		t.Errorf("allow_writes=true refused a write: %v", res.Err)
 	}
 }
 
@@ -148,12 +166,12 @@ func TestLive_Timeout(t *testing.T) {
 // Several statements and args together, in the default mode. The reply is the
 // last statement that returned rows, and the update really ran.
 func TestLive_SeveralStatementsWithArgs(t *testing.T) {
-	if res, _ := liveRun(t, "drop table if exists vegaload_tx; create table vegaload_tx(id int primary key, a int); insert into vegaload_tx values (1, 0), (2, 0)", nil); !res.Success {
+	if res, _ := liveWrite(t, "drop table if exists vegaload_tx; create table vegaload_tx(id int primary key, a int); insert into vegaload_tx values (1, 0), (2, 0)", nil); !res.Success {
 		t.Fatal(res.Err)
 	}
-	t.Cleanup(func() { liveRun(t, "drop table if exists vegaload_tx", nil) })
+	t.Cleanup(func() { liveWrite(t, "drop table if exists vegaload_tx", nil) })
 
-	res, rep := liveRun(t, "begin; update vegaload_tx set a = $2 where id = $1; select a from vegaload_tx where id = $1; commit",
+	res, rep := liveWrite(t, "begin; update vegaload_tx set a = $2 where id = $1; select a from vegaload_tx where id = $1; commit",
 		map[string]string{"args": "[1, 5]", "min_rows": "1"})
 	if !res.Success {
 		t.Fatal(res.Err)
@@ -169,14 +187,14 @@ func TestLive_SeveralStatementsWithArgs(t *testing.T) {
 
 // A value that looks like SQL stays a value, in both modes.
 func TestLive_ArgsCannotChangeTheStatement(t *testing.T) {
-	if res, _ := liveRun(t, "drop table if exists vegaload_inj; create table vegaload_inj(name text)", nil); !res.Success {
+	if res, _ := liveWrite(t, "drop table if exists vegaload_inj; create table vegaload_inj(name text)", nil); !res.Success {
 		t.Fatal(res.Err)
 	}
-	t.Cleanup(func() { liveRun(t, "drop table if exists vegaload_inj", nil) })
+	t.Cleanup(func() { liveWrite(t, "drop table if exists vegaload_inj", nil) })
 	for _, mode := range []string{"simple", "extended"} {
 		for _, val := range []string{`x'); drop table vegaload_inj; --`, `back\slash'quote`, "$1 -- $$", "-5"} {
 			arg, _ := json.Marshal([]string{val})
-			res, rep := liveRun(t, "insert into vegaload_inj values ($1) returning name", map[string]string{"args": string(arg), "query_mode": mode})
+			res, rep := liveWrite(t, "insert into vegaload_inj values ($1) returning name", map[string]string{"args": string(arg), "query_mode": mode})
 			if !res.Success {
 				t.Fatalf("%s %q: %v", mode, val, res.Err)
 			}
