@@ -12,6 +12,7 @@ import (
 	"github.com/vegaload/vegaload/internal/mcp"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/grpc/grpctest"
+	"github.com/vegaload/vegaload/internal/protocol/mysql/mysqltest"
 	"github.com/vegaload/vegaload/internal/protocol/postgres/postgrestest"
 	"github.com/vegaload/vegaload/internal/report"
 )
@@ -125,6 +126,8 @@ func wireTestTarget(name string) protocol.Target {
 		return protocol.Target{URL: "kafka://localhost:1", Options: map[string]string{"topic": "t"}}
 	case "postgres":
 		return protocol.Target{URL: "postgres://localhost:1/db", Body: []byte("select 1")}
+	case "mysql":
+		return protocol.Target{URL: "mysql://localhost:1/db", Body: []byte("select 1")}
 	case "tcp":
 		return protocol.Target{URL: "tcp://localhost:1"}
 	case "udp":
@@ -212,6 +215,45 @@ func TestCmdRun_PostgresProtocol(t *testing.T) {
 			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
 			"-target", srv.URL(), "-protocol", "postgres", "-body", "select n from t",
 			"-opt", "sslmode=disable", "-opt", "pool=2", "-opt", "min_rows=" + minRows,
+		})
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res report.Result
+		if err := json.Unmarshal(data, &res); err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := run("2"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("min_rows=2: total %d failed %d, want all to pass", res.Total, res.Failed)
+	}
+	if res := run("3"); res.Total == 0 || res.Failed != res.Total {
+		t.Errorf("min_rows=3: total %d failed %d, want all to fail", res.Total, res.Failed)
+	}
+	if n := srv.ConnCount(); n > 4 {
+		t.Errorf("%d connections for two runs with pool=2, want the pool reused", n)
+	}
+}
+
+// A MySQL load test runs end to end through `vegaload run -protocol mysql`,
+// and its checks (min_rows) fail the iteration when not met.
+func TestCmdRun_MySQLProtocol(t *testing.T) {
+	srv := mysqltest.Start(t, func(string) []mysqltest.Result {
+		return []mysqltest.Result{{
+			Columns: []mysqltest.Column{mysqltest.Int("n")},
+			Rows:    [][]any{{"1"}, {"2"}},
+		}}
+	})
+	run := func(minRows string) report.Result {
+		dir := t.TempDir()
+		out := filepath.Join(dir, "summary.json")
+		cmdRun([]string{
+			"-vus", "2", "-duration", "300ms", "-no-report",
+			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+			"-target", srv.URL(), "-protocol", "mysql", "-body", "select n from t",
+			"-opt", "tls=false", "-opt", "pool=2", "-opt", "min_rows=" + minRows,
 		})
 		data, err := os.ReadFile(out)
 		if err != nil {

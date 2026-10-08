@@ -59,7 +59,6 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -74,6 +73,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/sqlcommon"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
@@ -352,7 +352,7 @@ func (d *Driver) readJob() error {
 	t := d.target
 	d.sql = string(bytes.TrimSpace(t.Body))
 	if d.sql == "" {
-		return errors.New("postgres: the SQL is required (pass it with -body)")
+		return sqlcommon.ErrNoSQL("postgres")
 	}
 	var err error
 	if d.minRows, err = t.OptionInt("min_rows", 0); err != nil {
@@ -370,7 +370,7 @@ func (d *Driver) readJob() error {
 	d.expect = t.Option("expect", "")
 	d.args = nil
 	if raw, ok := t.Options["args"]; ok {
-		if d.args, err = parseArgs(raw); err != nil {
+		if d.args, err = sqlcommon.ParseArgs("postgres", raw); err != nil {
 			return err
 		}
 	}
@@ -382,40 +382,6 @@ func (d *Driver) readJob() error {
 		}
 	}
 	return nil
-}
-
-// parseArgs reads the args option, a JSON array. A whole number stays a
-// whole number. A nested object or array is passed as its JSON text, which
-// a json or jsonb parameter accepts.
-func parseArgs(raw string) ([]any, error) {
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	var list []any
-	if err := dec.Decode(&list); err != nil {
-		return nil, errors.New(`postgres: args must be a JSON array, such as '[42, "abc"]'`)
-	}
-	if dec.More() {
-		return nil, errors.New("postgres: args has text after the JSON array")
-	}
-	for i, v := range list {
-		switch x := v.(type) {
-		case json.Number:
-			if n, err := x.Int64(); err == nil {
-				list[i] = n
-			} else if f, err := x.Float64(); err == nil {
-				list[i] = f
-			} else {
-				return nil, fmt.Errorf("postgres: args[%d]: %q is not a number", i, x)
-			}
-		case map[string]any, []any:
-			b, err := json.Marshal(x)
-			if err != nil {
-				return nil, fmt.Errorf("postgres: args[%d]: %w", i, err)
-			}
-			list[i] = string(b)
-		}
-	}
-	return list, nil
 }
 
 // Name implements protocol.Protocol.
@@ -579,20 +545,7 @@ func (d *Driver) runQuery(ctx context.Context, c *pgx.Conn, rep *Reply) (int64, 
 
 // check applies min_rows and expect.
 func (d *Driver) check(rep Reply) error {
-	if d.minRows > 0 && rep.RowCount < d.minRows {
-		return fmt.Errorf("postgres: the result has %d rows, want at least %d", rep.RowCount, d.minRows)
-	}
-	if d.expect != "" {
-		for _, row := range rep.Rows {
-			for _, v := range row {
-				if strings.Contains(fmt.Sprint(v), d.expect) {
-					return nil
-				}
-			}
-		}
-		return fmt.Errorf("postgres: no value in the result contains %q", d.expect)
-	}
-	return nil
+	return sqlcommon.Check("postgres", d.minRows, rep.RowCount, d.expect, rep.Rows)
 }
 
 // explain turns an error into the one a user should read: the end of the
