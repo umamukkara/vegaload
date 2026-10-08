@@ -52,13 +52,15 @@ func TestInterpolate_Errors(t *testing.T) {
 		args []any
 		want string
 	}{
-		"too few values":    {"select $2", []any{int64(1)}, "$2 but args has 1"},
-		"an unused value":   {"select $1", []any{int64(1), int64(2)}, "only up to $1"},
-		"no placeholder":    {"select 1", []any{int64(1)}, "no $1 placeholder"},
-		"a zero":            {"select $0", []any{int64(1)}, "not a valid"},
-		"a number and name": {"select $1abc", []any{int64(1)}, "not a valid"},
-		"a zero byte":       {"select $1", []any{"a\x00b"}, "zero byte"},
-		"a nested value":    {"select $1", []any{[]any{1}}, "cannot be used"},
+		"too few values":      {"select $2", []any{int64(1)}, "$2 but args has 1"},
+		"an unused value":     {"select $1", []any{int64(1), int64(2)}, "args[1] is never used"},
+		"a gap":               {"select $2", []any{int64(1), int64(2)}, "args[0] is never used"},
+		"a gap in the middle": {"select $1, $3", []any{int64(1), int64(2), int64(3)}, "args[1] is never used"},
+		"no placeholder":      {"select 1", []any{int64(1)}, "args[0] is never used"},
+		"a zero":              {"select $0", []any{int64(1)}, "not a valid"},
+		"a number and name":   {"select $1abc", []any{int64(1)}, "not a valid"},
+		"a zero byte":         {"select $1", []any{"a\x00b"}, "zero byte"},
+		"a nested value":      {"select $1", []any{[]any{1}}, "cannot be used"},
 	}
 	for name, c := range cases {
 		_, err := interpolate(c.sql, c.args)

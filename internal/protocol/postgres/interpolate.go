@@ -25,11 +25,12 @@ import (
 // has standard_conforming_strings on. Text with a zero byte is refused,
 // because PostgreSQL cannot hold one.
 //
-// The SQL must use every value, and no placeholder may point past the values.
+// The SQL must use every value ($1 up to the last one, with no gap), and no
+// placeholder may point past the values.
 func interpolate(sql string, args []any) (string, error) {
 	var out strings.Builder
 	out.Grow(len(sql) + 16*len(args))
-	used := 0
+	seen := make([]bool, len(args))
 	i := 0
 	n := len(sql)
 	for i < n {
@@ -78,9 +79,7 @@ func interpolate(sql string, args []any) (string, error) {
 					return "", fmt.Errorf("postgres: args[%d]: %w", idx-1, err)
 				}
 				out.WriteString(lit)
-				if idx > used {
-					used = idx
-				}
+				seen[idx-1] = true
 				i = j
 				break
 			}
@@ -96,11 +95,10 @@ func interpolate(sql string, args []any) (string, error) {
 			i++
 		}
 	}
-	if used == 0 && len(args) > 0 {
-		return "", fmt.Errorf("postgres: args has %d values but the SQL has no $1 placeholder", len(args))
-	}
-	if used < len(args) {
-		return "", fmt.Errorf("postgres: args has %d values but the SQL uses only up to $%d", len(args), used)
+	for i, ok := range seen {
+		if !ok {
+			return "", fmt.Errorf("postgres: args[%d] is never used: the SQL has no $%d", i, i+1)
+		}
 	}
 	return out.String(), nil
 }
