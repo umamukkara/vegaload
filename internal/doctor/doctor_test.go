@@ -420,6 +420,12 @@ func TestSchemeTable(t *testing.T) {
 			t.Errorf("%s = %+v, %v; want port 5432 and protocol postgres", in, got, err)
 		}
 	}
+	for _, in := range []string{"mysql://h", "mariadb://h/db"} {
+		got, err := parseTarget(in)
+		if err != nil || got.Port != "3306" || got.protocol() != "mysql" {
+			t.Errorf("%s = %+v, %v; want port 3306 and protocol mysql", in, got, err)
+		}
+	}
 	got, err := parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)
