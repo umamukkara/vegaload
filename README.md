@@ -2,7 +2,7 @@
 
 VegaLoad is a thin, open-source load testing tool: a single static binary
 with a scriptable core engine, protocol drivers (HTTP/1.1, HTTP/2, gRPC,
-WebSocket, MQTT, Kafka, and raw TCP and UDP), and a self-contained HTML report — no server, no account,
+WebSocket, MQTT, Kafka, PostgreSQL, and raw TCP and UDP), and a self-contained HTML report — no server, no account,
 no telemetry.
 
 It's also agent-native: `vegaload init` registers VegaLoad as an MCP server
@@ -213,6 +213,62 @@ Some points to know:
 - The topic must exist, unless the broker creates topics on its own. Use the
   admin `create_topic` action first.
 
+### Test a PostgreSQL database
+
+The `postgres` driver runs one SQL text for each iteration, read from `-body`,
+and reads every row it returns. It uses a pure Go client, so there is nothing
+to install. The target is `postgres://host[:port][/database]` (or
+`postgresql://`), with port 5432 by default. It also works with servers that
+speak the PostgreSQL protocol, such as CockroachDB, YugabyteDB and Aurora.
+
+```
+# One query, 20 users, for 30 seconds. The password is in $DB_PASSWORD.
+./vegaload run -target postgres://127.0.0.1:5432/app -protocol postgres \
+  -body 'select id, total from orders where customer_id = 42' \
+  -opt username=app -opt password_env=DB_PASSWORD -opt pool=20 -opt min_rows=1 \
+  -vus 20 -duration 30s
+
+# A parameterised, prepared statement: $1 and $2 come from -opt args.
+./vegaload run -target postgres://127.0.0.1:5432/app -protocol postgres \
+  -body 'select * from orders where customer_id = $1 and status = $2' \
+  -opt 'args=[42, "paid"]' -opt query_mode=extended -opt username=app
+
+# A transaction. Several statements in one text work in the default mode.
+./vegaload run -target postgres://127.0.0.1:5432/app -protocol postgres \
+  -body 'begin; update accounts set n = n + 1 where id = 1; select n from accounts where id = 1; commit' \
+  -opt username=app -opt expect=1
+```
+
+The options are `username`, `password_env`, `database`, `sslmode`
+(`disable`, `prefer`, `require`, `verify-full`), `application_name`, `pool`,
+`read_only`, `query_mode`, `args`, `min_rows`, `expect` and `max_rows`.
+
+- The connections are kept in a pool that all users share, like an
+  application's pool. `pool` is the most connections to open (default 10).
+  Waiting for a free connection counts as part of the measured time, so set
+  `pool` to at least the number of users if you want to measure the server and
+  not the queue.
+- Put the password in an environment variable and pass its name with
+  `-opt password_env=NAME` (it needs a user), so it is not on the command line.
+  A password in the URL is refused. The standard `PGPASSWORD` variable and a
+  `~/.pgpass` file work too, as they do for `psql`.
+- `query_mode=simple` (the default) sends the SQL as one text, so it can hold
+  several statements, such as a transaction. `query_mode=extended` prepares
+  the statement once for each connection and reuses it, as most applications
+  do. It runs one statement. With `args` in simple mode the client puts the
+  values into the text, quoted.
+- `read_only=true` makes every transaction read-only, so a load test cannot
+  change data by mistake. A statement can still override it with
+  `begin read write`.
+- An iteration passes when the SQL ran without a server error and the result
+  has at least `min_rows` rows. With `expect`, some value in the result must also contain the
+  text (only the first `max_rows` rows are checked). A server error fails the
+  iteration, and its message and SQLSTATE code are in the report.
+- If a transaction fails halfway, the connection is closed and replaced, never
+  reused. A timeout does the same.
+- The host allowlist and caps apply as for HTTP targets. Load tests change
+  data and use real server resources, so run them against a test database.
+
 ### 2. Or write a scenario file
 
 ```
@@ -268,9 +324,9 @@ fit your real flow. `sample-app.vegaload-plan.md` is a runbook with one
 ready-to-run `vegaload run` command per endpoint, for loading one endpoint at a
 time.
 
-### Call TCP, UDP, MQTT, Kafka and gRPC from a scenario
+### Call TCP, UDP, MQTT, Kafka, gRPC and PostgreSQL from a scenario
 
-A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka` and `grpc` globals. Each
+A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka`, `grpc` and `postgres` globals. Each
 function is one call that does one job and returns what it read:
 
 ```js
@@ -322,9 +378,25 @@ export default function () {
   an exception. Only unary methods work for now. `url` is `host:port`,
   `grpc://host:port` or `grpcs://host:port` for TLS. One connection is made on
   the first call and kept for the rest of that virtual user's run.
+- `postgres.query(url, options)` runs one SQL text, given as `body`, and takes
+  the other PostgreSQL `-opt` keys (`username`, `database`, `sslmode`, `args`,
+  `min_rows`, `expect`, `max_rows`, `query_mode`, `read_only`, `pool`). `args`
+  is a list: `args: [42, "paid"]`. The reply has `rows` (a list of objects, one
+  per row, keyed by column name, up to `max_rows`), `columns` (the names, in
+  order), `rowCount` (all the rows, also those past `max_rows`),
+  `rowsAffected` and `commandTag` (such as `"SELECT 2"`). Numbers, text,
+  booleans and NULL (`null`) keep their type, and JSON columns are parsed.
+  Times are text in UTC (RFC 3339), and `numeric`, `uuid` and byte columns are
+  text, so no precision is lost. If two columns have the same name, the last
+  one wins: give them different names with `as`. Give the password as
+  `password: env.DB_PASSWORD` and run with `-secret-env DB_PASSWORD`. A pool
+  with one connection is made on the first call and kept for the rest of that
+  virtual user's run, so each call does not connect again. A server error
+  (a bad SQL, a failed constraint) is a reply with `ok` false and the
+  SQLSTATE code in `error`, not an exception.
 - Every function also accepts `insecure` (skip TLS checks) and `timeout`
   (milliseconds, or text such as `"2s"`).
-- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`, and gRPC calls return `status`, `statusName` and `json`.
+- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`, gRPC calls return `status`, `statusName` and `json`, and PostgreSQL calls return `rows`, `columns`, `rowCount`, `rowsAffected` and `commandTag`.
   A network failure does not throw: `ok` is false and `error` says why. A
   call that is set up wrongly (an unknown option, a missing topic) does throw.
 - The safety allowlist is checked for the host of every call, like `http`.
@@ -360,7 +432,10 @@ is a small example, and
 shows Kafka, and
 [`examples/scenarios/mixed-protocols.vl.js`](./examples/scenarios/mixed-protocols.vl.js)
 (Python: [`mixed_protocols.py`](./examples/scenarios/mixed_protocols.py)) mixes
-HTTP, gRPC and WebSocket in one flow.
+HTTP, gRPC and WebSocket in one flow, and
+[`examples/scenarios/postgres-orders.vl.js`](./examples/scenarios/postgres-orders.vl.js)
+(Python: [`postgres_orders.py`](./examples/scenarios/postgres_orders.py))
+writes and reads rows in PostgreSQL.
 
 ### Start from a browser recording
 

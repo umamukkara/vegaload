@@ -10,6 +10,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/http2"
 	"github.com/vegaload/vegaload/internal/protocol/kafka"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
+	"github.com/vegaload/vegaload/internal/protocol/postgres"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/websocket"
 )
@@ -58,6 +59,13 @@ var drivers = []driverSpec{
 	}},
 	{name: "kafka", options: kafka.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := kafka.New(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}},
+	{name: "postgres", options: postgres.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := postgres.New(t, to)
 		if err != nil {
 			return nil, err
 		}

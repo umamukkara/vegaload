@@ -131,7 +131,7 @@ func runTestTool(exePath string) Tool {
 			"properties": map[string]any{
 				"scenario_path":   map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
 				"target":          map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
-				"protocol":        map[string]any{"type": "string", "description": "http1, http2, grpc, websocket, mqtt, kafka, tcp, or udp (protocol-direct mode)"},
+				"protocol":        map[string]any{"type": "string", "description": "http1, http2, grpc, websocket, mqtt, kafka, postgres, tcp, or udp (protocol-direct mode)"},
 				"options":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "driver options, each \"key=value\" (protocol-direct mode). Each protocol has its own keys"},
 				"executor":        map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
 				"vus":             map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
