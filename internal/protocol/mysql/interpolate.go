@@ -298,6 +298,12 @@ func returnsRows(kw string) bool {
 	return false
 }
 
+// preparedRefused reports a statement prepared mode cannot run. Those
+// statements change the connection, and a prepared call does not keep one.
+func preparedRefused(kw string) bool {
+	return changesSession(kw) || startsTx(kw)
+}
+
 func changesSession(kw string) bool {
 	switch kw {
 	case "set", "use", "lock", "xa", "unlock":
