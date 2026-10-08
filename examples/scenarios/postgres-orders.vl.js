@@ -11,7 +11,9 @@
 // Each user keeps one connection for the whole run.
 export default function () {
   const url = "postgres://localhost:5432/app";
-  const login = { username: "app", password: env.DB_PASSWORD, sslmode: "prefer" };
+  // This scenario inserts rows, so it asks to write. Without allow_writes,
+  // VegaLoad runs every query read-only.
+  const login = { username: "app", password: env.DB_PASSWORD, sslmode: "prefer", allow_writes: true };
 
   const made = postgres.query(url, {
     ...login,

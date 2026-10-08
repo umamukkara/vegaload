@@ -161,3 +161,26 @@ func TestProtoFunctions_ListsPostgres(t *testing.T) {
 		t.Errorf("postgres functions = %v", f)
 	}
 }
+
+// A script is read-only like the command line, unless it asks to write.
+func TestPostgres_ScriptsAreReadOnlyUnlessAllowWrites(t *testing.T) {
+	s := postgrestest.Start(t, rows)
+	c := NewProtoClient(nil, 5*time.Second)
+	defer c.Close()
+	if r, err := c.Postgres(context.Background(), ProtoCall{URL: s.URL(), Body: []byte("select 1"), Options: map[string]string{"sslmode": "disable"}}); err != nil || !r.OK {
+		t.Fatalf("%v %+v", err, r)
+	}
+	if r, err := c.Postgres(context.Background(), ProtoCall{URL: s.URL(), Body: []byte("select 1"), Options: map[string]string{"sslmode": "disable", "allow_writes": "true"}}); err != nil || !r.OK {
+		t.Fatalf("%v %+v", err, r)
+	}
+	st := s.Startups()
+	if len(st) != 2 {
+		t.Fatalf("%d connections, want 2: allow_writes makes its own pool", len(st))
+	}
+	if st[0]["default_transaction_read_only"] != "on" {
+		t.Errorf("default call: %v", st[0])
+	}
+	if _, ok := st[1]["default_transaction_read_only"]; ok {
+		t.Errorf("allow_writes call: %v", st[1])
+	}
+}

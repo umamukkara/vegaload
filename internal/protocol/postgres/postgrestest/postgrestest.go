@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -163,6 +164,12 @@ func (s *Server) serve(c net.Conn) {
 	be.Send(&pgproto3.ParameterStatus{Name: "server_version", Value: "16.0"})
 	be.Send(&pgproto3.ParameterStatus{Name: "client_encoding", Value: "UTF8"})
 	be.Send(&pgproto3.ParameterStatus{Name: "standard_conforming_strings", Value: "on"})
+	// PostgreSQL 14 and later report this setting, and each SET of it.
+	readOnly := "off"
+	if v := params["default_transaction_read_only"]; v != "" {
+		readOnly = v
+	}
+	be.Send(&pgproto3.ParameterStatus{Name: "default_transaction_read_only", Value: readOnly})
 	be.Send(&pgproto3.BackendKeyData{ProcessID: 1, SecretKey: 1})
 	be.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
 	if be.Flush() != nil {
@@ -179,7 +186,14 @@ func (s *Server) serve(c net.Conn) {
 			s.mu.Lock()
 			s.queries = append(s.queries, m.String)
 			s.mu.Unlock()
-			s.answer(be, m.String)
+			if v, ok := readOnlySet(m.String); ok {
+				// The server handles this SET itself, as PostgreSQL does.
+				be.Send(&pgproto3.ParameterStatus{Name: "default_transaction_read_only", Value: v})
+				be.Send(&pgproto3.CommandComplete{CommandTag: []byte("SET")})
+				be.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+			} else {
+				s.answer(be, m.String)
+			}
 		case *pgproto3.Terminate:
 			return
 		default:
@@ -229,6 +243,16 @@ func (s *Server) answer(be *pgproto3.Backend, sql string) {
 		be.Send(&pgproto3.CommandComplete{CommandTag: []byte(tag)})
 	}
 	be.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+}
+
+// readOnlySet recognises "set default_transaction_read_only = on|off" and
+// returns the new value.
+func readOnlySet(sql string) (string, bool) {
+	f := strings.Fields(strings.ToLower(strings.TrimSuffix(strings.TrimSpace(sql), ";")))
+	if len(f) == 4 && f[0] == "set" && f[1] == "default_transaction_read_only" && f[2] == "=" && (f[3] == "on" || f[3] == "off") {
+		return f[3], true
+	}
+	return "", false
 }
 
 func text(v any) string {

@@ -17,7 +17,9 @@ URL = "postgres://localhost:5432/app"
 
 
 def iteration():
-    login = dict(username="app", password=env.DB_PASSWORD, sslmode="prefer")
+    # This scenario inserts rows, so it asks to write. Without allow_writes,
+    # VegaLoad runs every query read-only.
+    login = dict(username="app", password=env.DB_PASSWORD, sslmode="prefer", allow_writes=True)
 
     made = postgres.query(
         URL, **login,
