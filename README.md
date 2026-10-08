@@ -218,7 +218,9 @@ Some points to know:
 The `postgres` driver runs one SQL text for each iteration, read from `-body`,
 and reads every row it returns. It uses a pure Go client, so there is nothing
 to install. The target is `postgres://host[:port][/database]` (or
-`postgresql://`), with port 5432 by default. It also works with servers that
+`postgresql://`), with port 5432 by default. The URL may end with
+`?sslmode=...` and `?application_name=...`, as in `psql`. Any other setting
+after the `?` is refused, and a password there is refused too. It also works with servers that
 speak the PostgreSQL protocol, such as CockroachDB, YugabyteDB and Aurora.
 
 ```
@@ -255,8 +257,12 @@ The options are `username`, `password_env`, `database`, `sslmode`
 - `query_mode=simple` (the default) sends the SQL as one text, so it can hold
   several statements, such as a transaction. `query_mode=extended` prepares
   the statement once for each connection and reuses it, as most applications
-  do. It runs one statement. With `args` in simple mode the client puts the
-  values into the text, quoted.
+  do. It runs one statement. With `args` in simple mode, VegaLoad puts the
+  values into the text as quoted values (a value is never read as SQL), so
+  several statements and `args` work together:
+  `begin; update t set a = $2 where id = $1; select a from t where id = $1; commit`.
+  The result is the last statement that returned rows. Each `$n` must have
+  a value, and each value must be used.
 - `read_only=true` makes every transaction read-only, so a load test cannot
   change data by mistake. A statement can still override it with
   `begin read write`.

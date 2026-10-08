@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -141,5 +142,65 @@ func TestLive_Timeout(t *testing.T) {
 	res, _ := d.Run(context.Background())
 	if res.Success || !strings.Contains(res.Err.Error(), "timed out") || time.Since(start) > 3*time.Second {
 		t.Errorf("success %v err %v after %s", res.Success, res.Err, time.Since(start))
+	}
+}
+
+// Several statements and args together, in the default mode. The reply is the
+// last statement that returned rows, and the update really ran.
+func TestLive_SeveralStatementsWithArgs(t *testing.T) {
+	if res, _ := liveRun(t, "drop table if exists vegaload_tx; create table vegaload_tx(id int primary key, a int); insert into vegaload_tx values (1, 0), (2, 0)", nil); !res.Success {
+		t.Fatal(res.Err)
+	}
+	t.Cleanup(func() { liveRun(t, "drop table if exists vegaload_tx", nil) })
+
+	res, rep := liveRun(t, "begin; update vegaload_tx set a = $2 where id = $1; select a from vegaload_tx where id = $1; commit",
+		map[string]string{"args": "[1, 5]", "min_rows": "1"})
+	if !res.Success {
+		t.Fatal(res.Err)
+	}
+	if len(rep.Rows) != 1 || rep.Rows[0][0] != int32(5) || rep.CommandTag != "COMMIT" || rep.RowsAffected < 2 {
+		t.Errorf("reply = %+v", rep)
+	}
+	_, after := liveRun(t, "select a from vegaload_tx order by id", nil)
+	if after.Rows[0][0] != int32(5) || after.Rows[1][0] != int32(0) {
+		t.Errorf("table = %v", after.Rows)
+	}
+}
+
+// A value that looks like SQL stays a value, in both modes.
+func TestLive_ArgsCannotChangeTheStatement(t *testing.T) {
+	if res, _ := liveRun(t, "drop table if exists vegaload_inj; create table vegaload_inj(name text)", nil); !res.Success {
+		t.Fatal(res.Err)
+	}
+	t.Cleanup(func() { liveRun(t, "drop table if exists vegaload_inj", nil) })
+	for _, mode := range []string{"simple", "extended"} {
+		for _, val := range []string{`x'); drop table vegaload_inj; --`, `back\slash'quote`, "$1 -- $$", "-5"} {
+			arg, _ := json.Marshal([]string{val})
+			res, rep := liveRun(t, "insert into vegaload_inj values ($1) returning name", map[string]string{"args": string(arg), "query_mode": mode})
+			if !res.Success {
+				t.Fatalf("%s %q: %v", mode, val, res.Err)
+			}
+			if rep.Rows[0][0] != val {
+				t.Errorf("%s: stored %#v, want %q", mode, rep.Rows[0][0], val)
+			}
+		}
+	}
+	_, n := liveRun(t, "select count(*) from vegaload_inj", nil)
+	if n.Rows[0][0] != int64(8) {
+		t.Errorf("rows = %v, want 8", n.Rows[0][0])
+	}
+}
+
+func TestLive_URLSslmodeIsUsed(t *testing.T) {
+	tg := liveTarget(t, "select 1", nil)
+	delete(tg.Options, "sslmode")
+	tg.URL += "?sslmode=disable"
+	d, err := New(tg, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if res, _ := d.Run(context.Background()); !res.Success {
+		t.Fatalf("failed: %v", res.Err)
 	}
 }

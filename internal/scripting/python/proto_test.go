@@ -236,7 +236,7 @@ assert r.rows[1]["name"] is None
 assert r.columns == ["id", "name"], r.columns
 assert r.commandTag == "SELECT 2", r.commandTag
 `)
-	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "'0'") {
+	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "id >  0 ") {
 		t.Errorf("queries = %q", q)
 	}
 }

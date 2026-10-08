@@ -27,9 +27,11 @@
 //	                  test cannot change data by mistake.
 //	query_mode        simple (default) or extended. simple sends the SQL
 //	                  as one text, so it can hold several statements such as
-//	                  "begin; update ...; commit". extended prepares the
-//	                  statement once for each connection and reuses it, as
-//	                  most applications do. It runs one statement.
+//	                  "begin; update ... where id = $1; select ...; commit",
+//	                  with or without args. VegaLoad puts the args into the
+//	                  text as quoted values. extended prepares the statement
+//	                  once for each connection and reuses it, as most
+//	                  applications do. It runs one statement.
 //	args              A JSON array of values for $1, $2 and so on, such as
 //	                  '[42, "abc"]'.
 //	min_rows          The result must have at least this many rows.
@@ -39,7 +41,9 @@
 //	                  1000). Every row is read and counted either way.
 //
 // The target is postgres://host[:port][/database] (or postgresql://), with
-// port 5432 by default.
+// port 5432 by default. The URL may end with ?sslmode=... and
+// ?application_name=..., as in psql. Any other setting after the "?" is
+// refused.
 package postgres
 
 import (
@@ -94,11 +98,13 @@ type Driver struct {
 
 	// The job of the call. Empty on a connection made for a script, until
 	// Call sets them.
-	sql     string
-	args    []any
-	minRows int
-	expect  string
-	maxRows int
+	sql  string
+	args []any
+	// simpleSQL is sql with args put in, for query_mode=simple.
+	simpleSQL string
+	minRows   int
+	expect    string
+	maxRows   int
 
 	// pool is shared by every Driver that Call makes from this one.
 	pool *pgxpool.Pool
@@ -150,7 +156,31 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		return nil, fmt.Errorf("postgres: unsupported scheme %q, want postgres://", u.Scheme)
 	}
 	if u.Hostname() == "" {
-		return nil, fmt.Errorf("postgres: target %q has no host", target.URL)
+		return nil, errors.New("postgres: the target URL has no host")
+	}
+	// A psql-style URL may carry settings after "?". sslmode and
+	// application_name are honoured. Anything else is refused by name, and
+	// its value is never shown, so a password pasted there cannot leak.
+	urlOpts := map[string]string{}
+	for k, vs := range u.Query() {
+		switch k {
+		case "sslmode", "application_name":
+			if len(vs) != 1 {
+				return nil, fmt.Errorf("postgres: the URL gives %s more than once", k)
+			}
+			urlOpts[k] = vs[0]
+		case "password", "passfile", "sslpassword":
+			return nil, fmt.Errorf("postgres: do not put %s in the URL, use -opt password_env=NAME", k)
+		default:
+			return nil, fmt.Errorf("postgres: the URL setting %q is not supported (use -opt for sslmode and application_name)", k)
+		}
+	}
+	for _, k := range []string{"sslmode", "application_name"} {
+		if v, ok := urlOpts[k]; ok {
+			if o, has := target.Options[k]; has && o != v {
+				return nil, fmt.Errorf("postgres: give %s in the URL or in -opt, not both", k)
+			}
+		}
 	}
 	port := u.Port()
 	if port == "" {
@@ -206,7 +236,10 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		pw = v
 	}
 
-	sslmode := target.Option("sslmode", "prefer")
+	sslmode := target.Option("sslmode", urlOpts["sslmode"])
+	if sslmode == "" {
+		sslmode = "prefer"
+	}
 	switch sslmode {
 	case "disable", "prefer", "require", "verify-full":
 	default:
@@ -250,7 +283,11 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	}
 	q := url.Values{}
 	q.Set("sslmode", sslmode)
-	q.Set("application_name", target.Option("application_name", "vegaload"))
+	appName := target.Option("application_name", urlOpts["application_name"])
+	if appName == "" {
+		appName = "vegaload"
+	}
+	q.Set("application_name", appName)
 	dsn.RawQuery = q.Encode()
 
 	cfg, err := pgxpool.ParseConfig(dsn.String())
@@ -316,6 +353,13 @@ func (d *Driver) readJob() error {
 	d.args = nil
 	if raw, ok := t.Options["args"]; ok {
 		if d.args, err = parseArgs(raw); err != nil {
+			return err
+		}
+	}
+	d.simpleSQL = d.sql
+	if d.simple && len(d.args) > 0 {
+		var err error
+		if d.simpleSQL, err = interpolate(d.sql, d.args); err != nil {
 			return err
 		}
 	}
@@ -405,7 +449,7 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	defer conn.Release()
 
 	var got int64
-	if d.simple && len(d.args) == 0 {
+	if d.simple {
 		got, err = d.runSimple(ctx, conn.Conn(), &rep)
 	} else {
 		got, err = d.runQuery(ctx, conn.Conn(), &rep)
@@ -419,13 +463,13 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, rep
 }
 
-// runSimple sends the SQL as one simple query. It may hold several
-// statements. The rows and columns are those of the last statement that
+// runSimple sends the SQL (with the args put in, see interpolate) as one
+// simple query. It may hold several statements, with or without args. The rows and columns are those of the last statement that
 // returned columns, so "begin; ...; select ...; commit" gives the select.
 func (d *Driver) runSimple(ctx context.Context, c *pgx.Conn, rep *Reply) (int64, error) {
 	var got int64
 	tm := c.TypeMap()
-	mrr := c.PgConn().Exec(ctx, d.sql)
+	mrr := c.PgConn().Exec(ctx, d.simpleSQL)
 	for mrr.NextResult() {
 		rr := mrr.ResultReader()
 		fds := rr.FieldDescriptions()

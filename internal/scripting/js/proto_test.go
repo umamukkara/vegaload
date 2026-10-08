@@ -483,7 +483,7 @@ func TestPostgres_QueryReturnsRows(t *testing.T) {
 		assert(r.columns.join() === "id,name", "columns");
 		assert(r.commandTag === "SELECT 2", r.commandTag);
 	`)
-	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "'0'") {
+	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "id >  0 ") {
 		t.Errorf("queries = %q", q)
 	}
 }

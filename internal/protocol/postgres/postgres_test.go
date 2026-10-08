@@ -140,7 +140,7 @@ func TestMaxRows_KeepsFewButCountsAll(t *testing.T) {
 	}
 }
 
-// In simple mode the client puts the values into the text, quoted, so a quote
+// In simple mode the driver puts the values into the text, quoted, so a quote
 // in a value cannot change the statement.
 func TestArgs_AreFilledIn(t *testing.T) {
 	s := postgrestest.Start(t, people)
@@ -149,9 +149,52 @@ func TestArgs_AreFilledIn(t *testing.T) {
 	if !res.Success {
 		t.Fatal(res.Err)
 	}
-	q := s.Queries()
-	if len(q) != 1 || !strings.Contains(q[0], "'42'") || !strings.Contains(q[0], "'o''brien'") || !strings.Contains(q[0], "'t'") || !strings.Contains(q[0], "null") {
+	want := "select * from t where id =  42  and name = 'o''brien' and ok = true and x is not distinct from NULL"
+	if q := s.Queries(); len(q) != 1 || q[0] != want {
+		t.Errorf("sent %q, want %q", q, want)
+	}
+}
+
+// Several statements and args work together in simple mode. The reply is the
+// last statement that returned rows, and every statement is counted.
+func TestArgs_WithSeveralStatements(t *testing.T) {
+	s := postgrestest.Start(t, func(string) []postgrestest.Result {
+		return []postgrestest.Result{
+			{Tag: "BEGIN"},
+			{Tag: "UPDATE 1"},
+			{Columns: []postgrestest.Column{postgrestest.Int("n")}, Rows: [][]any{{"7"}}},
+			{Tag: "COMMIT"},
+		}
+	})
+	res, rep := run(t, target(s.URL(), "begin; update t set a = 1 where id = $1; select 7; commit",
+		map[string]string{"args": "[1]", "min_rows": "1"}), 3*time.Second)
+	if !res.Success {
+		t.Fatal(res.Err)
+	}
+	if q := s.Queries(); len(q) != 1 || q[0] != "begin; update t set a = 1 where id =  1 ; select 7; commit" {
 		t.Errorf("sent %q", q)
+	}
+	if rep.RowCount != 1 || rep.Rows[0][0] != int32(7) || rep.RowsAffected != 1+1 || rep.CommandTag != "COMMIT" {
+		t.Errorf("reply = %+v", rep)
+	}
+}
+
+func TestArgs_WrongCountIsAConfigError(t *testing.T) {
+	for name, tg := range map[string]protocol.Target{
+		"too few":  target("postgres://h/db", "select $1, $2", map[string]string{"args": "[1]"}),
+		"too many": target("postgres://h/db", "select $1", map[string]string{"args": "[1, 2]"}),
+		"none":     target("postgres://h/db", "select 1", map[string]string{"args": "[1]"}),
+	} {
+		if d, err := New(tg, time.Second); err == nil {
+			_ = d.Close()
+			t.Errorf("%s: want an error", name)
+		}
+	}
+	// With no args, a $1 is left for the server to judge.
+	if d, err := New(target("postgres://h/db", "select $1", nil), time.Second); err != nil {
+		t.Errorf("no args: %v", err)
+	} else {
+		_ = d.Close()
 	}
 }
 
@@ -340,6 +383,61 @@ func TestNew_ConfigMistakes(t *testing.T) {
 		if strings.Contains(err.Error(), "app:pw") {
 			t.Errorf("%s: the error shows the password: %v", name, err)
 		}
+	}
+}
+
+func TestURLQuery_SslmodeAndApplicationNameAreHonoured(t *testing.T) {
+	s := postgrestest.Start(t, people)
+	// The fake server refuses TLS, so sslmode=require must fail, which shows
+	// that the URL's sslmode was used and not the default (prefer, which
+	// would have connected).
+	tg := protocol.Target{URL: s.URL() + "?sslmode=require", Body: []byte("select 1")}
+	if res, _ := run(t, tg, 3*time.Second); res.Success {
+		t.Error("sslmode=require in the URL was ignored: the call worked without TLS")
+	}
+	tg = protocol.Target{URL: s.URL() + "?sslmode=disable&application_name=from-url", Body: []byte("select 1")}
+	if res, _ := run(t, tg, 3*time.Second); !res.Success {
+		t.Fatalf("failed: %v", res.Err)
+	}
+	if st := s.Startups(); st[len(st)-1]["application_name"] != "from-url" {
+		t.Errorf("startup = %v", st[len(st)-1])
+	}
+	// The same setting in the URL and in -opt is fine if they agree, and an
+	// error if they differ.
+	ok := protocol.Target{URL: s.URL() + "?sslmode=disable", Body: []byte("select 1"), Options: map[string]string{"sslmode": "disable"}}
+	if d, err := New(ok, time.Second); err != nil {
+		t.Errorf("same value twice: %v", err)
+	} else {
+		_ = d.Close()
+	}
+	bad := protocol.Target{URL: s.URL() + "?sslmode=disable", Body: []byte("select 1"), Options: map[string]string{"sslmode": "require"}}
+	if _, err := New(bad, time.Second); err == nil {
+		t.Error("different values must be an error")
+	}
+}
+
+func TestURLQuery_OtherSettingsAreRefusedWithoutShowingValues(t *testing.T) {
+	for _, raw := range []string{
+		"postgres://h/db?password=hunter2",
+		"postgres://h/db?sslpassword=hunter2",
+		"postgres://h/db?passfile=/tmp/hunter2",
+		"postgres://h/db?connect_timeout=hunter2",
+		"postgres://h/db?options=-c%20hunter2",
+		"postgres://h/db?sslmode=disable&sslmode=require",
+	} {
+		_, err := New(protocol.Target{URL: raw, Body: []byte("select 1")}, time.Second)
+		if err == nil {
+			t.Errorf("%s: want an error", raw)
+			continue
+		}
+		if strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("%s: the error shows the value: %v", raw, err)
+		}
+	}
+	// A URL with no host does not echo the URL back either.
+	_, err := New(protocol.Target{URL: "postgres:///db?password=hunter2", Body: []byte("select 1")}, time.Second)
+	if err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("no host: %v", err)
 	}
 }
 
