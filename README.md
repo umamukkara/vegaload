@@ -653,7 +653,7 @@ server.
 | `hidden` | false | For `list` only: send `LIST -a`. MLSD already returns names that start with `.`. |
 | `username` | `anonymous` | Login name. |
 | `password_env` | | Environment variable that holds the password. |
-| `tls` | from the URL | `none`, `explicit` or `implicit`. |
+| `tls` | from the URL | `none`, `explicit` or `implicit`. With `implicit` and no port in the URL, the port is 990. |
 | `tls_verify` | true | Check the server certificate. `-insecure` turns this off. |
 | `sessions` | `10` | How many control connections this run may hold. Match it to `-vus`. Extra users wait. |
 | `connection` | `shared` | `per_call` dials a new session and drops it. It still takes one of the `sessions` slots, so the number in flight stays bounded. |
