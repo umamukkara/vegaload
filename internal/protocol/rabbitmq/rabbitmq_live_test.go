@@ -158,11 +158,11 @@ func TestLive_BodiesAndRouting(t *testing.T) {
 func TestLive_MissingQueueTimeoutAndFlags(t *testing.T) {
 	url, base := liveBase(t)
 	missing := "vegaload.test.missing." + fmt.Sprint(time.Now().UnixNano())
-	d, err := New(protocol.Target{URL: url, Options: liveCopy(base, "mode", "consume", "queue", missing, "allow_writes", "true")}, 2*time.Second)
+	d, err := New(protocol.Target{URL: url, Options: liveCopy(base, "mode", "consume", "queue", missing, "allow_writes", "true", "allow_admin", "true")}, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 	res, _ := d.Run(context.Background())
 	if res.Success || !strings.Contains(res.Err.Error(), "NOT_FOUND") {
 		t.Fatal(res.Err)
@@ -223,12 +223,16 @@ func TestLive_LoginPerCallQuorumAndLoad(t *testing.T) {
 	}
 	opts := liveCopy(base, "username", user, "mandatory", "false")
 	delete(opts, "password_env")
-	bad, err := NewConn(protocol.Target{URL: url, Body: []byte("x"), Options: opts}, 3*time.Second, &secret)
+	bad, err := NewConn(protocol.Target{URL: url, Options: opts}, 8*time.Second, &secret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer bad.Close()
-	res, err := bad.Do(context.Background())
+	t.Cleanup(func() { _ = bad.Close() })
+	call, err := bad.Call(map[string]string{"mandatory": "false"}, []byte("x"), 8*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := call.Do(context.Background())
 	if err != nil || res.Success || !strings.Contains(res.Err.Error(), "refused the login") || strings.Contains(res.Err.Error(), secret) {
 		t.Fatalf("err %v res %v", err, res.Err)
 	}

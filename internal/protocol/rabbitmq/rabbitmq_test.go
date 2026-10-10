@@ -124,6 +124,7 @@ func TestOptions_Rejected(t *testing.T) {
 		{url: s.URL(), opts: map[string]string{"mode": "admin", "action": "queue_lifecycle", "queue": "plain", "allow_writes": "true"}, want: "{id}"},
 		{url: s.URL(), opts: map[string]string{"exchange_type": "headers", "mode": "admin", "action": "exchange_declare", "exchange": "e", "allow_writes": "true"}, want: "headers"},
 		{url: "amqps://127.0.0.1:1", opts: map[string]string{"tls": "false"}, want: "amqps"},
+		{url: "amqp://alice:hunter2-secret@[::1", want: "parsing target URL", hidden: "hunter2-secret"},
 	}
 	for _, c := range cases {
 		body := c.body
@@ -137,6 +138,9 @@ func TestOptions_Rejected(t *testing.T) {
 		if c.hidden != "" && err != nil && strings.Contains(err.Error(), c.hidden) {
 			t.Errorf("error contains secret: %v", err)
 		}
+	}
+	if _, err := NewConn(protocol.Target{URL: s.URL(), Options: map[string]string{"username": "alice"}}, time.Second, nil); err == nil || !strings.Contains(err.Error(), "pass password: env.NAME") {
+		t.Fatalf("script password hint: %v", err)
 	}
 	big := make([]byte, maxBody+1)
 	if _, err := New(protocol.Target{URL: s.URL(), Body: big}, time.Second); err == nil || !strings.Contains(err.Error(), "16777216") {
@@ -541,6 +545,54 @@ func TestNoRetry_AndChannelDeath(t *testing.T) {
 	s.CloseChannelOn("", 0, "")
 	if res, _ = d.Run(context.Background()); !res.Success {
 		t.Fatal(res.Err)
+	}
+}
+
+func TestStall_OpenAndConfirmEndAtTheTimeout(t *testing.T) {
+	// admin and consume never send confirm.select, so a stall on that
+	// method cannot fire in those modes.
+	cases := []struct {
+		name  string
+		opts  map[string]string
+		stall string
+	}{
+		{"publish channel.open", map[string]string{"mandatory": "false"}, "channel.open"},
+		{"publish confirm.select", map[string]string{"mandatory": "false"}, "confirm.select"},
+		{"roundtrip channel.open", map[string]string{"mode": "roundtrip"}, "channel.open"},
+		{"roundtrip confirm.select", map[string]string{"mode": "roundtrip"}, "confirm.select"},
+		{"admin channel.open", map[string]string{"mode": "admin", "action": "queue_declare", "queue": "q", "allow_writes": "true"}, "channel.open"},
+		{"consume channel.open", map[string]string{"mode": "consume", "queue": "q"}, "channel.open"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := rabbitmqtest.Start(t)
+			s.StallOn(tc.stall)
+			d := mustDriver(t, s.URL(), "x", tc.opts, 400*time.Millisecond)
+			start := time.Now()
+			res, err := d.Do(context.Background())
+			elapsed := time.Since(start)
+			if err != nil || res.Success || !strings.Contains(res.Err.Error(), "timed out after 400ms") || elapsed > 2*time.Second {
+				t.Fatalf("err %v res %v after %s", err, res.Err, elapsed)
+			}
+		})
+	}
+}
+
+func TestPublish_StalledAckIsNotReused(t *testing.T) {
+	s := rabbitmqtest.Start(t)
+	s.StallOn("basic.ack")
+	d := mustDriver(t, s.URL(), "x", map[string]string{"mandatory": "false"}, 400*time.Millisecond)
+	start := time.Now()
+	res, err := d.Do(context.Background())
+	if err != nil || res.Success || !strings.Contains(res.Err.Error(), "timed out after 400ms") || time.Since(start) > 2*time.Second {
+		t.Fatalf("err %v res %v after %s", err, res.Err, time.Since(start))
+	}
+	s.StallOn("")
+	for i := 0; i < 5; i++ {
+		res, _ = d.Run(context.Background())
+		if !res.Success {
+			t.Fatalf("call %d: %v", i+1, res.Err)
+		}
 	}
 }
 
