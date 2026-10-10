@@ -38,6 +38,34 @@ tags `0.5.0` and `latest`. A pre-release tag such as `v0.5.0-rc.1` gives only
 without the `v`, so the two match. It needs no extra secret: the job uses the
 workflow's own `GITHUB_TOKEN` with `packages: write`.
 
+## Helm chart
+
+The `chart` job runs after the `image` job. It packages `charts/vegaload` with
+the chart version and app version set to the tag without the `v`, and pushes it
+to `oci://ghcr.io/vegaload/charts`. It needs no extra secret: it uses the
+workflow's `GITHUB_TOKEN` with `packages: write`. Users run:
+
+```
+helm install smoke oci://ghcr.io/vegaload/charts/vegaload --version 0.7.0 -n perf \
+  --set run.target=http://orders.shop.svc:8080/health --set run.protocol=http1
+```
+
+A pre-release tag such as `v0.7.0-rc.1` publishes the chart version
+`0.7.0-rc.1`, which `helm` only installs when you ask for that version.
+
+Do this once, after the first release that publishes a chart:
+
+1. Open the package at `https://github.com/orgs/vegaload/packages/container/package/charts%2Fvegaload`.
+2. In **Package settings**, set the visibility to **Public**. A new package is
+   private, and `helm install` fails with "unauthorized" until it is public.
+3. Check that the package is linked to the `vegaload/vegaload` repository.
+
+Check the chart:
+
+```
+helm show chart oci://ghcr.io/vegaload/charts/vegaload --version <version>
+```
+
 Before the first image release, check that the organization allows public
 packages: **Organization settings → Packages → Package creation → Public**.
 If it is off, GitHub greys out "Public" in the next step, and only an

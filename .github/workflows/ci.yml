@@ -152,6 +152,9 @@ jobs:
       - uses: azure/setup-helm@v4
       - run: helm lint charts/vegaload --set run.target=http://example.svc:8080/health --set run.protocol=http1
       - run: ./charts/vegaload/test.sh
+      # The release job packages the chart the same way, so a broken chart
+      # fails here and not on release day.
+      - run: helm package charts/vegaload --version 0.0.0-ci --app-version 0.0.0-ci --destination "$RUNNER_TEMP/chart"
       - run: ./scripts/check-chart-version_test.sh
 
   # Builds the container image for both architectures, so a broken Dockerfile
