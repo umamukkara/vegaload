@@ -13,6 +13,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestScriptHeaders_SetCookieKeepsEveryValue(t *testing.T) {
+	h := make(http.Header)
+	h.Add("Set-Cookie", "sid=one; Path=/")
+	h.Add("Set-Cookie", "theme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT")
+	h.Set("X-Request-Id", "abc")
+	got := ScriptHeaders(h)
+	if got["X-Request-Id"] != "abc" {
+		t.Fatalf("request id %#v", got)
+	}
+	want := "sid=one; Path=/\ntheme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT"
+	if got["Set-Cookie"] != want {
+		t.Fatalf("Set-Cookie = %q", got["Set-Cookie"])
+	}
+}
+
 func TestHTTPClient_GetAndCarryValue(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Custom", "yes")

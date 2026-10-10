@@ -834,10 +834,7 @@ func (v *VU) callHTTP(msg message) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	headers := make(map[string]string, len(resp.Headers))
-	for k := range resp.Headers {
-		headers[k] = resp.Headers.Get(k)
-	}
+	headers := netapi.ScriptHeaders(resp.Headers)
 	return map[string]interface{}{
 		"status":  resp.StatusCode,
 		"body":    string(resp.Body),

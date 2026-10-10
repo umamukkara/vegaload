@@ -513,8 +513,8 @@ func (v *VU) wrapHTTPResponse(vm *goja.Runtime, resp *netapi.HTTPResponse) *goja
 	_ = o.Set("body", bodyStr)
 
 	headers := vm.NewObject()
-	for k := range resp.Headers {
-		_ = headers.Set(k, resp.Headers.Get(k))
+	for k, v := range netapi.ScriptHeaders(resp.Headers) {
+		_ = headers.Set(k, v)
 	}
 	_ = o.Set("headers", headers)
 

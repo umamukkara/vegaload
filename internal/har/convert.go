@@ -11,37 +11,41 @@ import (
 )
 
 // part is a piece of a JavaScript string built from text and expressions.
+// slot is 0, or one past the index in builder.slots. encode wraps a
+// carried or secret value in encodeURIComponent.
 type part struct {
-	lit  string // literal text, when expr is empty
-	expr string // a JavaScript expression, such as env.VL_TOKEN
-}
-
-type dyn struct {
-	val  string
-	note int // index in request.notes
+	lit    string // literal text, when expr is empty
+	expr   string // a JavaScript expression, such as env.VL_TOKEN
+	slot   int
+	encode bool
 }
 
 type header struct {
-	name string
-	val  []part
+	name   string
+	val    []part
+	cookie bool
+	auth   bool
 }
 
 // A body is one of: nothing, a JSON value (rendered with JSON.stringify),
 // or a text made of parts.
 type request struct {
-	method  string
-	url     []part
-	headers []header
-	isJSON  bool // the body is JSON in jsonVal
-	jsonVal any
-	text    []part // when the body is any other text
-	hasBody bool
-	status  int
-	label   string // METHOD /path, for messages
-	page    string
-	notes   []string // TODO lines
-	answer  string   // text of the answer, to find where later values came from
-	dynamic []dyn    // values that look dynamic, and the note about each
+	method      string
+	url         []part
+	headers     []header
+	isJSON      bool // the body is JSON in jsonVal
+	jsonVal     any
+	text        []part // when the body is any other text
+	hasBody     bool
+	status      int
+	label       string // METHOD /path, for messages
+	page        string
+	notes       []string // TODO lines
+	answer      string   // text of the answer, to find where later values came from
+	host        string
+	respHeaders []nameValue
+	cookies     []cookiePair
+	emits       []emit // consts taken from this response
 }
 
 // jsExpr is a raw JavaScript expression inside a JSON value.
@@ -131,13 +135,6 @@ func dynamicKind(v string) string {
 	return ""
 }
 
-// isJWT reports whether a JSON value is a string that is a JWT. A JWT is a
-// credential whatever the name of the field that holds it.
-func isJWT(v any) bool {
-	s, ok := v.(string)
-	return ok && reJWT.MatchString(s)
-}
-
 func hasLetterAndDigit(s string) bool {
 	var l, d bool
 	for _, r := range s {
@@ -152,8 +149,9 @@ func hasLetterAndDigit(s string) bool {
 }
 
 type builder struct {
-	env     map[string]bool
-	flagged []string // values that look dynamic, in the request being built
+	env   map[string]bool
+	cur   int
+	slots []slot
 }
 
 func (b *builder) secret(name string) part {
@@ -196,15 +194,18 @@ func (b *builder) pairs(prs [][2]string) []part {
 			sep = "&"
 		}
 		name := unesc(p[0])
-		if isSecretName(name) || reJWT.MatchString(unesc(p[1])) {
+		decoded := unesc(p[1])
+		if id, ok := b.consider(name, decoded); ok {
+			out = append(out, part{lit: sep + p[0] + "="})
+			out = append(out, part{slot: id + 1, encode: true, lit: p[1]})
+			continue
+		}
+		if isSecretName(name) || reJWT.MatchString(decoded) {
 			out = append(out, part{lit: sep + p[0] + "="})
 			e := b.secret(name)
 			e.expr = "encodeURIComponent(" + e.expr + ")"
 			out = append(out, e)
 			continue
-		}
-		if k := dynamicKind(unesc(p[1])); k != "" {
-			b.flagged = append(b.flagged, unesc(p[1])+"|"+k)
 		}
 		out = append(out, part{lit: sep + p[0] + "=" + p[1]})
 	}
@@ -214,7 +215,7 @@ func (b *builder) pairs(prs [][2]string) []part {
 func merge(ps []part) []part {
 	var out []part
 	for _, p := range ps {
-		if p.expr == "" && len(out) > 0 && out[len(out)-1].expr == "" {
+		if p.expr == "" && p.slot == 0 && len(out) > 0 && out[len(out)-1].expr == "" && out[len(out)-1].slot == 0 {
 			out[len(out)-1].lit += p.lit
 			continue
 		}
@@ -229,15 +230,24 @@ func merge(ps []part) []part {
 // buildURL renders a request URL. Secret-looking query values come from
 // the environment, and path segments that look dynamic are flagged.
 func (b *builder) buildURL(u *url.URL) []part {
-	base := *u
-	base.RawQuery = ""
-	base.Fragment = ""
-	for _, seg := range strings.Split(u.EscapedPath(), "/") {
-		if k := dynamicKind(seg); k != "" {
-			b.flagged = append(b.flagged, seg+"|"+k)
-		}
+	ps := []part{{lit: u.Scheme + "://" + u.Host}}
+	raw := u.EscapedPath()
+	if raw == "" {
+		raw = "/"
 	}
-	ps := []part{{lit: base.String()}}
+	for i, seg := range strings.Split(raw, "/") {
+		if i > 0 {
+			ps = append(ps, part{lit: "/"})
+		}
+		if seg == "" {
+			continue
+		}
+		if id, ok := b.consider("", unesc(seg)); ok {
+			ps = append(ps, part{slot: id + 1, encode: true, lit: seg})
+			continue
+		}
+		ps = append(ps, part{lit: seg})
+	}
 	if u.RawQuery != "" {
 		ps = append(ps, part{lit: "?"})
 		ps = append(ps, b.pairs(splitPairs(u.RawQuery))...)
@@ -309,16 +319,7 @@ func (b *builder) redactJSON(v any) any {
 	case jObj:
 		out := make(jObj, len(x))
 		for i, kv := range x {
-			switch kv.val.(type) {
-			case jObj, jArr:
-				out[i] = jKV{kv.key, b.redactJSON(kv.val)}
-			default:
-				if kv.val != nil && (isSecretName(kv.key) || isJWT(kv.val)) {
-					out[i] = jKV{kv.key, jsExpr(b.secret(kv.key).expr)}
-				} else {
-					out[i] = jKV{kv.key, b.redactJSON(kv.val)}
-				}
-			}
+			out[i] = jKV{kv.key, b.redactField(kv.key, kv.val)}
 		}
 		return out
 	case jArr:
@@ -327,18 +328,34 @@ func (b *builder) redactJSON(v any) any {
 			out[i] = b.redactJSON(e)
 		}
 		return out
-	case string:
-		if k := dynamicKind(x); k != "" {
-			b.flagged = append(b.flagged, x+"|"+k)
-		}
-		return x
-	case json.Number:
-		if k := dynamicKind(x.String()); k != "" {
-			b.flagged = append(b.flagged, x.String()+"|"+k)
-		}
-		return x
 	}
 	return v
+}
+
+func (b *builder) redactField(key string, v any) any {
+	switch x := v.(type) {
+	case jObj, jArr:
+		return b.redactJSON(x)
+	case string:
+		return b.jsonLeaf(key, x, false)
+	case json.Number:
+		return b.jsonLeaf(key, x.String(), true)
+	default:
+		return v
+	}
+}
+
+func (b *builder) jsonLeaf(key, val string, num bool) any {
+	if id, ok := b.consider(key, val); ok {
+		return pending{slot: id + 1, num: num, raw: val}
+	}
+	if isSecretName(key) || reJWT.MatchString(val) {
+		return jsExpr(b.secret(key).expr)
+	}
+	if num {
+		return json.Number(val)
+	}
+	return val
 }
 
 func (b *builder) headers(in []nameValue) []header {
@@ -350,14 +367,23 @@ func (b *builder) headers(in []nameValue) []header {
 			continue
 		}
 		seen[n] = true
-		if alwaysSecretHeaders[n] || isSecretName(n) || reJWT.MatchString(h.Value) {
-			out = append(out, header{h.Name, []part{b.secret(h.Name)}})
+		if strings.EqualFold(n, "cookie") {
+			out = append(out, header{name: h.Name, cookie: true})
 			continue
 		}
-		if k := dynamicKind(h.Value); k != "" {
-			b.flagged = append(b.flagged, h.Value+"|"+k)
+		if strings.EqualFold(n, "authorization") {
+			out = append(out, b.authHeader(h.Name, h.Value))
+			continue
 		}
-		out = append(out, header{h.Name, []part{{lit: h.Value}}})
+		if alwaysSecretHeaders[n] || isSecretName(n) || reJWT.MatchString(h.Value) {
+			out = append(out, header{name: h.Name, val: []part{b.secret(h.Name)}})
+			continue
+		}
+		if id, ok := b.consider(h.Name, h.Value); ok {
+			out = append(out, header{name: h.Name, val: []part{{slot: id + 1, lit: h.Value}}})
+			continue
+		}
+		out = append(out, header{name: h.Name, val: []part{{lit: h.Value}}})
 	}
 	return out
 }
@@ -455,11 +481,12 @@ func Convert(r io.Reader, source string, opt Options) (*Result, error) {
 			skip(skipLimit)
 			continue
 		}
-		reqs = append(reqs, b.request(c.e, c.u, f))
+		reqs = append(reqs, b.request(len(reqs), c.e, c.u, f))
 		hosts[c.u.Host] = true
 	}
 
-	correlate(reqs)
+	correlate(reqs, b.slots)
+	applySlots(reqs, b)
 	res.Requests = len(reqs)
 	res.Hosts = sortedKeys(hosts)
 	res.EnvNames = sortedKeys(b.env)
@@ -471,10 +498,11 @@ func Convert(r io.Reader, source string, opt Options) (*Result, error) {
 }
 
 // request converts one entry.
-func (b *builder) request(e *entry, u *url.URL, f *file) *request {
-	b.flagged = nil
-	q := &request{method: strings.ToUpper(e.Request.Method), status: e.Response.Status}
+func (b *builder) request(idx int, e *entry, u *url.URL, f *file) *request {
+	b.cur = idx
+	q := &request{method: strings.ToUpper(e.Request.Method), status: e.Response.Status, host: u.Host}
 	q.url = b.buildURL(u)
+	q.cookies = b.cookieSlots(cookieValue(e.Request.Headers))
 	q.headers = b.headers(e.Request.Headers)
 	q.label = q.method + " " + u.Path
 	if u.Path == "" {
@@ -491,17 +519,7 @@ func (b *builder) request(e *entry, u *url.URL, f *file) *request {
 	if q.method != "GET" && q.method != "HEAD" {
 		b.body(q, e)
 	}
-	// Flagged values become TODO notes, once each.
-	seen := map[string]bool{}
-	for _, fl := range b.flagged {
-		if seen[fl] {
-			continue
-		}
-		seen[fl] = true
-		val, kind, _ := strings.Cut(fl, "|")
-		q.dynamic = append(q.dynamic, dyn{val, len(q.notes)})
-		q.notes = append(q.notes, fmt.Sprintf("%s looks like %s.", shorten(val), kind))
-	}
+	q.respHeaders = e.Response.Headers
 	q.answer = responseText(e)
 	return q
 }
@@ -557,22 +575,4 @@ func (b *builder) body(q *request, e *entry) {
 func looksJSON(s string) bool {
 	t := strings.TrimSpace(s)
 	return strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[")
-}
-
-// correlate adds, to the note about a dynamic value, the earlier request
-// whose answer contained that value.
-func correlate(reqs []*request) {
-	for i, q := range reqs {
-		for _, d := range q.dynamic {
-			for j := 0; j < i; j++ {
-				if reqs[j].answer != "" && strings.Contains(reqs[j].answer, d.val) {
-					q.notes[d.note] += fmt.Sprintf(" It was in the answer to request %d (%s). Take it from there, for example from r%d.json() or r%d.body.", j+1, reqs[j].label, j+1, j+1)
-					break
-				}
-			}
-		}
-	}
-	for _, q := range reqs {
-		q.answer = "" // not needed after this
-	}
 }

@@ -146,10 +146,14 @@ func render(source string, reqs []*request, res *Result) string {
 		w(commentLines("//   ", strings.Join(flags, " ")))
 		w("//\n")
 	}
-	w("// Not done for you: waits between requests (there is no sleep in the\n")
-	w("// scenario API), cookies set by an answer (a scenario has no cookie jar:\n")
-	w("// pass the Cookie header as a secret), and values that change on every\n")
-	w("// run. Look for the TODO lines.\n")
+	w("// A value that the nearest earlier response on the same host held in a\n")
+	w("// named place is read from that response. When that response holds it\n")
+	w("// in several kinds of place, a JSON field wins, then a response header,\n")
+	w("// then a Set-Cookie, then an input. Two places of the same kind stay a\n")
+	w("// TODO, and an older response is not used. Anything else that looks\n")
+	w("// like it changes on every run is a TODO. Waits are not written: the\n")
+	w("// scenario API has no sleep. A scenario has no cookie jar. A cookie an\n")
+	w("// earlier response did not set is still a secret.\n")
 	w("\n")
 
 	if len(res.EnvNames) > 0 {
@@ -164,6 +168,7 @@ func render(source string, reqs []*request, res *Result) string {
 	w("  const bad = want === 0 ? res.status >= 400 : res.status !== want;\n")
 	w("  if (bad) throw new Error(label + \": status \" + res.status + \", the recording had \" + (want || \"below 400\"));\n")
 	w("}\n\n")
+	w(helperSource(reqs))
 
 	w("export default function () {\n")
 	if len(res.EnvNames) > 0 {
@@ -187,11 +192,106 @@ func render(source string, reqs []*request, res *Result) string {
 			w(commentLinesFrom("  // TODO: ", "  //       ", note))
 		}
 		w(renderCall(n, q))
-		w(fmt.Sprintf("  expectStatus(r%d, %d, %s);\n\n", n, want, jsString(q.label)))
+		w(fmt.Sprintf("  expectStatus(r%d, %d, %s);\n", n, want, jsString(q.label)))
+		for _, e := range q.emits {
+			w(fmt.Sprintf("  const %s = %s;\n", e.name, e.expr))
+		}
+		w("\n")
 	}
 	w("}\n")
 	return sb.String()
 }
+
+func helperSource(reqs []*request) string {
+	var header, cookie, hidden bool
+	for _, q := range reqs {
+		for _, e := range q.emits {
+			header = header || strings.Contains(e.expr, "header(")
+			cookie = cookie || strings.Contains(e.expr, "cookie(")
+			hidden = hidden || strings.Contains(e.expr, "hidden(")
+		}
+	}
+	if cookie {
+		header = true
+	}
+	var sb strings.Builder
+	if header {
+		sb.WriteString(helperHeader)
+	}
+	if cookie {
+		sb.WriteString(helperCookie)
+	}
+	if hidden {
+		sb.WriteString(helperHidden)
+	}
+	return sb.String()
+}
+
+const helperHeader = `function header(res, name) {
+  const want = name.toLowerCase();
+  for (const key of Object.keys(res.headers)) {
+    if (key.toLowerCase() === want) return res.headers[key];
+  }
+  return "";
+}
+
+`
+
+const helperCookie = `function cookie(setCookie, name) {
+  const prefix = name + "=";
+  for (const part of String(setCookie).split("\n")) {
+    const first = part.split(";")[0].trim();
+    if (first.startsWith(prefix)) return first.slice(prefix.length);
+  }
+  throw new Error("no cookie " + name);
+}
+
+`
+
+const helperHidden = `function hidden(body, name) {
+  // Stops at the first ">". An attribute value that itself contains ">" is missed.
+  const re = /<input\b[^>]*>/gi;
+  let m;
+  while ((m = re.exec(body))) {
+    if (attr(m[0], "name") === name || attr(m[0], "id") === name) return attr(m[0], "value");
+  }
+  throw new Error("no input " + name);
+}
+function attr(tag, name) {
+  const want = name.toLowerCase();
+  let i = 0;
+  while (i < tag.length) {
+    while (i < tag.length && tag[i] !== " " && tag[i] !== "\t" && tag[i] !== "\n" && tag[i] !== "/") i++;
+    while (i < tag.length && (tag[i] === " " || tag[i] === "\t" || tag[i] === "\n" || tag[i] === "/")) i++;
+    let j = i;
+    while (j < tag.length && tag[j] !== "=" && tag[j] !== " " && tag[j] !== ">") j++;
+    const key = tag.slice(i, j).toLowerCase();
+    while (j < tag.length && tag[j] !== "=" && tag[j] !== ">") j++;
+    if (j >= tag.length || tag[j] !== "=") { i = j + 1; continue; }
+    j++;
+    while (j < tag.length && tag[j] === " ") j++;
+    let v = "";
+    if (tag[j] === '"' || tag[j] === "'") {
+      const q = tag[j];
+      j++;
+      const k = tag.indexOf(q, j);
+      v = k < 0 ? tag.slice(j) : tag.slice(j, k);
+      i = k < 0 ? tag.length : k + 1;
+    } else {
+      const k = j;
+      while (j < tag.length && tag[j] !== " " && tag[j] !== ">") j++;
+      v = tag.slice(k, j);
+      i = j;
+    }
+    if (key === want) return decodeAttr(v);
+  }
+  return "";
+}
+function decodeAttr(s) {
+  return s.replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+`
 
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")

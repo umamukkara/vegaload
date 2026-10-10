@@ -24,6 +24,9 @@ The main branch, which becomes v0.5.0, adds MCP over HTTP and SSE
 (`mcp serve -http`), a second eval suite (`mcp eval -suite v2`), Windows
 support, a Helm chart that runs a test as a Kubernetes Job with no CRD, and a
 container image published to `ghcr.io/vegaload/vegaload`.
+In a script, a response's `Set-Cookie` header is every cookie that response
+set, separated by newlines. A script that used to read only the first cookie
+now sees the rest as well.
 A Harness RT bridge (`--move-to-harness`) is intentionally out of scope for now.
 
 ## Install
@@ -850,26 +853,35 @@ one of the first page you opened in the recording. Use `-include-static`,
 `-include-third-party` or `-host` to change that, and `-max N` to stop after
 N requests.
 
-The importer keeps the secrets it can recognise out of the file. A `Cookie`
-or `Authorization` header, any header, query parameter or body field whose
-name looks secret (password, token, api key, session, csrf and similar), and
-any value that is a JWT, is read from the environment as `env.VL_NAME`. The
-file lists the variables, and you pass each one by name with `-secret-env`.
-It works on names and on the shape of a JWT, so a secret with an ordinary
-name stays as it was recorded: a token in a path such as `/reset/<token>`, a
-query parameter named `code`, or a field named `key`. Read the file before
-you share it, and do not commit the HAR file. The importer also drops headers a client
-sets by itself (`User-Agent`, `Content-Length`, `Referer`, `Origin`, `Sec-*`
-and similar).
+The importer keeps the secrets it can recognise out of the file as
+`env.VL_NAME`. You pass each one by name with `-secret-env`. That covers a
+password, an API key, a session id, and any header, query parameter or body
+field whose name looks secret. A `Cookie` or `Authorization` header is a
+secret when an earlier response on the same host did not set that cookie or
+return that bearer token. A CSRF token or a view state is not a secret: the
+notes below say when the scenario reads it from a response. A value with an
+ordinary name stays as it was recorded, including a token in a path such as
+`/reset/<token>`, a query parameter named `code`, or a field named `key`.
+Read the file before you share it, and do not commit the HAR file. The
+importer also drops headers a client sets by itself (`User-Agent`,
+`Content-Length`, `Referer`, `Origin`, `Sec-*` and similar).
 
 Some things are left for you, and the file marks them with `TODO` lines:
 
 - A value that looks like it changes on every run (a UUID, a long number, a
-  token). When the same value was in the answer to an earlier request, the
-  note says which request, so you can carry it forward with `r2.json()`.
+  token), when the nearest earlier response on the same host does not hold
+  it in a named place. When it does, the scenario reads it from that
+  response: a JSON field, then a response header, then a `Set-Cookie`, then
+  an input found by `name` or `id`. Two places of the same kind, including
+  two JSON fields, stay in the file with a `TODO`, and an older response is
+  not used. A password or an API key stays in the environment even if a
+  response echoes it. A CSRF token or a view state is carried when the page
+  returned it, and stays in the file with a `TODO` when it did not.
 - A multipart body. It is left out.
-- Waits between requests, and cookies that an answer sets. A scenario has no
-  sleep and no cookie jar, so pass the `Cookie` header as a secret.
+- Waits between requests. A scenario has no sleep and no cookie jar. A
+  cookie an earlier response set is carried. Any other cookie is a secret.
+  In a script, `Set-Cookie` is every cookie the response set, separated by
+  newlines, so a date in `Expires` stays intact.
 
 The hosts in the file are real. A host that is not localhost needs
 `-allow-target` on the run, and the file's first lines say which.

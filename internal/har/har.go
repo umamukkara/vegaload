@@ -20,10 +20,13 @@
 //   - It drops headers that a client sets by itself (User-Agent, Host,
 //     Content-Length, Accept-Encoding and similar), and the headers that
 //     tie a request to the recorded page (Origin, Referer, Sec-*).
-//   - It marks values that look like they change on every run, such as a
-//     UUID, a long number or a token, with a TODO comment. When the same
-//     value appears in the answer to an earlier request, the comment says
-//     which request, so the author can carry the value forward.
+//   - It carries a value that changes on every run when the nearest earlier
+//     response on the same host holds it. One named place is enough. When
+//     that response holds it in several kinds of place, a JSON field wins,
+//     then a response header, then a Set-Cookie, then an input's name or
+//     id. Two places of the same kind, including two JSON fields, stay in
+//     the file with a TODO, and an older response is not used. A password
+//     or an API key is still read from the environment.
 //
 // It does not guess a flow: it keeps the recorded order and one call per
 // request. It writes no waits between calls, because the scenario API has
@@ -87,7 +90,8 @@ type entry struct {
 		} `json:"postData"`
 	} `json:"request"`
 	Response struct {
-		Status  int `json:"status"`
+		Status  int         `json:"status"`
+		Headers []nameValue `json:"headers"`
 		Content struct {
 			MimeType string `json:"mimeType"`
 			Text     string `json:"text"`

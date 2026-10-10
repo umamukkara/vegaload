@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -107,6 +108,25 @@ type SafetyCheck func(host string) error
 type Options struct {
 	Headers            map[string]string
 	InsecureSkipVerify bool
+}
+
+// ScriptHeaders is the header map a scenario sees. Keys keep Go's
+// canonical form (Set-Cookie, X-Request-Id). Every Set-Cookie value is
+// kept, joined with newlines, because a comma join would split an
+// Expires date. Every other header keeps its first value.
+func ScriptHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vals := range h {
+		if len(vals) == 0 {
+			continue
+		}
+		if http.CanonicalHeaderKey(k) == "Set-Cookie" {
+			out[k] = strings.Join(vals, "\n")
+			continue
+		}
+		out[k] = vals[0]
+	}
+	return out
 }
 
 // HTTPResponse is what one HTTPClient.Do call hands back to a script --
