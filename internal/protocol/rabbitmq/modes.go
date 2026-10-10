@@ -10,7 +10,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func (d *Driver) publish(ctx context.Context, l leash, id string) (int64, error) {
+func (d *Driver) publish(ctx context.Context, l leash, id string) (sent int64, err error) {
 	conn, own, err := d.connection(ctx)
 	if err != nil {
 		return 0, err
@@ -22,14 +22,22 @@ func (d *Driver) publish(ctx context.Context, l leash, id string) (int64, error)
 	var ch *amqp.Channel
 	var rets chan amqp.Return
 	var closed *atomic.Pointer[amqp.Error]
+	var pooled *pubCh
+	defer func() {
+		if pooled == nil {
+			return
+		}
+		// err is the named result, so this sees the error the call returned.
+		// A timed-out or failed call must not put its channel back.
+		d.link.giveBack(pooled, err == nil && ctx.Err() == nil && ch != nil && !ch.IsClosed())
+	}()
 	if d.confirm && !d.perCall {
-		p, err := d.link.borrow(conn)
+		pooled, err = d.link.borrow(conn)
 		if err != nil {
 			return 0, err
 		}
-		ch, rets = p.ch, p.rets
-		closed = p.close
-		defer func() { d.link.giveBack(p, err == nil && ch != nil && !ch.IsClosed()) }()
+		ch, rets = pooled.ch, pooled.rets
+		closed = pooled.close
 	} else {
 		ch, err = conn.Channel()
 		if err != nil {
@@ -49,7 +57,6 @@ func (d *Driver) publish(ctx context.Context, l leash, id string) (int64, error)
 	l.use(ch, conn)
 	drainReturns(rets)
 
-	var sent int64
 	var confirms []*amqp.DeferredConfirmation
 	for n := 1; n <= d.count; n++ {
 		body := []byte(applyTokens(string(d.target.Body), id, n))
@@ -176,13 +183,11 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	l.use(ch, conn)
+	defer ch.Close()
 	q, err := ch.QueueDeclare("", false, true, true, false, nil)
 	if err != nil {
-		_ = ch.Close()
 		return 0, 0, nil, err
 	}
-	defer ch.Close()
 	defer d.deleteQueue(conn, ch, q.Name)
 	if d.exchange != "" {
 		key := applyTokens(d.bindKey, id, 1)
@@ -193,6 +198,7 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 	if err := ch.Confirm(false); err != nil {
 		return 0, 0, nil, err
 	}
+	l.use(ch, conn)
 	rets := make(chan amqp.Return, d.count)
 	ch.NotifyReturn(rets)
 	tag := "vegaload-" + id

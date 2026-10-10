@@ -550,6 +550,8 @@ The connection options are `username`, `password_env`, `vhost`, `tls`
   `-opt password_env=NAME`. The default user is `guest` with password
   `guest` when you set neither. Any other username needs `password_env`.
   The user can also be the user in the URL. Give it in one place.
+  RabbitMQ waits about 3 seconds before it refuses a login, so a call
+  timeout shorter than that reports `timed out` instead of `refused the login`.
 - `vhost` defaults to `/`. It can also be the path of the URL. Give it in
   one place.
 - `tls=false` is the default for `amqp://`. `amqps://` means TLS. `true`

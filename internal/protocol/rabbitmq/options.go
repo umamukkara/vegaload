@@ -15,7 +15,12 @@ import (
 func (d *Driver) parseURL() error {
 	u, err := url.Parse(d.target.URL)
 	if err != nil {
-		return fmt.Errorf("rabbitmq: parsing target URL: %w", err)
+		// url.Error repeats the whole URL, password included. Keep the
+		// inner error only.
+		if ue, ok := err.(*url.Error); ok && ue.Err != nil {
+			err = ue.Err
+		}
+		return fmt.Errorf("rabbitmq: parsing target URL: %v", err)
 	}
 	switch u.Scheme {
 	case "amqp":
@@ -106,6 +111,8 @@ func (d *Driver) readConn(passwordGiven bool) error {
 		} else if d.username == "guest" {
 			d.password = "guest"
 			passwordGiven = true
+		} else if d.script {
+			return fmt.Errorf("rabbitmq: username %q needs a password: pass password: env.NAME", d.username)
 		} else {
 			return fmt.Errorf("rabbitmq: username %q needs password_env", d.username)
 		}

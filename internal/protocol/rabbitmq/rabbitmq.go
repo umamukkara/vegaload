@@ -235,17 +235,11 @@ func (d *Driver) Close() error {
 	d.link.mu.Lock()
 	d.link.closed = true
 	c := d.link.conn
-	idle := d.link.idle
 	d.link.conn = nil
 	d.link.idle = nil
 	d.link.mu.Unlock()
-	for _, p := range idle {
-		if p != nil && p.ch != nil {
-			_ = p.ch.Close()
-		}
-	}
 	if c != nil && !c.IsClosed() {
-		return c.Close()
+		return c.CloseDeadline(time.Now().Add(time.Second))
 	}
 	return nil
 }
@@ -268,17 +262,25 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	var held atomic.Pointer[amqp.Connection]
 	stop := context.AfterFunc(ctx, func() {
 		ch := cur.Load()
+		c := held.Load()
+		// channel.open and confirm.select run before this call has a channel
+		// to close. Those calls block with no deadline of their own, so the
+		// connection has to be closed at once.
+		if ch == nil {
+			if c != nil && !c.IsClosed() {
+				_ = c.CloseDeadline(time.Now().Add(time.Second))
+			}
+			return
+		}
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			if ch != nil {
-				_ = ch.Close()
-			}
+			_ = ch.Close()
 		}()
 		select {
 		case <-done:
 		case <-time.After(time.Second):
-			if c := held.Load(); c != nil && !c.IsClosed() {
+			if c != nil && !c.IsClosed() {
 				_ = c.CloseDeadline(time.Now().Add(time.Second))
 			}
 		}
@@ -384,6 +386,12 @@ func (l *link) blockReason() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.blocked
+}
+
+func (l *link) closeReason() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.lastClose
 }
 
 func (d *Driver) connection(ctx context.Context) (*amqp.Connection, bool, error) {
@@ -598,7 +606,7 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 		return errors.New(d.redact(fmt.Sprintf("rabbitmq: %s (%d)", ae.Reason, ae.Code)))
 	}
 	if errors.Is(err, amqp.ErrClosed) {
-		reason := d.link.lastClose
+		reason := d.link.closeReason()
 		if reason == "" {
 			reason = "the broker closed it"
 		}
