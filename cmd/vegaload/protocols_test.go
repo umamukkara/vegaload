@@ -11,6 +11,7 @@ import (
 
 	"github.com/vegaload/vegaload/internal/mcp"
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/ftp/ftptest"
 	"github.com/vegaload/vegaload/internal/protocol/grpc/grpctest"
 	"github.com/vegaload/vegaload/internal/protocol/mysql/mysqltest"
 	"github.com/vegaload/vegaload/internal/protocol/postgres/postgrestest"
@@ -134,6 +135,8 @@ func wireTestTarget(name string) protocol.Target {
 		return protocol.Target{URL: "redis://localhost:1", Body: []byte("PING")}
 	case "rabbitmq":
 		return protocol.Target{URL: "amqp://localhost:1", Body: []byte("hello")}
+	case "ftp":
+		return protocol.Target{URL: "ftp://localhost:1", Options: map[string]string{"mode": "connect"}}
 	case "tcp":
 		return protocol.Target{URL: "tcp://localhost:1"}
 	case "udp":
@@ -350,5 +353,60 @@ func TestCmdRun_RabbitMQProtocol(t *testing.T) {
 	}
 	if res := run("-opt", "mode=roundtrip", "-body", "hello"); res.Total == 0 || res.Failed != 0 {
 		t.Errorf("roundtrip: total %d failed %d", res.Total, res.Failed)
+	}
+}
+
+// An FTP load test runs end to end through `vegaload run -protocol ftp`
+// for each mode: connect, download, list, stat, upload, roundtrip and delete.
+func TestCmdRun_FTPProtocol(t *testing.T) {
+	srv := ftptest.Start(t)
+	srv.Apply(ftptest.Config{Files: map[string][]byte{
+		"/pub/data.bin": []byte("hello ftp"),
+		"/pub/gone.bin": []byte("bye"),
+	}})
+	run := func(extra ...string) report.Result {
+		dir := t.TempDir()
+		out := filepath.Join(dir, "summary.json")
+		args := []string{
+			"-vus", "2", "-duration", "300ms", "-no-report",
+			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+			"-target", srv.URL(), "-protocol", "ftp",
+		}
+		args = append(args, extra...)
+		cmdRun(args)
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res report.Result
+		if err := json.Unmarshal(data, &res); err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := run("-opt", "mode=connect"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("connect: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=download", "-opt", "path=/pub/data.bin", "-opt", "expect_size=9"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("download: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=list", "-opt", "path=/pub", "-opt", "expect=data.bin"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("list: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=stat", "-opt", "path=/pub/data.bin"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("stat: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=upload", "-opt", "path=/up-{id}.bin", "-opt", "size=1KiB", "-opt", "allow_writes=true"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("upload: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=roundtrip", "-opt", "path=/rt-{id}.bin", "-opt", "size=1KiB", "-opt", "allow_writes=true"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("roundtrip: total %d failed %d", res.Total, res.Failed)
+	}
+	res := run("-opt", "mode=delete", "-opt", "path=/pub/gone.bin", "-opt", "allow_writes=true", "-opt", "allow_admin=true")
+	if res.Total == 0 {
+		t.Errorf("delete: total %d", res.Total)
+	}
+	if _, ok := srv.File("/pub/gone.bin"); ok {
+		t.Error("delete left /pub/gone.bin")
 	}
 }

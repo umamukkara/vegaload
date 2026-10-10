@@ -39,6 +39,8 @@ func TestTargetHost(t *testing.T) {
 		"rediss://u@cache.internal":       "cache.internal",
 		"amqp://mq.internal:5672":         "mq.internal",
 		"amqps://u@mq.internal/orders":    "mq.internal",
+		"ftp://files.internal":            "files.internal",
+		"ftps://u@files.internal":         "files.internal",
 		"mqtts://broker.internal":         "broker.internal",
 		"kafka://k1.internal:9092":        "k1.internal",
 		"tcp://10.0.0.5:7000":             "10.0.0.5",
@@ -92,6 +94,8 @@ func TestAllowlistAppliesToEveryScheme(t *testing.T) {
 		"rediss://db.example.com",
 		"amqp://mq.example.com:5672",
 		"amqps://mq.example.com",
+		"ftp://files.example.com",
+		"ftps://files.example.com",
 	} {
 		host, err := TargetHost(raw)
 		if err != nil {

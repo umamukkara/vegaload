@@ -198,7 +198,7 @@ http = HTTP()
 ws = WS()
 
 class _Reply(dict):
-    """The answer of a tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis or rabbitmq call. r.ok and r["ok"] mean
+    """The answer of a tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis, rabbitmq or ftp call. r.ok and r["ok"] mean
     the same. Nested messages and records are _Reply too, so
     r.messages[0].body works. A field named values is also an attribute:
     dict already has a values method, and the field would be hidden without this."""
@@ -221,7 +221,7 @@ def _wrap(value):
     return value
 
 class _Proto:
-    """tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis and rabbitmq: one call per action, such as
+    """tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis, rabbitmq and ftp: one call per action, such as
     tcp.send(url, body="PING\\r\\n", until="\\r\\n"),
     kafka.produce(url, topic="t", value="v") or
     grpc.call(url, method="/pkg.Svc/Method", body={"name": "x"}). Options are keyword arguments.
@@ -242,7 +242,7 @@ class _Proto:
 
 _PROTO_FUNCS = __PROTO_FUNCS__
 _PROTOS = {ns: _Proto(ns, funcs) for ns, funcs in _PROTO_FUNCS.items()}
-tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis, rabbitmq = _PROTOS["tcp"], _PROTOS["udp"], _PROTOS["mqtt"], _PROTOS["kafka"], _PROTOS["grpc"], _PROTOS["postgres"], _PROTOS["mysql"], _PROTOS["redis"], _PROTOS["rabbitmq"]
+tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis, rabbitmq, ftp = _PROTOS["tcp"], _PROTOS["udp"], _PROTOS["mqtt"], _PROTOS["kafka"], _PROTOS["grpc"], _PROTOS["postgres"], _PROTOS["mysql"], _PROTOS["redis"], _PROTOS["rabbitmq"], _PROTOS["ftp"]
 
 class _Env:
     """env.NAME, env["NAME"] or env.get("NAME", default): an environment
@@ -382,7 +382,7 @@ def main():
     try:
         module_globals = runpy.run_path(
             script_path,
-            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "grpc": grpc, "postgres": postgres, "mysql": mysql, "redis": redis, "rabbitmq": rabbitmq, "check": check, "step": step, "env": env, "data": data},
+            init_globals={"http": http, "ws": ws, "tcp": tcp, "udp": udp, "mqtt": mqtt, "kafka": kafka, "grpc": grpc, "postgres": postgres, "mysql": mysql, "redis": redis, "rabbitmq": rabbitmq, "ftp": ftp, "check": check, "step": step, "env": env, "data": data},
             run_name="__vegaload_scenario__",
         )
     except BaseException as e:

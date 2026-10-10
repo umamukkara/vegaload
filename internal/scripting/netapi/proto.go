@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/ftp"
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/kafka"
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
@@ -27,7 +28,7 @@ import (
 // defaultProtoTimeout is used when the caller gives no timeout at all.
 const defaultProtoTimeout = 10 * time.Second
 
-// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis or rabbitmq target.
+// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis, rabbitmq or ftp target.
 type ProtoCall struct {
 	// URL is the target. tcp and udp accept a bare host:port too.
 	URL string
@@ -60,6 +61,7 @@ func ProtoFunctions() map[string][]string {
 		"mysql":    {"query"},
 		"redis":    {"command"},
 		"rabbitmq": {"publish", "consume", "roundtrip", "admin"},
+		"ftp":      {"connect", "download", "upload", "list", "stat", "delete", "roundtrip"},
 	}
 }
 
@@ -85,6 +87,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.Redis(ctx, call)
 	case "rabbitmq":
 		return c.RabbitMQ(ctx, fn, call)
+	case "ftp":
+		return c.FTP(ctx, fn, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -341,6 +345,30 @@ func (r *ProtoReply) Fields() map[string]any {
 		f["messages"] = rm
 		f["text"] = r.RabbitText
 	}
+	if r.IsFTP {
+		ents := make([]any, 0, len(r.FTPEntries))
+		for _, e := range r.FTPEntries {
+			when := ""
+			if !e.Time.IsZero() {
+				when = e.Time.UTC().Format(time.RFC3339)
+			}
+			ents = append(ents, map[string]any{
+				"name": e.Name, "type": e.Type, "size": e.Size, "time": when,
+			})
+		}
+		f["entries"] = ents
+		f["size"] = r.FTPSize
+		f["total"] = r.FTPTotal
+		f["timing"] = map[string]any{
+			"connectMs":  r.FTPTiming.ConnectMs,
+			"loginMs":    r.FTPTiming.LoginMs,
+			"transferMs": r.FTPTiming.TransferMs,
+			"uploadMs":   r.FTPTiming.UploadMs,
+			"downloadMs": r.FTPTiming.DownloadMs,
+			"deleteMs":   r.FTPTiming.DeleteMs,
+		}
+		f["text"] = r.FTPText
+	}
 	return f
 }
 
@@ -410,6 +438,32 @@ type ProtoReply struct {
 	IsRabbit       bool
 	RabbitMessages []RabbitMessage
 	RabbitText     string
+	// IsFTP is true for an FTP reply. FTPEntries are the names a list or
+	// stat returned. FTPText is the short answer. Times are UTC.
+	IsFTP      bool
+	FTPEntries []FTPEntry
+	FTPSize    int64
+	FTPTotal   int
+	FTPTiming  FTPTiming
+	FTPText    string
+}
+
+// FTPEntry is one name from an FTP listing.
+type FTPEntry struct {
+	Name string
+	Type string
+	Size int64
+	Time time.Time
+}
+
+// FTPTiming is how long the parts of an FTP call took, in milliseconds.
+type FTPTiming struct {
+	ConnectMs  int64
+	LoginMs    int64
+	TransferMs int64
+	UploadMs   int64
+	DownloadMs int64
+	DeleteMs   int64
 }
 
 // RabbitMessage is one AMQP message a consume or roundtrip read.
@@ -438,6 +492,7 @@ type ProtoClient struct {
 	myConns    map[string]*mysql.Driver
 	redisConns map[string]*redis.Driver
 	rmqConns   map[string]*rabbitmq.Driver
+	ftpConns   map[string]*ftp.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -891,6 +946,10 @@ func (c *ProtoClient) Close() {
 		_ = d.Close()
 		delete(c.rmqConns, k)
 	}
+	for k, d := range c.ftpConns {
+		_ = d.Close()
+		delete(c.ftpConns, k)
+	}
 }
 
 // rabbitConnOptions are the options that make up a RabbitMQ connection.
@@ -972,6 +1031,92 @@ func (c *ProtoClient) rabbitConn(call ProtoCall, opts map[string]string) (*rabbi
 		c.rmqConns = map[string]*rabbitmq.Driver{}
 	}
 	c.rmqConns[key] = d
+	return d, nil
+}
+
+// ftpConnOptions are the options that make up an FTP session pool. They
+// are the same for every call of one client. The rest of a call's options
+// describe the job.
+var ftpConnOptions = []string{
+	"username", "tls", "tls_verify", "sessions", "connection",
+	"data_host", "epsv", "allow_writes", "allow_admin",
+}
+
+// FTP does one FTP job. mode is connect, download, upload, list, stat,
+// delete or roundtrip. The session pool is kept for the next call with
+// the same connection options.
+func (c *ProtoClient) FTP(ctx context.Context, mode string, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "ftp"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["mode"]; ok {
+		return nil, errors.New("ftp: option mode is not allowed here, the function you called sets it")
+	}
+	opts["mode"] = mode
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("ftp: password_env is for the command line, pass password: env.NAME instead")
+	}
+	conn, err := c.ftpConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	r.IsFTP = true
+	r.FTPSize = rep.Size
+	r.FTPTotal = rep.Total
+	r.FTPText = rep.Text
+	r.FTPTiming = FTPTiming{
+		ConnectMs: rep.Timing.ConnectMs, LoginMs: rep.Timing.LoginMs,
+		TransferMs: rep.Timing.TransferMs, UploadMs: rep.Timing.UploadMs,
+		DownloadMs: rep.Timing.DownloadMs, DeleteMs: rep.Timing.DeleteMs,
+	}
+	for _, e := range rep.Entries {
+		r.FTPEntries = append(r.FTPEntries, FTPEntry{Name: e.Name, Type: e.Type, Size: e.Size, Time: e.Time})
+	}
+	return r, nil
+}
+
+func (c *ProtoClient) ftpConn(call ProtoCall, opts map[string]string) (*ftp.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range ftpConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%q|", *call.Password)
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.ftpConns[key]; ok {
+		return d, nil
+	}
+	d, err := ftp.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password)
+	if err != nil {
+		return nil, err
+	}
+	if c.ftpConns == nil {
+		c.ftpConns = map[string]*ftp.Driver{}
+	}
+	c.ftpConns[key] = d
 	return d, nil
 }
 

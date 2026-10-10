@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/ftp"
 	"github.com/vegaload/vegaload/internal/protocol/grpc"
 	"github.com/vegaload/vegaload/internal/protocol/http1"
 	"github.com/vegaload/vegaload/internal/protocol/http2"
@@ -90,6 +91,13 @@ var drivers = []driverSpec{
 	}},
 	{name: "rabbitmq", options: rabbitmq.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := rabbitmq.New(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}},
+	{name: "ftp", options: ftp.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := ftp.New(t, to)
 		if err != nil {
 			return nil, err
 		}
