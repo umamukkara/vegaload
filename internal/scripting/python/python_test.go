@@ -260,6 +260,42 @@ def iteration():
 	}
 }
 
+func TestHTTPGlobal_SetCookieAndCanonicalHeaders(t *testing.T) {
+	skipIfNoPython(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "sid=one; Path=/")
+		w.Header().Add("Set-Cookie", "theme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT")
+		w.Header().Set("X-Request-Id", "abc")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	path := writeScript(t, `
+def iteration():
+    res = http.get("`+srv.URL+`")
+    cookies = res.headers.get("Set-Cookie")
+    want = "sid=one; Path=/\ntheme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT"
+    if cookies != want:
+        raise ValueError("cookies = %r" % (cookies,))
+    if res.headers.get("X-Request-Id") != "abc":
+        raise ValueError("request id = %r" % (res.headers.get("X-Request-Id"),))
+    if "set-cookie" in res.headers:
+        raise ValueError("lowercase set-cookie should be absent")
+`)
+	script, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vu, err := script.NewVU(nil, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vu.Close()
+	if err := vu.Iteration(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHTTPGlobal_Headers(t *testing.T) {
 	skipIfNoPython(t)
 	var gotAuth string

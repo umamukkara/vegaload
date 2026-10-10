@@ -242,6 +242,43 @@ func TestHTTPGlobal_GetAndCarryValue(t *testing.T) {
 	}
 }
 
+func TestHTTPGlobal_SetCookieAndCanonicalHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "sid=one; Path=/")
+		w.Header().Add("Set-Cookie", "theme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT")
+		w.Header().Set("X-Request-Id", "abc")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	path := writeScript(t, "scenario.js", `
+		export default function () {
+			const res = http.get("`+srv.URL+`");
+			const cookies = res.headers["Set-Cookie"];
+			if (cookies !== "sid=one; Path=/\ntheme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT") {
+				throw new Error("cookies = " + JSON.stringify(cookies));
+			}
+			if (res.headers["X-Request-Id"] !== "abc") {
+				throw new Error("request id = " + res.headers["X-Request-Id"]);
+			}
+			if (res.headers["set-cookie"] !== undefined) {
+				throw new Error("lowercase set-cookie should be absent");
+			}
+		}
+	`)
+	script, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vu, err := script.NewVU(nil, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vu.Iteration(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHTTPGlobal_Headers(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

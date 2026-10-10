@@ -86,21 +86,24 @@ func TestConvert_MaxRequests(t *testing.T) {
 
 func TestConvert_NoSecretReachesTheFile(t *testing.T) {
 	res := convertShop(t, "shop.example.com", Options{})
-	for _, secret := range []string{"hunter2", "sid=abc", "KEY123", "eyJhbGciOiJIUzI1NiJ9", "zzz"} {
+	for _, secret := range []string{"hunter2", "sid=abc", "KEY123", "eyJhbGciOiJIUzI1NiJ9", "550e8400-e29b-41d4-a716-446655440000"} {
 		if strings.Contains(res.Script, secret) {
 			t.Errorf("the secret %q is in the scenario:\n%s", secret, res.Script)
 		}
 	}
-	want := []string{"VL_API_KEY", "VL_AUTHORIZATION", "VL_COOKIE", "VL_CSRF_TOKEN", "VL_PASSWORD"}
+	want := []string{"VL_API_KEY", "VL_COOKIE", "VL_PASSWORD"}
 	if strings.Join(res.EnvNames, ",") != strings.Join(want, ",") {
 		t.Errorf("EnvNames = %v, want %v", res.EnvNames, want)
 	}
 	for _, line := range []string{
-		`"Authorization": env.VL_AUTHORIZATION`,
+		`"Authorization": "Bearer " + c2_token`,
+		`const c2_token = r2.json().token`,
+		`const c2_userId = r2.json().userId`,
+		`encodeURIComponent(c2_userId)`,
 		`"Cookie": env.VL_COOKIE`,
 		`"password": env.VL_PASSWORD`,
 		`&api_key=" + encodeURIComponent(env.VL_API_KEY)`,
-		`"sku=A1&qty=2&csrf_token=" + encodeURIComponent(env.VL_CSRF_TOKEN)`,
+		`csrf_token=" + "zzz"`,
 		`-secret-env VL_API_KEY`,
 	} {
 		if !strings.Contains(res.Script, line) {
@@ -141,12 +144,14 @@ func TestConvert_JSONBodyKeepsOrderAndTypes(t *testing.T) {
 func TestConvert_FlagsDynamicValuesAndFindsTheirSource(t *testing.T) {
 	res := convertShop(t, "shop.example.com", Options{})
 	// The user id in the orders request came from the login answer.
-	flat := strings.Join(strings.Fields(strings.ReplaceAll(res.Script, "//", " ")), " ")
-	if !strings.Contains(flat, "It was in the answer to request 2 (POST /api/login)") {
-		t.Errorf("the source of the user id was not found in\n%s", res.Script)
+	if strings.Contains(res.Script, "It was in the answer") {
+		t.Errorf("a carried value should not stay a TODO:\n%s", res.Script)
 	}
 	if !strings.Contains(res.Script, "looks like a UUID") {
-		t.Error("a UUID should be flagged")
+		t.Error("a UUID with no source should be flagged")
+	}
+	if !strings.Contains(res.Script, "csrf_token was not in an earlier answer") {
+		t.Error("a csrf token with no source should stay a TODO")
 	}
 	// The request id header has no earlier source: flagged, no source.
 	if res.Todos < 3 {
@@ -296,6 +301,116 @@ func TestConvert_AJWTIsASecretWhateverItIsCalled(t *testing.T) {
 		if !strings.Contains(res.Script, want) {
 			t.Errorf("missing %q in\n%s", want, res.Script)
 		}
+	}
+}
+
+func TestConvert_HTMLInputByIDAndSetCookieAndHeader(t *testing.T) {
+	view := "recordedviewstatevalue0001"
+	sid := "recorded-session-value-0001"
+	rid := "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+	in := `{"log":{"entries":[
+		{"_resourceType":"document","request":{"method":"GET","url":"https://app.example.com/form","headers":[]},
+		 "response":{"status":200,"headers":[
+		   {"name":"x-request-id","value":"` + rid + `"},
+		   {"name":"set-cookie","value":"sid=` + sid + `; Path=/"},
+		   {"name":"set-cookie","value":"theme=dark; Expires=Wed, 21 Oct 2015 07:28:00 GMT"}
+		 ],"content":{"mimeType":"text/html","text":"<form><input id=\"viewstate\" type=\"hidden\" value=\"` + view + `\"></form>"}}},
+		{"_resourceType":"xhr","request":{"method":"POST","url":"https://app.example.com/save","headers":[
+		   {"name":"Cookie","value":"sid=` + sid + `; theme=dark"},
+		   {"name":"X-Request-Id","value":"` + rid + `"}
+		 ],"postData":{"mimeType":"application/x-www-form-urlencoded","text":"viewstate=` + view + `"}},
+		 "response":{"status":200,"content":{"mimeType":"text/plain","text":"ok"}}}
+	]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`const c1_viewstate = hidden(r1.body, "viewstate")`,
+		`const c1_sid = cookie(header(r1, "set-cookie"), "sid")`,
+		`const c1_x_request_id = header(r1, "x-request-id")`,
+		`function header(`,
+		`function cookie(`,
+		`function hidden(`,
+		`"sid=" + c1_sid + "; " + env.VL_COOKIE`,
+		`viewstate=" + encodeURIComponent(c1_viewstate)`,
+	} {
+		if !strings.Contains(res.Script, want) {
+			t.Errorf("missing %q in\n%s", want, res.Script)
+		}
+	}
+	if strings.Contains(res.Script, view) || strings.Contains(res.Script, sid) || strings.Contains(res.Script, rid) {
+		t.Errorf("a carried value is still in the file:\n%s", res.Script)
+	}
+}
+
+func TestConvert_SameHostOnly(t *testing.T) {
+	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+	in := `{"log":{"entries":[
+		{"_resourceType":"document","request":{"method":"GET","url":"https://app.example.com/","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"text/html","text":"<html></html>"}}},
+		{"_resourceType":"xhr","request":{"method":"POST","url":"https://app.example.com/login","headers":[],
+		 "postData":{"mimeType":"application/json","text":"{}"}},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{\"token\":\"` + jwt + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://api.example.com/items","headers":[
+		   {"name":"Authorization","value":"Bearer ` + jwt + `"}
+		 ]},"response":{"status":200,"content":{"mimeType":"application/json","text":"[]"}}}
+	]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Script, "c2_token") || strings.Contains(res.Script, jwt) {
+		t.Errorf("a token from another host was carried:\n%s", res.Script)
+	}
+	if !strings.Contains(res.Script, "env.VL_AUTHORIZATION") {
+		t.Errorf("Authorization should stay a secret:\n%s", res.Script)
+	}
+}
+
+func TestConvert_TwoJSONFieldsAreNotCarried(t *testing.T) {
+	id := "550e8400-e29b-41d4-a716-446655440000"
+	in := `{"log":{"entries":[
+		{"_resourceType":"xhr","request":{"method":"POST","url":"https://app.example.com/login","headers":[],
+		 "postData":{"mimeType":"application/json","text":"{}"}},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{\"userId\":\"` + id + `\",\"orderId\":\"` + id + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/orders?user=` + id + `","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"[]"}}}
+	]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Script, "const c1_") {
+		t.Errorf("an ambiguous value was carried:\n%s", res.Script)
+	}
+	if !strings.Contains(res.Script, id) || !strings.Contains(res.Script, "looks like a UUID") {
+		t.Errorf("the value should stay, with a TODO:\n%s", res.Script)
+	}
+}
+
+func TestConvert_NearestResponseWins(t *testing.T) {
+	first := "550e8400-e29b-41d4-a716-446655440000"
+	second := "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	in := `{"log":{"entries":[
+		{"_resourceType":"xhr","request":{"method":"POST","url":"https://app.example.com/login","headers":[],
+		 "postData":{"mimeType":"application/json","text":"{}"}},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{\"token\":\"` + first + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/a?token=` + first + `","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{\"token\":\"` + second + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/b?token=` + second + `","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{}"}}}
+	]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Script, "const c1_token = r1.json().token") || !strings.Contains(res.Script, "const c2_token = r2.json().token") {
+		t.Fatalf("missing consts in\n%s", res.Script)
+	}
+	b := res.Script[strings.Index(res.Script, "/b?"):]
+	if !strings.Contains(b, "encodeURIComponent(c2_token)") || strings.Contains(b, "c1_token") {
+		t.Errorf("the later call should use the refreshed token:\n%s", res.Script)
 	}
 }
 
