@@ -43,6 +43,8 @@ var schemes = map[string]scheme{
 	"postgresql": {port: "5432", protocol: "postgres"},
 	"mysql":      {port: "3306", protocol: "mysql"},
 	"mariadb":    {port: "3306", protocol: "mysql"},
+	"redis":      {port: "6379", protocol: "redis"},
+	"rediss":     {port: "6379", protocol: "redis"},
 	"tcp":        {protocol: "tcp"},
 	"udp":        {protocol: "udp", udp: true},
 }
