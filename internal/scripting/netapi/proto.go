@@ -19,6 +19,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
 	"github.com/vegaload/vegaload/internal/protocol/mysql"
 	"github.com/vegaload/vegaload/internal/protocol/postgres"
+	"github.com/vegaload/vegaload/internal/protocol/rabbitmq"
 	"github.com/vegaload/vegaload/internal/protocol/redis"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 )
@@ -26,7 +27,7 @@ import (
 // defaultProtoTimeout is used when the caller gives no timeout at all.
 const defaultProtoTimeout = 10 * time.Second
 
-// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres, mysql or redis target.
+// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres, mysql, redis or rabbitmq target.
 type ProtoCall struct {
 	// URL is the target. tcp and udp accept a bare host:port too.
 	URL string
@@ -38,7 +39,7 @@ type ProtoCall struct {
 	Insecure bool
 	// Timeout bounds the whole call. Zero means the client's default.
 	Timeout time.Duration
-	// Password is the MQTT, Kafka, PostgreSQL, MySQL or Redis password. nil means none. A script passes it
+	// Password is the MQTT, Kafka, PostgreSQL, MySQL, Redis or RabbitMQ password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
 	// Headers are the gRPC metadata of a grpc.call.
@@ -58,6 +59,7 @@ func ProtoFunctions() map[string][]string {
 		"postgres": {"query"},
 		"mysql":    {"query"},
 		"redis":    {"command"},
+		"rabbitmq": {"publish", "consume", "roundtrip", "admin"},
 	}
 }
 
@@ -81,6 +83,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.MySQL(ctx, call)
 	case "redis":
 		return c.Redis(ctx, call)
+	case "rabbitmq":
+		return c.RabbitMQ(ctx, fn, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -258,7 +262,9 @@ func optionTimeout(val any) (time.Duration, error) {
 // Fields is the reply as plain data: the shape a script sees. body is the
 // reply of tcp and udp (and of grpc, as JSON text, with json holding it parsed,
 // and status and statusName for the gRPC code). messages is for mqtt, each {topic, body}. kafka adds
-// records (each {topic, partition, offset, key, value}) and text. error is
+// records (each {topic, partition, offset, key, value}) and text. A RabbitMQ
+// reply uses messages too, each {exchange, routingKey, body, messageId,
+// redelivered}, and text for an admin answer. error is
 // "" when the call worked.
 func (r *ProtoReply) Fields() map[string]any {
 	msgs := make([]any, 0, len(r.Messages))
@@ -324,6 +330,17 @@ func (r *ProtoReply) Fields() map[string]any {
 		f["records"] = recs
 		f["text"] = r.Text
 	}
+	if r.IsRabbit {
+		rm := make([]any, 0, len(r.RabbitMessages))
+		for _, m := range r.RabbitMessages {
+			rm = append(rm, map[string]any{
+				"exchange": m.Exchange, "routingKey": m.RoutingKey, "body": m.Body,
+				"messageId": m.MessageID, "redelivered": m.Redelivered,
+			})
+		}
+		f["messages"] = rm
+		f["text"] = r.RabbitText
+	}
 	return f
 }
 
@@ -388,6 +405,20 @@ type ProtoReply struct {
 	RedisValue    any
 	RedisValues   []any
 	RedisRowCount int
+	// IsRabbit is true for a RabbitMQ reply. RabbitMessages are the messages
+	// a consume or roundtrip read. RabbitText is an admin answer.
+	IsRabbit       bool
+	RabbitMessages []RabbitMessage
+	RabbitText     string
+}
+
+// RabbitMessage is one AMQP message a consume or roundtrip read.
+type RabbitMessage struct {
+	Exchange    string
+	RoutingKey  string
+	Body        string
+	MessageID   string
+	Redelivered bool
 }
 
 // ProtoClient makes tcp, udp and mqtt calls for one VU. Each call opens
@@ -406,6 +437,7 @@ type ProtoClient struct {
 	pgConns    map[string]*postgres.Driver
 	myConns    map[string]*mysql.Driver
 	redisConns map[string]*redis.Driver
+	rmqConns   map[string]*rabbitmq.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -855,6 +887,92 @@ func (c *ProtoClient) Close() {
 		_ = d.Close()
 		delete(c.redisConns, k)
 	}
+	for k, d := range c.rmqConns {
+		_ = d.Close()
+		delete(c.rmqConns, k)
+	}
+}
+
+// rabbitConnOptions are the options that make up a RabbitMQ connection.
+// They are the same for every call of one client. The rest of a call's
+// options describe the job.
+var rabbitConnOptions = []string{
+	"username", "vhost", "tls", "connection", "channels", "heartbeat",
+	"connection_name", "allow_writes", "allow_admin",
+}
+
+// RabbitMQ does one RabbitMQ job. mode is publish, consume, roundtrip or
+// admin. The connection is kept for the next call with the same connection
+// options.
+func (c *ProtoClient) RabbitMQ(ctx context.Context, mode string, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "rabbitmq"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["mode"]; ok {
+		return nil, errors.New("rabbitmq: option mode is not allowed here, the function you called sets it")
+	}
+	opts["mode"] = mode
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("rabbitmq: password_env is for the command line, pass password: env.NAME instead")
+	}
+	conn, err := c.rabbitConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	r.IsRabbit = true
+	r.RabbitText = rep.Text
+	for _, m := range rep.Messages {
+		r.RabbitMessages = append(r.RabbitMessages, RabbitMessage{
+			Exchange: m.Exchange, RoutingKey: m.RoutingKey, Body: m.Body,
+			MessageID: m.MessageID, Redelivered: m.Redelivered,
+		})
+	}
+	return r, nil
+}
+
+func (c *ProtoClient) rabbitConn(call ProtoCall, opts map[string]string) (*rabbitmq.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range rabbitConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%q|", *call.Password)
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.rmqConns[key]; ok {
+		return d, nil
+	}
+	d, err := rabbitmq.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password)
+	if err != nil {
+		return nil, err
+	}
+	if c.rmqConns == nil {
+		c.rmqConns = map[string]*rabbitmq.Driver{}
+	}
+	c.rmqConns[key] = d
+	return d, nil
 }
 
 func (c *ProtoClient) socket(ctx context.Context, network string, call ProtoCall) (*ProtoReply, error) {

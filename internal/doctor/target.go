@@ -45,6 +45,8 @@ var schemes = map[string]scheme{
 	"mariadb":    {port: "3306", protocol: "mysql"},
 	"redis":      {port: "6379", protocol: "redis"},
 	"rediss":     {port: "6379", protocol: "redis"},
+	"amqp":       {port: "5672", protocol: "rabbitmq"},
+	"amqps":      {port: "5671", protocol: "rabbitmq"},
 	"tcp":        {protocol: "tcp"},
 	"udp":        {protocol: "udp", udp: true},
 }

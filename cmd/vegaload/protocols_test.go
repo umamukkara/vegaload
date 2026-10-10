@@ -14,6 +14,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/grpc/grpctest"
 	"github.com/vegaload/vegaload/internal/protocol/mysql/mysqltest"
 	"github.com/vegaload/vegaload/internal/protocol/postgres/postgrestest"
+	"github.com/vegaload/vegaload/internal/protocol/rabbitmq/rabbitmqtest"
 	"github.com/vegaload/vegaload/internal/protocol/redis/redistest"
 	"github.com/vegaload/vegaload/internal/report"
 )
@@ -131,6 +132,8 @@ func wireTestTarget(name string) protocol.Target {
 		return protocol.Target{URL: "mysql://localhost:1/db", Body: []byte("select 1")}
 	case "redis":
 		return protocol.Target{URL: "redis://localhost:1", Body: []byte("PING")}
+	case "rabbitmq":
+		return protocol.Target{URL: "amqp://localhost:1", Body: []byte("hello")}
 	case "tcp":
 		return protocol.Target{URL: "tcp://localhost:1"}
 	case "udp":
@@ -309,5 +312,43 @@ func TestCmdRun_RedisProtocol(t *testing.T) {
 	}
 	if res := run("3"); res.Total == 0 || res.Failed != res.Total {
 		t.Errorf("min_rows=3: total %d failed %d, want all to fail", res.Total, res.Failed)
+	}
+}
+
+// A RabbitMQ load test runs end to end through `vegaload run -protocol rabbitmq`
+// for each mode: publish, consume, roundtrip and admin.
+func TestCmdRun_RabbitMQProtocol(t *testing.T) {
+	srv := rabbitmqtest.Start(t)
+	run := func(extra ...string) report.Result {
+		dir := t.TempDir()
+		out := filepath.Join(dir, "summary.json")
+		args := []string{
+			"-vus", "2", "-duration", "300ms", "-no-report",
+			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+			"-target", srv.URL(), "-protocol", "rabbitmq",
+		}
+		args = append(args, extra...)
+		cmdRun(args)
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res report.Result
+		if err := json.Unmarshal(data, &res); err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := run("-opt", "mode=admin", "-opt", "action=queue_declare", "-opt", "queue=q", "-opt", "allow_writes=true", "-body", "x"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("queue_declare: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "routing_key=q", "-body", "hello"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("publish: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=consume", "-opt", "queue=q", "-body", "x"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("consume: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=roundtrip", "-body", "hello"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("roundtrip: total %d failed %d", res.Total, res.Failed)
 	}
 }
