@@ -23,7 +23,7 @@ couldn't also do.
   one into the next (create something over HTTP, then watch it over
   WebSocket) — the same per-call allowlist `run_test`'s safety gate below
   describes applies to every one of those calls, not just a `target`.
-  Scripts also have `tcp`, `udp`, `mqtt`, `kafka`, `grpc`, `postgres`, `mysql` and `redis` globals, so one
+  Scripts also have `tcp`, `udp`, `mqtt`, `kafka`, `grpc`, `postgres`, `mysql`, `redis` and `rabbitmq` globals, so one
   flow can mix protocols; `grpc.call(url, {method, body})` takes and returns
   JSON, with no `.proto` file, when the server offers reflection.
   Scripts can also call `check(value, {name: test})` to count named

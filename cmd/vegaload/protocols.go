@@ -12,6 +12,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
 	"github.com/vegaload/vegaload/internal/protocol/mysql"
 	"github.com/vegaload/vegaload/internal/protocol/postgres"
+	"github.com/vegaload/vegaload/internal/protocol/rabbitmq"
 	"github.com/vegaload/vegaload/internal/protocol/redis"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/websocket"
@@ -82,6 +83,13 @@ var drivers = []driverSpec{
 	}},
 	{name: "redis", options: redis.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := redis.New(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}},
+	{name: "rabbitmq", options: rabbitmq.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := rabbitmq.New(t, to)
 		if err != nil {
 			return nil, err
 		}
