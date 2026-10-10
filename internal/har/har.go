@@ -20,12 +20,13 @@
 //   - It drops headers that a client sets by itself (User-Agent, Host,
 //     Content-Length, Accept-Encoding and similar), and the headers that
 //     tie a request to the recorded page (Origin, Referer, Sec-*).
-//   - It carries a value that changes on every run when an earlier
-//     response on the same host holds it in one named place: a JSON
-//     field, an input's name or id, a Set-Cookie, or a whole response
-//     header. The scenario reads it from that response. A value with no
-//     named place, or two of them, stays in the file with a TODO. A
-//     password or an API key is still read from the environment.
+//   - It carries a value that changes on every run when the nearest earlier
+//     response on the same host holds it. One named place is enough. When
+//     that response holds it in several kinds of place, a JSON field wins,
+//     then a response header, then a Set-Cookie, then an input's name or
+//     id. Two places of the same kind, including two JSON fields, stay in
+//     the file with a TODO, and an older response is not used. A password
+//     or an API key is still read from the environment.
 //
 // It does not guess a flow: it keeps the recorded order and one call per
 // request. It writes no waits between calls, because the scenario API has

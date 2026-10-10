@@ -192,27 +192,76 @@ func (b *builder) authHeader(name, val string) header {
 	return header{name: name, val: []part{b.secret(name)}}
 }
 
+// placeRank is the order used when one response holds a value in several
+// kinds of place. A lower rank wins. Two places of the same rank are a tie.
+func placeRank(k placeKind) int {
+	switch k {
+	case placeJSON:
+		return 0
+	case placeHeader:
+		return 1
+	case placeCookie:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// choosePlace picks one place from a single response. JSON beats a response
+// header, which beats a Set-Cookie, which beats an HTML input. Two places of
+// the winning kind are a tie, and ok is false.
+func choosePlace(places []place) (place, bool) {
+	if len(places) == 0 {
+		return place{}, false
+	}
+	best := placeRank(places[0].kind)
+	winner := places[0]
+	n := 1
+	for _, p := range places[1:] {
+		r := placeRank(p.kind)
+		switch {
+		case r < best:
+			best = r
+			winner = p
+			n = 1
+		case r == best:
+			n++
+		}
+	}
+	if n != 1 {
+		return place{}, false
+	}
+	return winner, true
+}
+
 func correlate(reqs []*request, slots []slot) {
 	bindings := map[string]*binding{}
 	for i := range slots {
 		s := &slots[i]
 		var hit *place
+		var picked place
 		var src int
 		other := ""
 		for j := s.req - 1; j >= 0; j-- {
 			places := placesIn(reqs[j], s.val)
-			if len(places) != 1 {
+			if len(places) == 0 {
 				continue
 			}
-			if strings.EqualFold(reqs[j].host, reqs[s.req].host) {
-				p := places[0]
-				hit = &p
+			chosen, ok := choosePlace(places)
+			if !strings.EqualFold(reqs[j].host, reqs[s.req].host) {
+				if other == "" && ok {
+					other = reqs[j].host
+				}
+				continue
+			}
+			// The nearest response that holds the value decides. A tie stops
+			// the search: an older response would be a stale source.
+			if ok {
+				picked = chosen
+				hit = &picked
 				src = j
-				break
 			}
-			if other == "" {
-				other = reqs[j].host
-			}
+			break
 		}
 		if hit == nil {
 			s.otherHost = other

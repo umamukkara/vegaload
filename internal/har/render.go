@@ -146,12 +146,14 @@ func render(source string, reqs []*request, res *Result) string {
 		w(commentLines("//   ", strings.Join(flags, " ")))
 		w("//\n")
 	}
-	w("// A value that an earlier response on the same host held in one named\n")
-	w("// place (a JSON field, an input, a Set-Cookie or a response header) is\n")
-	w("// read from that response. Anything else that looks like it changes on\n")
-	w("// every run is a TODO. Waits are not written: the scenario API has no\n")
-	w("// sleep. A scenario has no cookie jar. A cookie an earlier response did\n")
-	w("// not set is still a secret.\n")
+	w("// A value that the nearest earlier response on the same host held in a\n")
+	w("// named place is read from that response. When that response holds it\n")
+	w("// in several kinds of place, a JSON field wins, then a response header,\n")
+	w("// then a Set-Cookie, then an input. Two places of the same kind stay a\n")
+	w("// TODO, and an older response is not used. Anything else that looks\n")
+	w("// like it changes on every run is a TODO. Waits are not written: the\n")
+	w("// scenario API has no sleep. A scenario has no cookie jar. A cookie an\n")
+	w("// earlier response did not set is still a secret.\n")
 	w("\n")
 
 	if len(res.EnvNames) > 0 {
@@ -247,6 +249,7 @@ const helperCookie = `function cookie(setCookie, name) {
 `
 
 const helperHidden = `function hidden(body, name) {
+  // Stops at the first ">". An attribute value that itself contains ">" is missed.
   const re = /<input\b[^>]*>/gi;
   let m;
   while ((m = re.exec(body))) {

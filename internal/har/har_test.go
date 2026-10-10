@@ -414,6 +414,55 @@ func TestConvert_NearestResponseWins(t *testing.T) {
 	}
 }
 
+func TestConvert_JSONBeatsSetCookieInTheSameResponse(t *testing.T) {
+	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+	in := `{"log":{"entries":[
+		{"_resourceType":"xhr","request":{"method":"POST","url":"https://app.example.com/login","headers":[],
+		 "postData":{"mimeType":"application/json","text":"{}"}},
+		 "response":{"status":200,"headers":[
+		   {"name":"set-cookie","value":"token=` + jwt + `; Path=/"}
+		 ],"content":{"mimeType":"application/json","text":"{\"token\":\"` + jwt + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/orders","headers":[
+		   {"name":"Authorization","value":"Bearer ` + jwt + `"}
+		 ]},"response":{"status":200,"content":{"mimeType":"application/json","text":"[]"}}}
+	]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Script, `const c1_token = r1.json().token`) {
+		t.Fatalf("the JSON field should win over Set-Cookie:\n%s", res.Script)
+	}
+	if !strings.Contains(res.Script, `"Authorization": "Bearer " + c1_token`) {
+		t.Errorf("Authorization should use the carried token:\n%s", res.Script)
+	}
+	if strings.Contains(res.Script, "env.VL_AUTHORIZATION") || strings.Contains(res.Script, "cookie(") || strings.Contains(res.Script, jwt) {
+		t.Errorf("the token should not stay a secret or come from the cookie:\n%s", res.Script)
+	}
+}
+
+func TestConvert_TieDoesNotUseAnOlderResponse(t *testing.T) {
+	id := "550e8400-e29b-41d4-a716-446655440000"
+	in := `{"log":{"entries":[
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/a","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{\"id\":\"` + id + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/b","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"{\"userId\":\"` + id + `\",\"orderId\":\"` + id + `\"}"}}},
+		{"_resourceType":"xhr","request":{"method":"GET","url":"https://app.example.com/orders?user=` + id + `","headers":[]},
+		 "response":{"status":200,"content":{"mimeType":"application/json","text":"[]"}}}
+	]}}`
+	res, err := Convert(strings.NewReader(in), "x.har", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Script, "const c1_") || strings.Contains(res.Script, "const c2_") {
+		t.Errorf("a tie must not fall through to an older response:\n%s", res.Script)
+	}
+	if !strings.Contains(res.Script, id) || !strings.Contains(res.Script, "looks like a UUID") {
+		t.Errorf("the value should stay, with a TODO:\n%s", res.Script)
+	}
+}
+
 func TestConvert_NamesThatDoNotLookSecretStayAsRecorded(t *testing.T) {
 	// This is the limit, and the package comment says so.
 	in := harOf(t, [5]string{"GET", "https://a.example.com/reset/abc?code=xyz", "xhr", "200", ""})

@@ -24,6 +24,9 @@ The main branch, which becomes v0.5.0, adds MCP over HTTP and SSE
 (`mcp serve -http`), a second eval suite (`mcp eval -suite v2`), Windows
 support, a Helm chart that runs a test as a Kubernetes Job with no CRD, and a
 container image published to `ghcr.io/vegaload/vegaload`.
+In a script, a response's `Set-Cookie` header is every cookie that response
+set, separated by newlines. A script that used to read only the first cookie
+now sees the rest as well.
 A Harness RT bridge (`--move-to-harness`) is intentionally out of scope for now.
 
 ## Install
@@ -866,12 +869,14 @@ importer also drops headers a client sets by itself (`User-Agent`,
 Some things are left for you, and the file marks them with `TODO` lines:
 
 - A value that looks like it changes on every run (a UUID, a long number, a
-  token), when the recording does not show one named place it came from.
-  When it does, on the same host, the scenario reads it from that response:
-  a JSON field, an input found by `name` or `id`, a `Set-Cookie`, or a
-  response header. A password or an API key stays in the environment even
-  if a response echoes it. A CSRF token or a view state is carried when the
-  page returned it, and stays in the file with a `TODO` when it did not.
+  token), when the nearest earlier response on the same host does not hold
+  it in a named place. When it does, the scenario reads it from that
+  response: a JSON field, then a response header, then a `Set-Cookie`, then
+  an input found by `name` or `id`. Two places of the same kind, including
+  two JSON fields, stay in the file with a `TODO`, and an older response is
+  not used. A password or an API key stays in the environment even if a
+  response echoes it. A CSRF token or a view state is carried when the page
+  returned it, and stays in the file with a `TODO` when it did not.
 - A multipart body. It is left out.
 - Waits between requests. A scenario has no sleep and no cookie jar. A
   cookie an earlier response set is carried. Any other cookie is a secret.
