@@ -147,7 +147,7 @@ func TestProtoCallFromArgs_PostgresArgs(t *testing.T) {
 	if _, err := ProtoCallFromArgs("postgres.query", "postgres://h/db", map[string]any{"args": 5}); err == nil {
 		t.Error("args must be a list")
 	}
-	// Only postgres and mysql take a list of args. Other calls keep the old error.
+	// Only postgres, mysql and redis take a list of args. Other calls keep the old error.
 	if _, err := ProtoCallFromArgs("kafka.produce", "kafka://h", map[string]any{"args": []any{1}}); err == nil {
 		t.Error("kafka does not take a list")
 	}

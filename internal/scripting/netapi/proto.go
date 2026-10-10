@@ -19,13 +19,14 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/mqtt"
 	"github.com/vegaload/vegaload/internal/protocol/mysql"
 	"github.com/vegaload/vegaload/internal/protocol/postgres"
+	"github.com/vegaload/vegaload/internal/protocol/redis"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 )
 
 // defaultProtoTimeout is used when the caller gives no timeout at all.
 const defaultProtoTimeout = 10 * time.Second
 
-// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres or mysql target.
+// ProtoCall is one call a script makes to a tcp, udp, mqtt, kafka, grpc, postgres, mysql or redis target.
 type ProtoCall struct {
 	// URL is the target. tcp and udp accept a bare host:port too.
 	URL string
@@ -37,7 +38,7 @@ type ProtoCall struct {
 	Insecure bool
 	// Timeout bounds the whole call. Zero means the client's default.
 	Timeout time.Duration
-	// Password is the MQTT, Kafka, PostgreSQL or MySQL password. nil means none. A script passes it
+	// Password is the MQTT, Kafka, PostgreSQL, MySQL or Redis password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
 	// Headers are the gRPC metadata of a grpc.call.
@@ -56,6 +57,7 @@ func ProtoFunctions() map[string][]string {
 		"grpc":     {"call"},
 		"postgres": {"query"},
 		"mysql":    {"query"},
+		"redis":    {"command"},
 	}
 }
 
@@ -77,6 +79,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.Postgres(ctx, call)
 	case "mysql":
 		return c.MySQL(ctx, call)
+	case "redis":
+		return c.Redis(ctx, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -91,7 +95,7 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 	pc := ProtoCall{URL: rawURL}
 	valueIsBody := strings.HasPrefix(name, "kafka.")
 	isGRPC := strings.HasPrefix(name, "grpc.")
-	isSQL := strings.HasPrefix(name, "postgres.") || strings.HasPrefix(name, "mysql.")
+	isSQL := strings.HasPrefix(name, "postgres.") || strings.HasPrefix(name, "mysql.") || strings.HasPrefix(name, "redis.")
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)
@@ -300,6 +304,15 @@ func (r *ProtoReply) Fields() map[string]any {
 			f["lastInsertId"] = r.SQLLastInsertID
 		}
 	}
+	if r.IsRedis {
+		vals := r.RedisValues
+		if vals == nil {
+			vals = []any{}
+		}
+		f["value"] = r.RedisValue
+		f["values"] = vals
+		f["rowCount"] = r.RedisRowCount
+	}
 	if r.IsKafka {
 		recs := make([]any, 0, len(r.Records))
 		for _, rec := range r.Records {
@@ -369,6 +382,12 @@ type ProtoReply struct {
 	SQLHasCommandTag bool
 	SQLLastInsertID  int64
 	SQLHasLastInsert bool
+	// IsRedis is true for a Redis reply. Value is the last command's reply.
+	// Values has one entry per command. RowCount counts the last reply.
+	IsRedis       bool
+	RedisValue    any
+	RedisValues   []any
+	RedisRowCount int
 }
 
 // ProtoClient makes tcp, udp and mqtt calls for one VU. Each call opens
@@ -386,6 +405,7 @@ type ProtoClient struct {
 	grpcConns  map[string]*grpc.Conn
 	pgConns    map[string]*postgres.Driver
 	myConns    map[string]*mysql.Driver
+	redisConns map[string]*redis.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -735,7 +755,83 @@ func (c *ProtoClient) mysqlConn(call ProtoCall, opts map[string]string) (*mysql.
 	return d, nil
 }
 
-// Close closes the Kafka and gRPC clients and the SQL pools. Safe to call more than once.
+// redisConnOptions are the options that make up a Redis client. They are
+// the same for every call of one client. The rest of a call's options
+// describe the job.
+var redisConnOptions = []string{"username", "database", "tls", "pool", "protocol", "allow_writes", "allow_admin"}
+
+// Redis runs one command, or several as a pipeline. The client is kept for
+// the next call with the same connection options. It has one connection,
+// because a script is one user, unless pool says more.
+func (c *ProtoClient) Redis(ctx context.Context, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "redis"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("redis: password_env is for the command line, pass password: env.NAME instead")
+	}
+	conn, err := c.redisConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	r.IsRedis = true
+	r.RedisValue = rep.Value
+	r.RedisValues = rep.Values
+	r.RedisRowCount = rep.RowCount
+	return r, nil
+}
+
+// redisConn returns the client for call's connection options, making it the
+// first time.
+func (c *ProtoClient) redisConn(call ProtoCall, opts map[string]string) (*redis.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range redisConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	if _, ok := connOpts["pool"]; !ok {
+		connOpts["pool"] = "1"
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%q|", *call.Password)
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.redisConns[key]; ok {
+		return d, nil
+	}
+	d, err := redis.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password)
+	if err != nil {
+		return nil, err
+	}
+	if c.redisConns == nil {
+		c.redisConns = map[string]*redis.Driver{}
+	}
+	c.redisConns[key] = d
+	return d, nil
+}
+
+// Close closes the Kafka and gRPC clients, the SQL pools and the Redis clients. Safe to call more than once.
 func (c *ProtoClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -754,6 +850,10 @@ func (c *ProtoClient) Close() {
 	for k, d := range c.myConns {
 		_ = d.Close()
 		delete(c.myConns, k)
+	}
+	for k, d := range c.redisConns {
+		_ = d.Close()
+		delete(c.redisConns, k)
 	}
 }
 

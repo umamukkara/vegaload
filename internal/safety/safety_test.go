@@ -35,6 +35,8 @@ func TestTargetHost(t *testing.T) {
 		"postgresql://u@db.internal/app":  "db.internal",
 		"mysql://db.internal:3306/app":    "db.internal",
 		"mariadb://u@db.internal/app":     "db.internal",
+		"redis://cache.internal:6379":     "cache.internal",
+		"rediss://u@cache.internal":       "cache.internal",
 		"mqtts://broker.internal":         "broker.internal",
 		"kafka://k1.internal:9092":        "k1.internal",
 		"tcp://10.0.0.5:7000":             "10.0.0.5",
@@ -84,6 +86,8 @@ func TestAllowlistAppliesToEveryScheme(t *testing.T) {
 		"postgres://db.example.com:5432/app",
 		"mysql://db.example.com:3306/app",
 		"mariadb://db.example.com/app",
+		"redis://db.example.com:6379",
+		"rediss://db.example.com",
 	} {
 		host, err := TargetHost(raw)
 		if err != nil {
