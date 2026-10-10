@@ -240,12 +240,8 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	})
 	defer stop()
 
-	rep, sent, got, err := d.exec(ctx, &held)
+	rep, sent, got, reused, err := d.exec(ctx, &held)
 	if err != nil {
-		reused := false
-		if s := held.Load(); s != nil {
-			reused = s.reused
-		}
 		return protocol.Result{BytesSent: sent, BytesReceived: got, Err: d.explain(parent, ctx, err, reused)}, rep
 	}
 	return protocol.Result{Success: true, BytesSent: sent, BytesReceived: got}, rep
@@ -278,11 +274,12 @@ func (d *Driver) Close() error {
 	return nil
 }
 
-func (d *Driver) exec(ctx context.Context, held *atomic.Pointer[session]) (rep Reply, sent, got int64, err error) {
+func (d *Driver) exec(ctx context.Context, held *atomic.Pointer[session]) (rep Reply, sent, got int64, reused bool, err error) {
 	s, err := d.acquire(ctx, held)
 	if err != nil {
-		return Reply{}, 0, 0, err
+		return Reply{}, 0, 0, false, err
 	}
+	reused = s.reused
 	keep := false
 	defer func() { d.finish(s, keep) }()
 	if dl, ok := ctx.Deadline(); ok && s.ctrl != nil {
@@ -293,7 +290,7 @@ func (d *Driver) exec(ctx context.Context, held *atomic.Pointer[session]) (rep R
 	id := d.pool.salt + "-" + fmt.Sprintf("%d", d.pool.seq.Add(1))
 	path := strings.ReplaceAll(d.path, "{id}", id)
 	if err = xfercommonCheck(path); err != nil {
-		return Reply{}, 0, 0, err
+		return Reply{}, 0, 0, reused, err
 	}
 	body := append([]byte(nil), d.target.Body...)
 	if len(body) > 0 {
@@ -332,7 +329,7 @@ func (d *Driver) exec(ctx context.Context, held *atomic.Pointer[session]) (rep R
 		sent = s.writeN.Load()
 	}
 	keep = keepSession(err)
-	return rep, sent, got, err
+	return rep, sent, got, reused, err
 }
 
 func xfercommonCheck(path string) error {
@@ -503,10 +500,12 @@ func (s *session) dialFunc(network, address string) (net.Conn, error) {
 		s.data = append(s.data, wrapped)
 		s.mu.Unlock()
 	} else {
+		s.mu.Lock()
 		s.ctrl = wrapped
 		if ta, ok := raw.RemoteAddr().(*net.TCPAddr); ok {
 			s.ctrlHost = ta.IP.String()
 		}
+		s.mu.Unlock()
 	}
 	return wrapped, nil
 }
