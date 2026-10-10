@@ -619,6 +619,84 @@ The connection options are `username`, `password_env`, `vhost`, `tls`
   unroutable message fails the call unless you set `mandatory=false`.
 - The host allowlist and caps apply as for HTTP targets.
 
+### Test an FTP server
+
+```
+FTP_PASSWORD=secret ./vegaload run -vus 4 -duration 10s -protocol ftp \
+  -target ftp://localhost -opt mode=roundtrip -opt path=/upload/vl-{id}.bin \
+  -opt size=1MiB -opt allow_writes=true -opt username=vegaload \
+  -opt password_env=FTP_PASSWORD -secret-env FTP_PASSWORD
+```
+
+`-target` is `ftp://host` (port 21) or `ftps://host` (implicit TLS, port 990).
+Put the password in an environment variable. Do not put it in the URL.
+With no username and no `password_env`, the client logs in as `anonymous`
+with the password `vegaload@`. A username other than `anonymous` needs
+`password_env`. `tls=explicit` on `ftp://` is AUTH TLS. `tls=none` is not
+allowed with `ftps://`. `-insecure` skips certificate checks for a test
+server.
+
+`-opt` keys:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `mode` | `download` | `connect`, `download`, `upload`, `list`, `stat`, `delete`, `roundtrip` |
+| `path` | | The file or directory. `{id}` is replaced in the path and in a body. |
+| `size` | | Upload this many bytes (`1KiB`, `1MiB`, up to 4GiB) instead of a body. `size=0` is an empty file. |
+| `fill` | `random` | `random`, `zero` or `text`, used with `size`. |
+| `expect_size` | | Download must be exactly this many bytes. |
+| `expect_sha256` | | Download must hash to this SHA-256 (64 hex characters). |
+| `expect` | | Text the download must contain, searched in the first 1MiB, or a name the listing must contain. |
+| `limit` | `1000` | How many listing entries the reply keeps (1 to 100000). |
+| `hidden` | false | For `list` only: send `LIST -a`. MLSD already returns names that start with `.`. |
+| `username` | `anonymous` | Login name. |
+| `password_env` | | Environment variable that holds the password. |
+| `tls` | from the URL | `none`, `explicit` or `implicit`. |
+| `tls_verify` | true | Check the server certificate. `-insecure` turns this off. |
+| `sessions` | `10` | How many control connections this run may hold. Match it to `-vus`. Extra users wait. |
+| `connection` | `shared` | `per_call` dials a new session and drops it. It still takes one of the `sessions` slots, so the number in flight stays bounded. |
+| `data_host` | `control` | `control` dials the data connection to the host you named. `announced` uses the PASV address, which must be an IP. |
+| `epsv` | `auto` | `off` uses PASV only. |
+| `allow_writes` | false | Required for `upload`, `roundtrip` and `delete`. |
+| `allow_admin` | false | Also required for `delete`, and for an `upload` whose path has no `{id}`. Needs `allow_writes` as well. |
+
+- Transfers are passive and binary. There is no active mode, no ASCII mode,
+  no resume and no recursion. One server per run.
+- `connect` logs in and does nothing else. `download` reads one file.
+  `upload` writes one file. `list` lists one directory. `stat` asks for
+  the size. `delete` removes one file. `roundtrip` uploads, downloads,
+  checks the bytes and deletes that file. It needs `{id}` in the path, so
+  it never removes a file that was already there.
+- `sessions` is how many control connections the run may hold at once.
+  Set it to the same number as `-vus`, or extra users wait for a free
+  session. A session that the server closes is not reused. The next call
+  dials again. There is no hidden retry.
+- `{id}` in a path or a body becomes a new value on every call. It is not
+  written into the bytes that `size` generates.
+- An upload without `size` and without a body is an error. A failed upload
+  can leave a partial file. `roundtrip` still tries to delete its file. If
+  that delete fails, the call can still pass and the text names the file
+  that is left.
+- The account is the real lock. `allow_writes` and `allow_admin` only stop
+  VegaLoad from sending the command. Give the account a scratch directory.
+- A listing skips lines the client cannot parse. `limit` trims what the
+  reply returns. The client still reads the whole listing first, so a huge
+  directory uses memory for every name. Many servers expand a wildcard in
+  a list path. `hidden` changes `LIST` only.
+- `data_host=control` ignores the address in the PASV reply and dials the
+  host from `-target`. Use that when the server is behind NAT and
+  announces an address the client cannot reach. `data_host=announced`
+  dials the announced IP. A firewall must allow the passive port range.
+- The timeout covers the whole call, including the transfer. A call that
+  takes too long says `timed out after <duration>`. Throughput in the
+  report is the bytes of the call divided by the time the call took.
+- A script's `ftp` reply has `entries` (each `name`, `type`, `size` and
+  `time`), `size`, `total`, `timing` (`connectMs`, `loginMs`,
+  `transferMs`, `uploadMs`, `downloadMs`, `deleteMs`) and `text`. `time`
+  is UTC, such as `2020-01-02T15:04:05Z`, or `""` when the server gave
+  none. Give the password as `password: env.FTP_PASSWORD`.
+- The host allowlist and caps apply as for HTTP targets.
+
 ### 2. Or write a scenario file
 
 ```
@@ -674,9 +752,9 @@ fit your real flow. `sample-app.vegaload-plan.md` is a runbook with one
 ready-to-run `vegaload run` command per endpoint, for loading one endpoint at a
 time.
 
-### Call TCP, UDP, MQTT, Kafka, gRPC, PostgreSQL, MySQL, Redis and RabbitMQ from a scenario
+### Call TCP, UDP, MQTT, Kafka, gRPC, PostgreSQL, MySQL, Redis, RabbitMQ and FTP from a scenario
 
-A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka`, `grpc`, `postgres`, `mysql`, `redis` and `rabbitmq` globals. Each
+A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka`, `grpc`, `postgres`, `mysql`, `redis`, `rabbitmq` and `ftp` globals. Each
 function is one call that does one job and returns what it read:
 
 ```js
@@ -785,9 +863,22 @@ export default function () {
   exception. A script that removes messages passes `allow_writes: true`.
   Admin actions that delete or purge also pass `allow_admin: true`. `url`
   may be `amqp://` or `amqps://`.
+- `ftp.connect`, `ftp.download`, `ftp.upload`, `ftp.list`, `ftp.stat`,
+  `ftp.delete` and `ftp.roundtrip` take the FTP `-opt` keys (not `mode`:
+  the function sets it) plus `body`. The names that were read are in
+  `r.entries`, each with `name`, `type`, `size` and `time`. `r.size` is
+  the file size, `r.total` is how many names the listing had, `r.timing`
+  is the parts of the call in milliseconds, and `r.text` is the short
+  answer. Give the password as `password: env.FTP_PASSWORD` and run with
+  `-secret-env FTP_PASSWORD`. A session pool is made on the first call and
+  kept for the rest of that virtual user's run. A server error, and a call
+  the safety check refuses, is a reply with `ok` false, not an exception.
+  A script that writes passes `allow_writes: true` in the connection
+  options. A delete, or an upload to a fixed path, also passes
+  `allow_admin: true`. `url` may be `ftp://` or `ftps://`.
 - Every function also accepts `insecure` (skip TLS checks) and `timeout`
   (milliseconds, or text such as `"2s"`).
-- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`, gRPC calls return `status`, `statusName` and `json`, PostgreSQL calls return `rows`, `columns`, `rowCount`, `rowsAffected` and `commandTag`, MySQL calls return `rows`, `columns`, `rowCount`, `rowsAffected` and `lastInsertId`, Redis calls return `value`, `values` and `rowCount`, and RabbitMQ calls return `messages` (each `{exchange, routingKey, body, messageId, redelivered}`) and `text`.
+- Every call returns `{ok, error, bytesSent, bytesReceived, body, messages}`. Kafka calls also return `records` and `text`, gRPC calls return `status`, `statusName` and `json`, PostgreSQL calls return `rows`, `columns`, `rowCount`, `rowsAffected` and `commandTag`, MySQL calls return `rows`, `columns`, `rowCount`, `rowsAffected` and `lastInsertId`, Redis calls return `value`, `values` and `rowCount`, and RabbitMQ calls return `messages` (each `{exchange, routingKey, body, messageId, redelivered}`) and `text`, and FTP calls return `entries` (each `{name, type, size, time}`), `size`, `total`, `timing` and `text`.
   A network failure does not throw: `ok` is false and `error` says why. A
   call that is set up wrongly (an unknown option, a missing topic) does throw.
 - The safety allowlist is checked for the host of every call, like `http`.

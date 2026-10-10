@@ -438,6 +438,12 @@ func TestSchemeTable(t *testing.T) {
 			t.Errorf("%s = %+v, %v; want port %s and protocol rabbitmq", tc.in, got, err, tc.port)
 		}
 	}
+	for _, tc := range []struct{ in, port string }{{"ftp://h", "21"}, {"ftps://h/files", "990"}} {
+		got, err := parseTarget(tc.in)
+		if err != nil || got.Port != tc.port || got.protocol() != "ftp" {
+			t.Errorf("%s = %+v, %v; want port %s and protocol ftp", tc.in, got, err, tc.port)
+		}
+	}
 	got, err := parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)
