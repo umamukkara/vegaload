@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -273,7 +275,20 @@ func TestSafety_ReadWriteAdmin(t *testing.T) {
 	if res, _ = d.Run(context.Background()); !res.Success {
 		t.Fatal(res.Err)
 	}
-	d = mustDriver(t, s.URL(), "CONFIG GET save", nil, 0)
+	d = mustDriver(t, s.URL(), "COMMAND", nil, 0)
+	if res, _ = d.Run(context.Background()); !res.Success {
+		t.Fatalf("COMMAND with no subcommand is a read: %v", res.Err)
+	}
+	sent := len(s.Commands())
+	d = mustDriver(t, s.URL(), "CONFIG GET requirepass", nil, 0)
+	res, _ = d.Run(context.Background())
+	if res.Success || !strings.Contains(res.Err.Error(), "CONFIG GET") || !strings.Contains(res.Err.Error(), "allow_admin") {
+		t.Fatal(res.Err)
+	}
+	if len(s.Commands()) != sent {
+		t.Fatal("CONFIG GET was sent in read-only mode")
+	}
+	d = mustDriver(t, s.URL(), "CONFIG GET requirepass", map[string]string{"allow_writes": "true", "allow_admin": "true"}, 0)
 	if res, _ = d.Run(context.Background()); !res.Success {
 		t.Fatal(res.Err)
 	}
@@ -374,6 +389,33 @@ func TestRun_HelloFallback(t *testing.T) {
 	}
 	if !sawHello {
 		t.Fatalf("setup %#v", s.Setup())
+	}
+}
+
+// deadlineCtx reports a deadline without Done being closed, the moment
+// after the socket times out and before the context timer is observed.
+type deadlineCtx struct {
+	context.Context
+	deadline time.Time
+}
+
+func (d deadlineCtx) Deadline() (time.Time, bool) { return d.deadline, true }
+func (d deadlineCtx) Err() error                  { return nil }
+
+func TestExplain_NetworkTimeoutWhenDeadlineIsDue(t *testing.T) {
+	d := &Driver{timeout: 300 * time.Millisecond, host: "127.0.0.1", port: "9"}
+	netErr := &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}
+
+	due := deadlineCtx{Context: context.Background(), deadline: time.Now().Add(200 * time.Microsecond)}
+	err := d.explain(context.Background(), due, netErr)
+	if err == nil || !strings.Contains(err.Error(), "timed out after 300ms") {
+		t.Fatalf("deadline due: %v", err)
+	}
+
+	later := deadlineCtx{Context: context.Background(), deadline: time.Now().Add(time.Hour)}
+	err = d.explain(context.Background(), later, netErr)
+	if err == nil || strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("a timeout with the deadline still ahead must keep the network error: %v", err)
 	}
 }
 

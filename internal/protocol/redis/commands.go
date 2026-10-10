@@ -82,7 +82,6 @@ var readCommands = map[string]bool{
 var readSubs = map[string]map[string]bool{
 	"object":  {"encoding": true, "freq": true, "idletime": true, "refcount": true},
 	"memory":  {"usage": true},
-	"config":  {"get": true},
 	"command": {"count": true, "info": true, "docs": true, "list": true, "getkeys": true},
 	"slowlog": {"get": true, "len": true},
 	"pubsub":  {"channels": true, "numsub": true, "numpat": true, "shardchannels": true, "shardnumsub": true},
@@ -101,7 +100,9 @@ var adminCommands = map[string]bool{
 
 // adminSubs are container subcommands that need allow_writes and allow_admin.
 var adminSubs = map[string]map[string]bool{
-	"config":   {"set": true, "rewrite": true, "resetstat": true},
+	// get is admin too: CONFIG GET requirepass and CONFIG GET masterauth
+	// return the server password, which must not appear in a reply.
+	"config":   {"get": true, "set": true, "rewrite": true, "resetstat": true},
 	"script":   {"flush": true, "kill": true},
 	"function": {"flush": true, "delete": true, "restore": true, "kill": true},
 }
@@ -162,6 +163,10 @@ const (
 
 func classify(name, sub string) class {
 	if isContainer(name) {
+		// COMMAND with no subcommand lists commands. It does not write.
+		if name == "command" && sub == "" {
+			return classRead
+		}
 		if readSubs[name][sub] {
 			return classRead
 		}

@@ -224,7 +224,11 @@ func TestLive_ACLUser(t *testing.T) {
 		t.Fatal(res.Err)
 	}
 	t.Cleanup(func() {
-		liveRun(t, url, "ACL DELUSER "+user, admin, 0)
+		// admin must not still carry the args from the SETUSER call.
+		gone, _ := liveRun(t, url, "ACL DELUSER "+user, cloneOpts(admin), 0)
+		if !gone.Success {
+			t.Errorf("deleting ACL user %s: %v", user, gone.Err)
+		}
 	})
 	pass := pw
 	d, err := NewConn(protocol.Target{URL: url, Options: map[string]string{
@@ -358,8 +362,9 @@ func cloneOpts(in map[string]string) map[string]string {
 }
 
 func withArgs(opts map[string]string, args string) map[string]string {
-	opts["args"] = args
-	return opts
+	o := cloneOpts(opts)
+	o["args"] = args
+	return o
 }
 
 func withPool(opts map[string]string, pool string) map[string]string {

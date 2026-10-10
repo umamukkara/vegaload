@@ -448,7 +448,7 @@ and `max_rows`.
   `XRANGE`, `XREVRANGE`, `XREAD`, `EVAL_RO`, `EVALSHA_RO`, `FCALL_RO`,
   `PING`, `ECHO`, `TIME`, `INFO`, `ROLE`, `LOLWUT`. These subcommands are
   reads too: `OBJECT ENCODING|FREQ|IDLETIME|REFCOUNT`, `MEMORY USAGE`,
-  `CONFIG GET`, `COMMAND COUNT|INFO|DOCS|LIST|GETKEYS`, `SLOWLOG GET|LEN`,
+  `COMMAND` with no subcommand, `COMMAND COUNT|INFO|DOCS|LIST|GETKEYS`, `SLOWLOG GET|LEN`,
   `PUBSUB CHANNELS|NUMSUB|NUMPAT|SHARDCHANNELS|SHARDNUMSUB`,
   `XINFO STREAM|GROUPS|CONSUMERS`, `ACL WHOAMI`.
 - Anything else is a write and needs `allow_writes=true`. That includes
@@ -459,7 +459,7 @@ and `max_rows`.
 - These need `allow_writes` and `allow_admin`: `FLUSHALL`, `FLUSHDB`,
   `SWAPDB`, `SHUTDOWN`, `DEBUG`, `SAVE`, `BGSAVE`, `BGREWRITEAOF`,
   `REPLICAOF`, `SLAVEOF`, `FAILOVER`, `CLUSTER`, `MIGRATE`, `MODULE`,
-  `ACL` (every subcommand except `WHOAMI`), `CONFIG SET|REWRITE|RESETSTAT`,
+  `ACL` (every subcommand except `WHOAMI`), `CONFIG GET|SET|REWRITE|RESETSTAT`,
   `SCRIPT FLUSH|KILL`, `FUNCTION FLUSH|DELETE|RESTORE|KILL`.
 - These are refused even with both flags, because they change the
   connection or they are not available: `SELECT` (use `database`),

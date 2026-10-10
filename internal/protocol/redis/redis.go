@@ -594,7 +594,10 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 	if parent.Err() != nil {
 		return parent.Err()
 	}
-	if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	// The socket is closed on the call deadline. That error can arrive a
+	// moment before the context itself reports DeadlineExceeded, so a network
+	// timeout counts once the deadline is due.
+	if callTimedOut(ctx, err) {
 		return fmt.Errorf("redis: timed out after %s", d.timeout)
 	}
 	if msg, ok := serverMessage(err); ok {
@@ -607,6 +610,29 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 		return errors.New(d.redact(err.Error()))
 	}
 	return fmt.Errorf("redis: %s", d.redact(err.Error()))
+}
+
+func callTimedOut(ctx context.Context, err error) bool {
+	if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	if !isNetTimeout(err) {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return false
+	}
+	// The net poller and the context timer do not fire on the same tick.
+	return time.Until(deadline) <= time.Millisecond
+}
+
+func isNetTimeout(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func serverMessage(err error) (string, bool) {
