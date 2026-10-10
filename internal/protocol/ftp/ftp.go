@@ -663,7 +663,20 @@ func callTimedOut(ctx context.Context, err error) bool {
 	return false
 }
 
+// isReset reports that the connection died under us. On Linux this is a
+// reset or a broken pipe. On Windows the text differs ("An established
+// connection was aborted by the software in your host machine", "forcibly
+// closed"), so a network error that is not a timeout counts too.
 func isReset(err error) bool {
-	return strings.Contains(strings.ToLower(err.Error()), "connection reset") ||
-		strings.Contains(strings.ToLower(err.Error()), "broken pipe")
+	var oe *net.OpError
+	if errors.As(err, &oe) && !oe.Timeout() {
+		return true
+	}
+	low := strings.ToLower(err.Error())
+	for _, m := range []string{"connection reset", "broken pipe", "forcibly closed", "connection was aborted", "connection aborted"} {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
 }
