@@ -190,13 +190,15 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string, settle func(
 		// as the watchdog's close makes the client library drop the shared
 		// connection.
 		settle()
-		if consTag != "" {
-			_ = ch.Cancel(consTag, false)
-		}
-		if qName != "" {
-			d.deleteQueue(conn, ch, qName)
-		}
-		_ = ch.Close()
+		d.boundedCleanup(ctx, conn, func() {
+			if consTag != "" {
+				_ = ch.Cancel(consTag, false)
+			}
+			if qName != "" {
+				d.deleteQueue(conn, ch, qName)
+			}
+			_ = ch.Close()
+		})
 	}()
 	q, err := ch.QueueDeclare("", false, true, true, false, nil)
 	if err != nil {
@@ -433,4 +435,33 @@ func (d *Driver) publishing(id string, n int, body []byte) amqp.Publishing {
 		pub.Priority = uint8(d.priority)
 	}
 	return pub
+}
+
+// boundedCleanup runs the call's own cleanup (cancel, delete, close). The
+// watchdog is already stopped by then, so a broker that stops answering
+// would hold the call past its timeout. If the cleanup is still running when
+// the call's time is up, the connection is dropped, which makes every
+// pending request return. The channel is not closed from here: the cleanup
+// is closing it, and two closes at once make the client library drop the
+// shared connection.
+func (d *Driver) boundedCleanup(ctx context.Context, conn *amqp.Connection, cleanup func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cleanup()
+	}()
+	wait := time.Second
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl); left > 0 {
+			wait = left
+		}
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		d.dropLink(conn, "closed because the call cleanup did not finish by the call timeout")
+		<-done
+	}
 }

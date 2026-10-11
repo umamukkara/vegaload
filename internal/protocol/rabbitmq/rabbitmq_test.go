@@ -1034,3 +1034,43 @@ func TestLogin_EnvUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A broker that stops answering during the call's own cleanup (queue.delete)
+// must not hold the call past its timeout.
+func TestRoundtrip_StalledCleanupEndsAtTheTimeout(t *testing.T) {
+	s := rabbitmqtest.Start(t)
+	if err := declareSink(t, s); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := NewConn(protocol.Target{URL: s.URL()}, 2*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Close() })
+	s.StallOn("queue.delete")
+	call, err := parent.Call(map[string]string{
+		"mode": "roundtrip", "exchange": "amq.topic",
+		"routing_key": "mine.x", "bind_key": "mine.*",
+	}, []byte("ping-{id}"), 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = call.Run(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the call was still running 3s after its 500ms timeout")
+	}
+	s.StallOn("")
+	next, err := parent.Call(map[string]string{"mode": "roundtrip"}, []byte("ping-{id}"), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := next.Run(context.Background()); !res.Success {
+		t.Fatalf("next call: %v", res.Err)
+	}
+}
