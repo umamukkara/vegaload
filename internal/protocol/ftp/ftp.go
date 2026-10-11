@@ -37,7 +37,7 @@ import (
 // Options are the -opt keys this driver accepts.
 var Options = []string{
 	"mode", "path", "size", "fill", "expect_size", "expect_sha256", "expect",
-	"limit", "hidden", "username", "password_env", "tls", "tls_verify",
+	"limit", "hidden", "username", "password_env", "tls", "tls_verify", "tls_max",
 	"sessions", "connection", "data_host", "epsv", "allow_writes", "allow_admin",
 }
 
@@ -89,6 +89,7 @@ type Driver struct {
 	tlsMode         string
 	portFromURL     bool
 	tlsVerify       bool
+	tlsMax          uint16
 	perCall         bool
 	sessions        int
 	dataHostControl bool
@@ -176,6 +177,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, scri
 		d.tlsCfg = &tls.Config{
 			ServerName:         d.host,
 			MinVersion:         tls.VersionTLS12,
+			MaxVersion:         d.tlsMax,
 			InsecureSkipVerify: !d.tlsVerify,
 			ClientSessionCache: tls.NewLRUClientSessionCache(32),
 		}
@@ -349,7 +351,7 @@ func (d *Driver) acquire(ctx context.Context, held *atomic.Pointer[session]) (*s
 	s := &session{
 		ctx: ctx, listHidden: d.hidden && d.mode == modeList,
 		implicit: d.tlsMode == "implicit", tlsOn: d.tlsMode != "none",
-		dataHostControl: d.dataHostControl, tlsCfg: d.tlsCfg,
+		dataHostControl: d.dataHostControl, tlsCfg: sessionTLS(d.tlsCfg),
 		discard: d.perCall || d.mode == modeConnect,
 	}
 	held.Store(s)
@@ -409,6 +411,20 @@ func (d *Driver) finish(s *session, keep bool) {
 	}
 }
 
+// sessionTLS gives one session its own copy of the TLS settings and its own
+// session cache. A data connection resumes the TLS session of its own
+// control connection, and a server such as ProFTPD refuses (425) a data
+// connection that resumes a session from another control connection. With
+// one cache for all sessions, parallel sessions took each other's tickets.
+func sessionTLS(cfg *tls.Config) *tls.Config {
+	if cfg == nil {
+		return nil
+	}
+	c := cfg.Clone()
+	c.ClientSessionCache = tls.NewLRUClientSessionCache(2)
+	return c
+}
+
 func (d *Driver) dial(ctx context.Context, s *session) error {
 	s.ctx = ctx
 	opts := []ftp.DialOption{
@@ -423,9 +439,9 @@ func (d *Driver) dial(ctx context.Context, s *session) error {
 	}
 	switch d.tlsMode {
 	case "implicit":
-		opts = append(opts, ftp.DialWithTLS(d.tlsCfg))
+		opts = append(opts, ftp.DialWithTLS(s.tlsCfg))
 	case "explicit":
-		opts = append(opts, ftp.DialWithExplicitTLS(d.tlsCfg))
+		opts = append(opts, ftp.DialWithExplicitTLS(s.tlsCfg))
 	}
 	t0 := time.Now()
 	conn, err := ftp.Dial(net.JoinHostPort(d.host, d.port), opts...)
