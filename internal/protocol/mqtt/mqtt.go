@@ -136,7 +136,7 @@ func newDriver(target protocol.Target, timeout time.Duration, password *string) 
 		return nil, fmt.Errorf("mqtt: unsupported scheme %q, want mqtt:// or mqtts://", u.Scheme)
 	}
 	if u.Hostname() == "" {
-		return nil, fmt.Errorf("mqtt: target %q has no host", target.URL)
+		return nil, fmt.Errorf("mqtt: target %q has no host", urlerr.Mask(target.URL))
 	}
 
 	if err := target.RejectUnknownOptions(Options...); err != nil {

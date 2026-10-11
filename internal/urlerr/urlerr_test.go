@@ -35,6 +35,10 @@ func TestMask(t *testing.T) {
 		"host:80":                           "host:80",
 		"https://h/path?x=a:b@c":            "https://h/path?x=a:b@c",
 		"postgres://u:p%40ss@h/d?sslmode=x": "postgres://u:***@h/d?sslmode=x",
+		"alice:hunter2@host:443":            "alice:***@host:443",
+		"alice:p@ss@host:443":               "alice:***@host:443",
+		"kafka://alice:p@ss@host:9092":      "kafka://alice:***@host:9092",
+		"foo://alice:hunter2@":              "foo://alice:***@",
 	}
 	for in, want := range cases {
 		if got := Mask(in); got != want {

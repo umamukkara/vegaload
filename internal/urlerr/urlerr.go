@@ -21,10 +21,13 @@ func Inner(err error) error {
 	return err
 }
 
-var userinfo = regexp.MustCompile(`(?i)(://[^/@\s:]*):[^/@\s]*@`)
+// userinfo finds user:password@ at the start of the text or after "://". The
+// password runs to the last @ before a slash, so a password that holds an
+// unescaped @ is hidden whole.
+var userinfo = regexp.MustCompile(`(^|://)([^/@\s:]*):[^/\s]*@`)
 
 // Mask hides the password of a user:password@ part in raw, so the text can
-// go into a message about that URL.
+// go into a message about that URL. It also handles a bare user:password@host:port.
 func Mask(raw string) string {
-	return userinfo.ReplaceAllString(raw, "$1:***@")
+	return userinfo.ReplaceAllString(raw, "$1$2:***@")
 }

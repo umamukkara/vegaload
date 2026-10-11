@@ -194,7 +194,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		return nil, fmt.Errorf("kafka: unsupported scheme %q, want kafka:// or kafkas://", u.Scheme)
 	}
 	if u.Hostname() == "" {
-		return nil, fmt.Errorf("kafka: target %q has no host", target.URL)
+		return nil, fmt.Errorf("kafka: target %q has no host", urlerr.Mask(target.URL))
 	}
 	seed := net.JoinHostPort(u.Hostname(), port)
 

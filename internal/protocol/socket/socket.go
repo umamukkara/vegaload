@@ -92,7 +92,7 @@ func newDriver(network string, target protocol.Target, timeout time.Duration) (*
 		return nil, fmt.Errorf("%s: unsupported scheme %q, want %s:// or host:port", network, u.Scheme, network)
 	}
 	if u.Hostname() == "" || u.Port() == "" {
-		return nil, fmt.Errorf("%s: target %q needs a host and a port, such as %s://localhost:9000", network, target.URL, network)
+		return nil, fmt.Errorf("%s: target %q needs a host and a port, such as %s://localhost:9000", network, urlerr.Mask(target.URL), network)
 	}
 	d.host = u.Hostname()
 	d.addr = net.JoinHostPort(u.Hostname(), u.Port())
