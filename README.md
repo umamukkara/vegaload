@@ -630,7 +630,7 @@ FTP_PASSWORD=secret ./vegaload run -vus 4 -duration 10s -protocol ftp \
   -opt password_env=FTP_PASSWORD -secret-env FTP_PASSWORD
 ```
 
-`-target` is `ftp://host` (port 21) or `ftps://host` (implicit TLS, port 990).
+`-target` is `ftp://host` (port 21, or 990 with `-opt tls=implicit`) or `ftps://host` (implicit TLS, port 990). A port in the URL always wins. `vegaload doctor` takes no `-opt`, so it reads only the URL: it checks port 21 for `ftp://host`. To check port 990, give it `ftps://host` or `ftp://host:990`.
 Put the password in an environment variable. Do not put it in the URL.
 With no username and no `password_env`, the client logs in as `anonymous`
 with the password `vegaload@`. A username other than `anonymous` needs
