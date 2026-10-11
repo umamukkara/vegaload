@@ -1376,6 +1376,9 @@ helm install smoke ./charts/vegaload --namespace perf \
 kubectl logs -n perf job/smoke-vegaload-1
 ```
 
+From v0.7.0, you can install the chart without a
+clone: `helm install smoke oci://ghcr.io/vegaload/charts/vegaload --version <version> ...`.
+
 A scenario file works too: `--set-file scenario=./checkout.vl.js`. A broken
 threshold fails the Job. See the chart's README. For plain `kubectl`, use
 [`examples/k8s/job.yaml`](./examples/k8s/job.yaml).

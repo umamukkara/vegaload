@@ -3,7 +3,8 @@ name: Release
 # Runs when a version tag such as v0.1.0 is pushed. Builds the binaries,
 # creates the GitHub release, updates the Homebrew formula in
 # vegaload/homebrew-tap, and publishes the container image to
-# ghcr.io/vegaload/vegaload (linux/amd64 and linux/arm64).
+# ghcr.io/vegaload/vegaload (linux/amd64 and linux/arm64), and publishes the
+# Helm chart to oci://ghcr.io/vegaload/charts.
 on:
   push:
     tags:
@@ -77,3 +78,25 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Publishes the Helm chart as an OCI package, after the image it points to
+  # exists. The chart version and the app version are both the tag without the
+  # "v", so `helm install --version 0.7.0` runs image 0.7.0.
+  chart:
+    needs: [check-chart, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Package the chart
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          helm package charts/vegaload --version "$version" --app-version "$version" --destination dist-chart
+          ls -l dist-chart
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Push the chart
+        run: helm push dist-chart/vegaload-*.tgz oci://ghcr.io/vegaload/charts
