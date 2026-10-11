@@ -43,6 +43,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Two tags can point at one commit (v0.7.0-rc.1 and v0.7.0). GoReleaser
+          # then picks one of them on its own, and it picked the older
+          # pre-release. Name the tag that started this run.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
   image:
     needs: check-chart
