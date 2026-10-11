@@ -28,6 +28,11 @@ func liveBase(t *testing.T) (string, map[string]string) {
 	if name := os.Getenv("VEGALOAD_TEST_RABBITMQ_PASSWORD_ENV"); name != "" {
 		opts["password_env"] = name
 	}
+	// VEGALOAD_TEST_RABBITMQ_TLS is the tls option: true, skip-verify or
+	// false. An amqps:// URL turns TLS on without it.
+	if v := os.Getenv("VEGALOAD_TEST_RABBITMQ_TLS"); v != "" {
+		opts["tls"] = v
+	}
 	return raw, opts
 }
 

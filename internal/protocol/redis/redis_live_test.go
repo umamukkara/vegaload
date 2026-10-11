@@ -22,6 +22,11 @@ func liveBase(t *testing.T) (string, map[string]string) {
 	if name := os.Getenv("VEGALOAD_TEST_REDIS_PASSWORD_ENV"); name != "" {
 		opts["password_env"] = name
 	}
+	// VEGALOAD_TEST_REDIS_TLS is the tls option: true, skip-verify or false.
+	// A rediss:// URL turns TLS on without it.
+	if v := os.Getenv("VEGALOAD_TEST_REDIS_TLS"); v != "" {
+		opts["tls"] = v
+	}
 	return raw, opts
 }
 
@@ -231,9 +236,11 @@ func TestLive_ACLUser(t *testing.T) {
 		}
 	})
 	pass := pw
-	d, err := NewConn(protocol.Target{URL: url, Options: map[string]string{
-		"username": user, "allow_writes": "true", "pool": "1",
-	}}, 5*time.Second, &pass)
+	aclOpts := map[string]string{"username": user, "allow_writes": "true", "pool": "1"}
+	if v, ok := opts["tls"]; ok {
+		aclOpts["tls"] = v
+	}
+	d, err := NewConn(protocol.Target{URL: url, Options: aclOpts}, 5*time.Second, &pass)
 	if err != nil {
 		t.Fatal(err)
 	}
