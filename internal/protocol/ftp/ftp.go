@@ -87,6 +87,7 @@ type Driver struct {
 	username        string
 	password        string
 	tlsMode         string
+	portFromURL     bool
 	tlsVerify       bool
 	perCall         bool
 	sessions        int
@@ -629,7 +630,7 @@ func (d *Driver) explain(parent, ctx context.Context, err error, reused bool) er
 		return errors.New(d.redact(fmt.Sprintf("ftp: the session to %s was closed by the server: %s", d.addr(), cut(err.Error(), 300))))
 	}
 	if certErr(err) {
-		return errors.New(d.redact(fmt.Sprintf("ftp: the TLS handshake with the server failed (control): %s: use -insecure for a test server", cut(err.Error(), 300))))
+		return errors.New(d.redact(fmt.Sprintf("ftp: the TLS handshake with the server failed: %s: use -insecure for a test server", cut(err.Error(), 300))))
 	}
 	return errors.New(d.redact(fmt.Sprintf("ftp: %s", cut(err.Error(), 300))))
 }

@@ -31,6 +31,7 @@ func (d *Driver) parseURL() error {
 	d.host = u.Hostname()
 	if u.Port() != "" {
 		d.port = u.Port()
+		d.portFromURL = true
 	}
 	if u.User != nil {
 		if _, ok := u.User.Password(); ok {
@@ -107,6 +108,11 @@ func (d *Driver) readConn(password *string) error {
 			d.tlsMode = "explicit"
 		case "implicit":
 			d.tlsMode = "implicit"
+			if !d.portFromURL {
+				// ftp:// with tls=implicit and no port in the URL: implicit TLS
+				// has its own port, as it has with ftps://.
+				d.port = "990"
+			}
 		default:
 			return fmt.Errorf("ftp: tls=%q, want none, explicit, or implicit", v)
 		}
