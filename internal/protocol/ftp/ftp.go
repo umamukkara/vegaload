@@ -37,7 +37,7 @@ import (
 // Options are the -opt keys this driver accepts.
 var Options = []string{
 	"mode", "path", "size", "fill", "expect_size", "expect_sha256", "expect",
-	"limit", "hidden", "username", "password_env", "tls", "tls_verify",
+	"limit", "hidden", "username", "password_env", "tls", "tls_verify", "tls_max",
 	"sessions", "connection", "data_host", "epsv", "allow_writes", "allow_admin",
 }
 
@@ -89,6 +89,7 @@ type Driver struct {
 	tlsMode         string
 	portFromURL     bool
 	tlsVerify       bool
+	tlsMax          uint16
 	perCall         bool
 	sessions        int
 	dataHostControl bool
@@ -176,6 +177,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, scri
 		d.tlsCfg = &tls.Config{
 			ServerName:         d.host,
 			MinVersion:         tls.VersionTLS12,
+			MaxVersion:         d.tlsMax,
 			InsecureSkipVerify: !d.tlsVerify,
 			ClientSessionCache: tls.NewLRUClientSessionCache(32),
 		}

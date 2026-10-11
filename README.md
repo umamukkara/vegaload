@@ -655,6 +655,7 @@ server.
 | `password_env` | | Environment variable that holds the password. |
 | `tls` | from the URL | `none`, `explicit` or `implicit`. With `implicit` and no port in the URL, the port is 990. |
 | `tls_verify` | true | Check the server certificate. `-insecure` turns this off. |
+| `tls_max` | `1.2` | Highest TLS version, `1.2` or `1.3`. It is `1.2` because vsftpd 3.0.5 fails large uploads over TLS 1.3 (`426 Failure reading network stream`). Use `1.3` for a server that needs it. |
 | `sessions` | `10` | How many control connections this run may hold. Match it to `-vus`. Extra users wait. |
 | `connection` | `shared` | `per_call` dials a new session and drops it. It still takes one of the `sessions` slots, so the number in flight stays bounded. |
 | `data_host` | `control` | `control` dials the data connection to the host you named. `announced` uses the PASV address, which must be an IP. |

@@ -1,6 +1,7 @@
 package ftp
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/url"
 	"os"
@@ -124,6 +125,17 @@ func (d *Driver) readConn(password *string) error {
 	d.tlsVerify = verify && !d.target.InsecureSkipVerify
 	if d.tlsMode == "none" {
 		d.tlsVerify = true
+	}
+	// TLS 1.3 is off by default. vsftpd 3.0.5 answers "426 Failure reading
+	// network stream" to a large upload over a TLS 1.3 data connection (about
+	// half of 1 MiB uploads here), and a TLS 1.2 data connection is fine.
+	switch d.target.Option("tls_max", "1.2") {
+	case "1.2":
+		d.tlsMax = tls.VersionTLS12
+	case "1.3":
+		d.tlsMax = tls.VersionTLS13
+	default:
+		return fmt.Errorf("ftp: tls_max=%q, want 1.2 or 1.3", d.target.Option("tls_max", ""))
 	}
 
 	if v, ok := opts["connection"]; ok {
@@ -286,7 +298,7 @@ func (d *Driver) rejectForeignOptions() error {
 
 func connOption(k string) bool {
 	switch k {
-	case "username", "password_env", "tls", "tls_verify", "sessions", "connection",
+	case "username", "password_env", "tls", "tls_verify", "tls_max", "sessions", "connection",
 		"data_host", "epsv", "allow_writes", "allow_admin":
 		return true
 	}
