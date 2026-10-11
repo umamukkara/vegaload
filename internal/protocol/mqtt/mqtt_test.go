@@ -65,7 +65,10 @@ func TestPublish_RetainFlagReachesBroker(t *testing.T) {
 	if !res.Success {
 		t.Fatal(res.Err)
 	}
-	if p := b.pubs(); len(p) != 1 || !p[0].retain {
+	// PUBACK is written before the broker stores the publish, so Do can
+	// return first. Wait for the store instead of reading pubs immediately.
+	p := b.waitPublished(1, 2*time.Second)
+	if len(p) != 1 || !p[0].retain {
 		t.Errorf("published = %+v, want one retained message", p)
 	}
 }

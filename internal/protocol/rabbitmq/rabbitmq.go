@@ -362,8 +362,13 @@ func (d *Driver) exec(ctx context.Context, cur *atomic.Pointer[amqp.Channel], he
 	}
 	// Run does not return until the watchdog has finished, and this call
 	// keeps its slot until then. The next call cannot start on a connection
-	// this watchdog is still closing.
-	defer waitWatch(stop, finished)
+	// this watchdog is still closing. settle is also called before this
+	// call touches the channel again: the watchdog and the call's own
+	// cleanup must not use the channel at the same time, or the client
+	// library closes the shared connection (504).
+	var once sync.Once
+	settle := func() { once.Do(func() { waitWatch(stop, finished) }) }
+	defer settle()
 	l := leash{ch: cur, conn: held}
 	id := d.link.salt + "-" + strconv.FormatUint(d.link.seq.Add(1), 10)
 	switch d.mode {
@@ -372,7 +377,7 @@ func (d *Driver) exec(ctx context.Context, cur *atomic.Pointer[amqp.Channel], he
 	case modeConsume:
 		got, rep.Messages, err = d.consume(ctx, l, id)
 	case modeRoundtrip:
-		sent, got, rep.Messages, err = d.roundtrip(ctx, l, id)
+		sent, got, rep.Messages, err = d.roundtrip(ctx, l, id, settle)
 	case modeAdmin:
 		rep.Text, err = d.admin(ctx, l, id)
 	default:

@@ -493,6 +493,110 @@ func TestRun_WaitsForTheWatchdogBeforeTheNextCall(t *testing.T) {
 	}
 }
 
+// TestRoundtrip_CleanupWaitsForTheWatchdog is the 504 on the call after a
+// timeout. The watchdog closes the channel, and the call's own cancel,
+// delete and close must not use that channel until the watchdog is done.
+// If they do, the client library closes the shared connection.
+func TestRoundtrip_CleanupWaitsForTheWatchdog(t *testing.T) {
+	s := rabbitmqtest.Start(t)
+	if err := declareSink(t, s); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := NewConn(protocol.Target{URL: s.URL()}, 2*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Close() })
+
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	closeCallMu.Lock()
+	origCh := closeCallChannel
+	closeCallChannel = func(ch *amqp.Channel) error {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+		if ch.IsClosed() {
+			t.Errorf("the call used the channel while the watchdog was closing it")
+		}
+		return origCh(ch)
+	}
+	closeCallMu.Unlock()
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		closeCallMu.Lock()
+		closeCallChannel = origCh
+		closeCallMu.Unlock()
+	})
+
+	call, err := parent.Call(map[string]string{
+		"mode": "roundtrip", "exchange": "amq.topic",
+		"routing_key": "lost.x", "bind_key": "mine.*",
+	}, []byte("ping-{id}"), 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan protocol.Result, 1)
+	go func() {
+		res, _ := call.Run(context.Background())
+		done <- res
+	}()
+
+	select {
+	case <-entered:
+	case res := <-done:
+		// stop() won the race, so the watchdog never started. The call
+		// cleaned the channel up by itself.
+		if res.Success || !strings.Contains(res.Err.Error(), "timed out") {
+			t.Fatalf("timed out call: %v", res.Err)
+		}
+		return
+	case <-time.After(5 * time.Second):
+		t.Fatal("call did not finish")
+	}
+	// The watchdog is inside close. Let the call goroutine run. If it
+	// cleans the channel up now, the roundtrip queue disappears while
+	// this close is still in progress.
+	for i := 0; i < 1000; i++ {
+		runtime.Gosched()
+		left := false
+		for _, name := range s.Queues() {
+			if strings.HasPrefix(name, "amq.gen-") {
+				left = true
+				break
+			}
+		}
+		if !left {
+			t.Fatal("the call deleted its queue while the watchdog was closing the channel")
+		}
+	}
+	close(release)
+
+	var res protocol.Result
+	select {
+	case res = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after the watchdog finished")
+	}
+	if res.Success || !strings.Contains(res.Err.Error(), "timed out") {
+		t.Fatalf("timed out call: %v", res.Err)
+	}
+	next, err := parent.Call(map[string]string{"mode": "roundtrip"}, []byte("ping-{id}"), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ = next.Run(context.Background()); !res.Success {
+		t.Fatalf("next call: %v", res.Err)
+	}
+}
+
 func TestAdmin_ActionsAndFlags(t *testing.T) {
 	s := rabbitmqtest.Start(t)
 	mk := func(opts map[string]string) *Driver {
@@ -613,6 +717,12 @@ func TestConnection_SharedPerCallAndNames(t *testing.T) {
 		if res, _ := p.Run(context.Background()); !res.Success {
 			t.Fatal(res.Err)
 		}
+	}
+	// The fake server counts a connection as closed when its read loop
+	// ends, which can lag the client's Close. Wait for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for s.OpenConns() != 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
 	}
 	if s.ConnCount() != 3 || s.OpenConns() != 1 {
 		t.Fatalf("accepted %d open %d", s.ConnCount(), s.OpenConns())
@@ -928,5 +1038,84 @@ func TestLogin_EnvUnset(t *testing.T) {
 	_, err := New(protocol.Target{URL: "amqp://127.0.0.1:1", Options: map[string]string{"password_env": "VL_RMQ_MISSING"}}, time.Second)
 	if err == nil || !strings.Contains(err.Error(), "not set") {
 		t.Fatal(err)
+	}
+}
+
+// A broker that stops answering during the call's own cleanup (queue.delete)
+// must not hold the call past its timeout.
+func TestRoundtrip_StalledCleanupEndsAtTheTimeout(t *testing.T) {
+	s := rabbitmqtest.Start(t)
+	if err := declareSink(t, s); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := NewConn(protocol.Target{URL: s.URL()}, 2*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Close() })
+	s.StallOn("queue.delete")
+	call, err := parent.Call(map[string]string{
+		"mode": "roundtrip", "exchange": "amq.topic",
+		"routing_key": "mine.x", "bind_key": "mine.*",
+	}, []byte("ping-{id}"), 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = call.Run(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the call was still running 2s after its 500ms timeout (limit: timeout plus the 1s grace)")
+	}
+	s.StallOn("")
+	next, err := parent.Call(map[string]string{"mode": "roundtrip"}, []byte("ping-{id}"), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := next.Run(context.Background()); !res.Success {
+		t.Fatalf("next call: %v", res.Err)
+	}
+}
+
+// A call that is cancelled (not timed out) while the broker stalls during
+// cleanup must end one grace period after the cancel, not at the call's
+// original deadline.
+func TestRoundtrip_StalledCleanupFollowsACancel(t *testing.T) {
+	s := rabbitmqtest.Start(t)
+	if err := declareSink(t, s); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := NewConn(protocol.Target{URL: s.URL()}, 2*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Close() })
+	s.StallOn("queue.delete")
+	call, err := parent.Call(map[string]string{
+		"mode": "roundtrip", "exchange": "amq.topic",
+		"routing_key": "mine.x", "bind_key": "mine.*",
+	}, []byte("ping-{id}"), 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		_, _ = call.Run(ctx)
+		close(done)
+	}()
+	// The roundtrip itself is quick. The call is then stuck in queue.delete.
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("the call was still running %v after the cancel (limit: 1s grace)", time.Since(start))
 	}
 }

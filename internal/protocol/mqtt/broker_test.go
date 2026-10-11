@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeBroker is a small MQTT 3.1.1 broker for tests. It handles CONNECT,
@@ -36,6 +37,8 @@ type fakeBroker struct {
 	subs      []*subscription
 	retained  map[string][]byte
 	conns     map[net.Conn]bool
+	// note is closed when a publish is stored, if a waiter is registered.
+	note chan struct{}
 }
 
 type pubRecord struct {
@@ -264,6 +267,8 @@ func (b *fakeBroker) route(topic string, payload []byte, qos byte, retain bool) 
 	if retain {
 		b.retained[topic] = payload
 	}
+	note := b.note
+	b.note = nil
 	var targets []*brokerConn
 	for _, s := range b.subs {
 		if topicMatch(s.filter, topic) {
@@ -271,6 +276,9 @@ func (b *fakeBroker) route(topic string, payload []byte, qos byte, retain bool) 
 		}
 	}
 	b.mu.Unlock()
+	if note != nil {
+		close(note)
+	}
 	if b.decoy != nil {
 		payload = b.decoy
 	}
@@ -310,6 +318,30 @@ func (b *fakeBroker) pubs() []pubRecord {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]pubRecord(nil), b.published...)
+}
+
+// waitPublished waits until the broker has stored n publishes. The client can
+// return from a QoS 1 publish as soon as PUBACK is written, which is before
+// route records the message.
+func (b *fakeBroker) waitPublished(n int, timeout time.Duration) []pubRecord {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		b.mu.Lock()
+		if len(b.published) >= n {
+			out := append([]pubRecord(nil), b.published...)
+			b.mu.Unlock()
+			return out
+		}
+		note := make(chan struct{})
+		b.note = note
+		b.mu.Unlock()
+		select {
+		case <-note:
+		case <-timer.C:
+			return b.pubs()
+		}
+	}
 }
 
 func (b *fakeBroker) setRetained(topic string, payload []byte) {

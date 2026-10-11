@@ -170,7 +170,7 @@ func (d *Driver) consume(ctx context.Context, l leash, id string) (int64, []Mess
 	return got, msgs, bad
 }
 
-func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got int64, msgs []Message, err error) {
+func (d *Driver) roundtrip(ctx context.Context, l leash, id string, settle func()) (sent, got int64, msgs []Message, err error) {
 	conn, own, err := d.connection(ctx)
 	if err != nil {
 		return 0, 0, nil, err
@@ -183,12 +183,28 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	defer ch.Close()
+	var qName, consTag string
+	defer func() {
+		// Wait until the watchdog has finished with this channel, or stop
+		// it, before cancel, delete or close. Doing those at the same time
+		// as the watchdog's close makes the client library drop the shared
+		// connection.
+		settle()
+		d.boundedCleanup(ctx, conn, func() {
+			if consTag != "" {
+				_ = ch.Cancel(consTag, false)
+			}
+			if qName != "" {
+				d.deleteQueue(conn, ch, qName)
+			}
+			_ = ch.Close()
+		})
+	}()
 	q, err := ch.QueueDeclare("", false, true, true, false, nil)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	defer d.deleteQueue(conn, ch, q.Name)
+	qName = q.Name
 	if d.exchange != "" {
 		key := applyTokens(d.bindKey, id, 1)
 		if err := ch.QueueBind(q.Name, key, d.exchange, false, nil); err != nil {
@@ -206,6 +222,7 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 	if err != nil {
 		return 0, 0, nil, err
 	}
+	consTag = tag
 	var confirms []*amqp.DeferredConfirmation
 	want := map[string]bool{}
 	for n := 1; n <= d.count; n++ {
@@ -243,7 +260,6 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 		}
 		confDone <- nil
 	}()
-	defer func() { _ = ch.Cancel(tag, false) }()
 	confirmed := false
 	for len(seen) < d.count {
 		select {
@@ -419,4 +435,35 @@ func (d *Driver) publishing(id string, n int, body []byte) amqp.Publishing {
 		pub.Priority = uint8(d.priority)
 	}
 	return pub
+}
+
+// boundedCleanup runs the call's own cleanup (cancel, delete, close). The
+// watchdog is already stopped by then, so a broker that stops answering
+// would hold the call past its timeout. If the cleanup is still running when
+// the call's time is up, the connection is dropped, which makes every
+// pending request return. The channel is not closed from here: the cleanup
+// is closing it, and two closes at once make the client library drop the
+// shared connection.
+func (d *Driver) boundedCleanup(ctx context.Context, conn *amqp.Connection, cleanup func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cleanup()
+	}()
+	// Wait for the call's context to end (deadline or cancel). Then give a
+	// healthy broker one more second to finish, so a normal timeout does not
+	// drop the shared connection.
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
+	}
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		d.dropLink(conn, "closed because the call cleanup did not finish after the call ended")
+		<-done
+	}
 }
