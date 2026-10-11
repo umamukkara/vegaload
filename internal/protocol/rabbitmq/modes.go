@@ -450,18 +450,20 @@ func (d *Driver) boundedCleanup(ctx context.Context, conn *amqp.Connection, clea
 		defer close(done)
 		cleanup()
 	}()
-	wait := time.Second
-	if dl, ok := ctx.Deadline(); ok {
-		if left := time.Until(dl); left > 0 {
-			wait = left
-		}
+	// Wait for the call's context to end (deadline or cancel). Then give a
+	// healthy broker one more second to finish, so a normal timeout does not
+	// drop the shared connection.
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
 	}
-	timer := time.NewTimer(wait)
+	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {
 	case <-done:
 	case <-timer.C:
-		d.dropLink(conn, "closed because the call cleanup did not finish by the call timeout")
+		d.dropLink(conn, "closed because the call cleanup did not finish after the call ended")
 		<-done
 	}
 }
