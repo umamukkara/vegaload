@@ -170,7 +170,7 @@ func (d *Driver) consume(ctx context.Context, l leash, id string) (int64, []Mess
 	return got, msgs, bad
 }
 
-func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got int64, msgs []Message, err error) {
+func (d *Driver) roundtrip(ctx context.Context, l leash, id string, settle func()) (sent, got int64, msgs []Message, err error) {
 	conn, own, err := d.connection(ctx)
 	if err != nil {
 		return 0, 0, nil, err
@@ -183,12 +183,26 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	defer ch.Close()
+	var qName, consTag string
+	defer func() {
+		// Wait until the watchdog has finished with this channel, or stop
+		// it, before cancel, delete or close. Doing those at the same time
+		// as the watchdog's close makes the client library drop the shared
+		// connection.
+		settle()
+		if consTag != "" {
+			_ = ch.Cancel(consTag, false)
+		}
+		if qName != "" {
+			d.deleteQueue(conn, ch, qName)
+		}
+		_ = ch.Close()
+	}()
 	q, err := ch.QueueDeclare("", false, true, true, false, nil)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	defer d.deleteQueue(conn, ch, q.Name)
+	qName = q.Name
 	if d.exchange != "" {
 		key := applyTokens(d.bindKey, id, 1)
 		if err := ch.QueueBind(q.Name, key, d.exchange, false, nil); err != nil {
@@ -206,6 +220,7 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 	if err != nil {
 		return 0, 0, nil, err
 	}
+	consTag = tag
 	var confirms []*amqp.DeferredConfirmation
 	want := map[string]bool{}
 	for n := 1; n <= d.count; n++ {
@@ -243,7 +258,6 @@ func (d *Driver) roundtrip(ctx context.Context, l leash, id string) (sent, got i
 		}
 		confDone <- nil
 	}()
-	defer func() { _ = ch.Cancel(tag, false) }()
 	confirmed := false
 	for len(seen) < d.count {
 		select {

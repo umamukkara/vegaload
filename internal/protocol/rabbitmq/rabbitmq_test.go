@@ -493,6 +493,110 @@ func TestRun_WaitsForTheWatchdogBeforeTheNextCall(t *testing.T) {
 	}
 }
 
+// TestRoundtrip_CleanupWaitsForTheWatchdog is the 504 on the call after a
+// timeout. The watchdog closes the channel, and the call's own cancel,
+// delete and close must not use that channel until the watchdog is done.
+// If they do, the client library closes the shared connection.
+func TestRoundtrip_CleanupWaitsForTheWatchdog(t *testing.T) {
+	s := rabbitmqtest.Start(t)
+	if err := declareSink(t, s); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := NewConn(protocol.Target{URL: s.URL()}, 2*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Close() })
+
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	closeCallMu.Lock()
+	origCh := closeCallChannel
+	closeCallChannel = func(ch *amqp.Channel) error {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+		if ch.IsClosed() {
+			t.Errorf("the call used the channel while the watchdog was closing it")
+		}
+		return origCh(ch)
+	}
+	closeCallMu.Unlock()
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		closeCallMu.Lock()
+		closeCallChannel = origCh
+		closeCallMu.Unlock()
+	})
+
+	call, err := parent.Call(map[string]string{
+		"mode": "roundtrip", "exchange": "amq.topic",
+		"routing_key": "lost.x", "bind_key": "mine.*",
+	}, []byte("ping-{id}"), 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan protocol.Result, 1)
+	go func() {
+		res, _ := call.Run(context.Background())
+		done <- res
+	}()
+
+	select {
+	case <-entered:
+	case res := <-done:
+		// stop() won the race, so the watchdog never started. The call
+		// cleaned the channel up by itself.
+		if res.Success || !strings.Contains(res.Err.Error(), "timed out") {
+			t.Fatalf("timed out call: %v", res.Err)
+		}
+		return
+	case <-time.After(5 * time.Second):
+		t.Fatal("call did not finish")
+	}
+	// The watchdog is inside close. Let the call goroutine run. If it
+	// cleans the channel up now, the roundtrip queue disappears while
+	// this close is still in progress.
+	for i := 0; i < 1000; i++ {
+		runtime.Gosched()
+		left := false
+		for _, name := range s.Queues() {
+			if strings.HasPrefix(name, "amq.gen-") {
+				left = true
+				break
+			}
+		}
+		if !left {
+			t.Fatal("the call deleted its queue while the watchdog was closing the channel")
+		}
+	}
+	close(release)
+
+	var res protocol.Result
+	select {
+	case res = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after the watchdog finished")
+	}
+	if res.Success || !strings.Contains(res.Err.Error(), "timed out") {
+		t.Fatalf("timed out call: %v", res.Err)
+	}
+	next, err := parent.Call(map[string]string{"mode": "roundtrip"}, []byte("ping-{id}"), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ = next.Run(context.Background()); !res.Success {
+		t.Fatalf("next call: %v", res.Err)
+	}
+}
+
 func TestAdmin_ActionsAndFlags(t *testing.T) {
 	s := rabbitmqtest.Start(t)
 	mk := func(opts map[string]string) *Driver {

@@ -261,8 +261,7 @@ func (s *Server) serve(c net.Conn) {
 			bw.Flush()
 			return
 		case "PING":
-			if s.maybeClose(c, &userN) {
-				s.recordCommand(args)
+			if s.maybeClose(c, &userN, args) {
 				return
 			}
 			s.recordCommand(args)
@@ -292,8 +291,7 @@ func (s *Server) serve(c net.Conn) {
 			inMulti = false
 			queued = nil
 		default:
-			if s.maybeClose(c, &userN) {
-				s.recordCommand(args)
+			if s.maybeClose(c, &userN, args) {
 				return
 			}
 			v := s.handler(args)
@@ -309,13 +307,18 @@ func (s *Server) serve(c net.Conn) {
 	}
 }
 
-func (s *Server) maybeClose(c net.Conn, userN *int) bool {
+// maybeClose reports whether this user command uses up the close-after
+// budget. The command is recorded before the socket is closed: the client
+// unblocks as soon as the close happens, and it must already be able to see
+// the command.
+func (s *Server) maybeClose(c net.Conn, userN *int, args []string) bool {
 	limit := int(s.closeAfter.Load())
 	if limit <= 0 {
 		return false
 	}
 	*userN++
 	if *userN >= limit {
+		s.recordCommand(args)
 		c.Close()
 		return true
 	}
