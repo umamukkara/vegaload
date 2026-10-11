@@ -627,3 +627,31 @@ func hasQuery(s *mysqltest.Server, want string) bool {
 	}
 	return false
 }
+
+// With tls=preferred (the default) and a server that has no TLS, the driver
+// switches TLS off in its settings during the handshake. Connections opened
+// at the same time must not share those settings. Run with -race.
+func TestPool_ParallelFirstConnectsDoNotShareSettings(t *testing.T) {
+	for round := 0; round < 20; round++ {
+		s := mysqltest.Start(t, func(string) []mysqltest.Result { return people("") })
+		d, err := New(target(s.URL(), "select 1", map[string]string{"pool": "16"}), 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if res, _ := d.Do(context.Background()); !res.Success {
+					t.Errorf("call failed: %v", res.Err)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		_ = d.Close()
+	}
+}

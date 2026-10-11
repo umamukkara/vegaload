@@ -352,7 +352,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	if err != nil {
 		return nil, errors.New("mysql: the connection settings are not valid (check the user, database and tls)")
 	}
-	db := sql.OpenDB(&sessionConnector{base: base, allowWrites: allowWrites, modes: d.modes})
+	db := sql.OpenDB(&sessionConnector{cfg: cfg, base: base, allowWrites: allowWrites, modes: d.modes})
 	db.SetMaxOpenConns(poolSize)
 	db.SetMaxIdleConns(poolSize)
 	d.db = db
@@ -362,7 +362,14 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 
 // sessionConnector runs the read-only setting and reads sql_mode on every
 // new connection, before the pool hands it out.
+//
+// The driver changes its own settings during the handshake (with tls=preferred
+// and a server that has no TLS it switches TLS off in the shared settings), so
+// two connections opened at the same time would write and read the same field.
+// Each Connect therefore builds its own connector from cfg, which is never
+// changed; base is only used to answer Driver().
 type sessionConnector struct {
+	cfg         *gomysql.Config
 	base        driver.Connector
 	allowWrites bool
 	modes       *atomic.Pointer[sqlMode]
@@ -371,7 +378,11 @@ type sessionConnector struct {
 func (c *sessionConnector) Driver() driver.Driver { return c.base.Driver() }
 
 func (c *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	raw, err := c.base.Connect(ctx)
+	one, err := gomysql.NewConnector(c.cfg)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := one.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
