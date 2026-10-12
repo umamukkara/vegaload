@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func captureCmd(t *testing.T, fn func() int) (int, string, string) {
@@ -141,5 +142,51 @@ func TestCmdProtocols_BadOutputAndUnknown(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "unknown -protocol \"bogus\"") || !strings.Contains(stderr, "http1") || !strings.Contains(stderr, "vegaload protocols") {
 		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCmdRun_UnknownProtocolExitsBeforeRunning(t *testing.T) {
+	start := time.Now()
+	code, stdout, stderr := captureCmd(t, func() int {
+		return cmdRun([]string{"-protocol", "bogus", "-target", "http://127.0.0.1:9", "-duration", "30s"})
+	})
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("took %s; an unknown protocol must not open a connection", time.Since(start))
+	}
+	if code != 2 {
+		t.Fatalf("code %d stderr %s", code, stderr)
+	}
+	if strings.Contains(stdout, "running") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	for _, want := range []string{
+		"vegaload run: unknown -protocol \"bogus\"",
+		"Supported protocols:",
+		"http1",
+		"sftp,",
+		"tcp, udp",
+		"Run `vegaload protocols` for details and examples.",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr missing %q\n%s", want, stderr)
+		}
+	}
+}
+
+func TestSuggestProtocol(t *testing.T) {
+	if got := suggestProtocol("HTTP1"); got != "http1" {
+		t.Errorf("case = %q", got)
+	}
+	if got := suggestProtocol("ftps"); got != "ftp" {
+		t.Errorf("ftps = %q", got)
+	}
+	if got := suggestProtocol("postgresql"); got != "postgres" {
+		t.Errorf("postgresql = %q", got)
+	}
+	if got := suggestProtocol("sft"); got != "sftp" {
+		t.Errorf("sft = %q", got)
+	}
+	if got := suggestProtocol("bogus"); got != "" {
+		t.Errorf("bogus = %q, want no suggestion", got)
 	}
 }

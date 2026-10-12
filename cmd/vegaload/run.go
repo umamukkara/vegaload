@@ -355,6 +355,11 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	if cfg.ScenarioPath != "" && len(cfg.Target.Options) > 0 {
 		return nil, fmt.Errorf("-opt sets options for a protocol driver, so it needs -target and -protocol, not a scenario file")
 	}
+	if cfg.Protocol != "" {
+		if _, ok := findDriver(cfg.Protocol); !ok {
+			return nil, fmt.Errorf("%s", unknownProtocolMessage(cfg.Protocol))
+		}
+	}
 
 	return cfg, nil
 }
@@ -479,7 +484,7 @@ func buildSafetyCheck(cfg *runConfig) netapi.SafetyCheck {
 func protocolIteration(name string, target protocol.Target, timeout time.Duration, calls netapi.CallRecorder) (engine.IterationFunc, func() error, error) {
 	spec, ok := findDriver(name)
 	if !ok {
-		return nil, nil, fmt.Errorf("unknown -protocol %q (want %s)", name, protocolList())
+		return nil, nil, fmt.Errorf("%s", unknownProtocolMessage(name))
 	}
 	// A driver says which -opt keys it knows. Any other key is a typo or
 	// meant for another protocol, so refuse it now instead of ignoring it.
