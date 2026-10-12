@@ -30,24 +30,28 @@ type driverSpec struct {
 }
 
 var drivers = []driverSpec{
-	{name: "http1", build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
-		return http1.New(t, to), nil
+	{name: "http1", options: http1.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+		d, err := http1.New(t, to)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
 	}},
-	{name: "http2", build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "http2", options: http2.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := http2.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "grpc", build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "grpc", options: grpc.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := grpc.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "websocket", build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "websocket", options: websocket.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := websocket.New(t, to)
 		if err != nil {
 			return nil, err

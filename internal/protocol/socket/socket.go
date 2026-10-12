@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
@@ -44,8 +45,8 @@ const (
 // TCPOptions and UDPOptions are the -opt keys each driver accepts. The
 // command's protocol table uses the same lists, so the two cannot differ.
 var (
-	TCPOptions = []string{"escape", "expect", "max", "read", "tls", "until"}
-	UDPOptions = []string{"escape", "expect", "reply"}
+	TCPOptions = append([]string{"escape", "expect", "max", "read", "tls", "until"}, tlsconf.Keys...)
+	UDPOptions = append([]string{"escape", "expect", "reply"}, tlsconf.Keys...)
 )
 
 // Driver is a raw TCP or UDP protocol.Protocol.
@@ -62,6 +63,7 @@ type Driver struct {
 	read   int  // TCP: exact bytes to read, 0 if not set
 	max    int  // TCP: read cap
 	useTLS bool // TCP
+	tlsCfg *tls.Config
 	reply  bool // UDP: wait for a datagram
 }
 
@@ -150,6 +152,19 @@ func newDriver(network string, target protocol.Target, timeout time.Duration) (*
 		if d.read > 0 && len(d.until) > 0 {
 			return nil, errors.New("tcp: use read or until, not both")
 		}
+		files := tlsconf.FromOptions(target.Options)
+		if d.useTLS {
+			d.tlsCfg = &tls.Config{
+				MinVersion:         tls.VersionTLS12,
+				ServerName:         d.host,
+				InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
+			}
+			if err := files.Apply(d.tlsCfg, target.InsecureSkipVerify, true); err != nil {
+				return nil, fmt.Errorf("tcp: %w", err)
+			}
+		} else if err := files.Apply(nil, false, false); err != nil {
+			return nil, fmt.Errorf("tcp: %w", err)
+		}
 	case "udp":
 		if len(d.body) == 0 {
 			return nil, errors.New("udp: a datagram to send is required (pass -body)")
@@ -159,6 +174,9 @@ func newDriver(network string, target protocol.Target, timeout time.Duration) (*
 		}
 		if len(d.expect) > 0 {
 			d.reply = true
+		}
+		if err := tlsconf.FromOptions(target.Options).Apply(nil, false, false); err != nil {
+			return nil, fmt.Errorf("udp: %w", err)
 		}
 	}
 	return d, nil
@@ -227,10 +245,7 @@ func (d *Driver) doTCP(ctx context.Context) (protocol.Result, []byte) {
 		err  error
 	)
 	if d.useTLS {
-		td := &tls.Dialer{NetDialer: &dialer, Config: &tls.Config{
-			ServerName:         d.host,
-			InsecureSkipVerify: d.target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
-		}}
+		td := &tls.Dialer{NetDialer: &dialer, Config: d.tlsCfg.Clone()}
 		conn, err = td.DialContext(ctx, "tcp", d.addr)
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", d.addr)

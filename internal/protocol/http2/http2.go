@@ -24,8 +24,12 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
+
+// Options are the -opt keys this driver accepts.
+var Options = tlsconf.Keys
 
 // Driver is an HTTP/2 protocol.Protocol.
 type Driver struct {
@@ -44,9 +48,19 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 		return nil, fmt.Errorf("http2: parsing target URL: %w", urlerr.Inner(err))
 	}
 
-	transport := &http2.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: target.InsecureSkipVerify}, //nolint:gosec // opt-in, see protocol.Target
+	tlsOn := u.Scheme != "http"
+	var cfg *tls.Config
+	if tlsOn {
+		cfg = &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			ServerName:         u.Hostname(),
+			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
+		}
 	}
+	if err := tlsconf.FromOptions(target.Options).Apply(cfg, target.InsecureSkipVerify, tlsOn); err != nil {
+		return nil, fmt.Errorf("http2: %w", err)
+	}
+	transport := &http2.Transport{TLSClientConfig: cfg}
 
 	if u.Scheme == "http" {
 		// h2c: speak HTTP/2 framing directly over a plain TCP

@@ -89,8 +89,8 @@ func TestProtocolIteration_DriverWithoutOptionsSaysSo(t *testing.T) {
 	tg := wireTestTarget("http1")
 	tg.Options = map[string]string{"read": "64"}
 	_, _, err := protocolIteration("http1", tg, 0)
-	if err == nil || !strings.Contains(err.Error(), "takes no options") {
-		t.Fatalf("err = %v, want \"takes no options\"", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown option read") {
+		t.Fatalf("err = %v, want an unknown option error", err)
 	}
 }
 

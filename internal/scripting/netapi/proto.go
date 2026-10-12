@@ -551,7 +551,7 @@ func (c *ProtoClient) MQTT(ctx context.Context, mode string, call ProtoCall) (*P
 // kafkaConnOptions are the options that make up a Kafka client. They are
 // the same for every call of one client. The rest of a call's options
 // describe the job.
-var kafkaConnOptions = []string{"client_id", "sasl", "username", "acks", "compression"}
+var kafkaConnOptions = append([]string{"client_id", "sasl", "username", "acks", "compression"}, tlsconf.Keys...)
 
 // Kafka does one Kafka job. mode is produce, consume, roundtrip or admin.
 // The client is kept for the next call with the same connection options.
@@ -718,6 +718,7 @@ func (c *ProtoClient) GRPC(ctx context.Context, call ProtoCall) (*ProtoReply, er
 			gc.Method = v
 		case "encoding":
 			gc.Encoding = v
+		case "ca_file", "cert_file", "key_file", "tls_server_name":
 		default:
 			return nil, fmt.Errorf("grpc: unknown option %s (want method, body, headers, encoding, timeout, insecure)", k)
 		}
@@ -748,13 +749,15 @@ func (c *ProtoClient) GRPC(ctx context.Context, call ProtoCall) (*ProtoReply, er
 }
 
 func (c *ProtoClient) grpcConn(call ProtoCall) (*grpc.Conn, error) {
-	key := fmt.Sprintf("%s|insecure=%t", call.URL, call.Insecure)
+	files := tlsconf.FromOptions(call.Options)
+	key := fmt.Sprintf("%s|insecure=%t|ca=%s|cert=%s|key=%s|name=%s",
+		call.URL, call.Insecure, files.CAFile, files.CertFile, files.KeyFile, files.ServerName)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if g, ok := c.grpcConns[key]; ok {
 		return g, nil
 	}
-	g, err := grpc.NewConn(call.URL, call.Insecure)
+	g, err := grpc.NewConnWithFiles(call.URL, call.Insecure, files)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,6 @@
 package protocol_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +42,7 @@ func TestBadURLErrorsDoNotRepeatThePassword(t *testing.T) {
 		"safety":   func() error { _, err := safety.TargetHost(mk("redis").URL); return err },
 		"socket":   func() error { _, err := socket.NewTCP(mk("tcp"), time.Second); return err },
 		"http1": func() error {
-			_, err := http1.New(mk("http"), time.Second).Do(context.Background())
+			_, err := http1.New(mk("http"), time.Second)
 			return err
 		},
 	}

@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 // Script mode (FR-CLI-19). A scenario script calls a gRPC method with JSON.
@@ -50,7 +51,13 @@ type methodTypes struct {
 // NewConn returns a Conn for target (a bare host:port, grpc:// or grpcs://).
 // It never fails because the server is unreachable, only for a bad target.
 func NewConn(target string, insecureSkipVerify bool) (*Conn, error) {
-	addr, creds, err := parseAddr(target, insecureSkipVerify)
+	return NewConnWithFiles(target, insecureSkipVerify, tlsconf.Files{})
+}
+
+// NewConnWithFiles is NewConn with the shared TLS file options. The files
+// are read here, when the connection is built.
+func NewConnWithFiles(target string, insecureSkipVerify bool, files tlsconf.Files) (*Conn, error) {
+	addr, creds, err := parseAddr(target, insecureSkipVerify, files)
 	if err != nil {
 		return nil, fmt.Errorf("grpc: %w", err)
 	}

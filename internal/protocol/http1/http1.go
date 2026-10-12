@@ -10,11 +10,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
+
+// Options are the -opt keys this driver accepts.
+var Options = tlsconf.Keys
 
 // Driver is an HTTP/1.1 protocol.Protocol. It reuses one *http.Client
 // (and the connection pool behind it) across every call to Do, so
@@ -36,20 +41,41 @@ type Driver struct {
 // individual request; it should normally be shorter than the executor's
 // own run duration. A timeout of 0 means no per-request timeout beyond
 // ctx's own deadline.
-func New(target protocol.Target, timeout time.Duration) *Driver {
+//
+// New returns an error for a bad URL or bad TLS files. A target that is
+// merely unreachable is reported by Do.
+func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
+	u, err := url.Parse(target.URL)
+	if err != nil {
+		return nil, fmt.Errorf("http1: parsing target URL: %w", urlerr.Inner(err))
+	}
+	tlsOn := u.Scheme == "https"
+	var cfg *tls.Config
+	if tlsOn {
+		cfg = &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			ServerName:         u.Hostname(),
+			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
+		}
+	}
+	if err := tlsconf.FromOptions(target.Options).Apply(cfg, target.InsecureSkipVerify, tlsOn); err != nil {
+		return nil, fmt.Errorf("http1: %w", err)
+	}
 	transport := &http.Transport{
 		// An empty, non-nil map (rather than the default nil, which
 		// lets net/http populate it with an http2 upgrader when
 		// available) is what keeps this transport on HTTP/1.1 even
 		// against a server that offers HTTP/2 over TLS via ALPN.
-		TLSNextProto:    make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: target.InsecureSkipVerify}, //nolint:gosec // opt-in, see protocol.Target
+		TLSNextProto: make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
+	}
+	if cfg != nil {
+		transport.TLSClientConfig = cfg
 	}
 	return &Driver{
 		target:    target,
 		client:    &http.Client{Transport: transport, Timeout: timeout},
 		transport: transport,
-	}
+	}, nil
 }
 
 // Name implements protocol.Protocol.

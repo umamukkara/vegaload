@@ -21,8 +21,12 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
+
+// Options are the -opt keys this driver accepts.
+var Options = tlsconf.Keys
 
 // Driver is a WebSocket protocol.Protocol.
 type Driver struct {
@@ -46,11 +50,23 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 		return nil, fmt.Errorf("websocket: unsupported scheme %q, want ws:// or wss://", u.Scheme)
 	}
 
+	tlsOn := u.Scheme == "wss"
+	var cfg *tls.Config
+	if tlsOn {
+		cfg = &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			ServerName:         u.Hostname(),
+			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
+		}
+	}
+	if err := tlsconf.FromOptions(target.Options).Apply(cfg, target.InsecureSkipVerify, tlsOn); err != nil {
+		return nil, fmt.Errorf("websocket: %w", err)
+	}
 	return &Driver{
 		target: target,
 		dialer: &websocket.Dialer{
 			HandshakeTimeout: timeout,
-			TLSClientConfig:  &tls.Config{InsecureSkipVerify: target.InsecureSkipVerify}, //nolint:gosec // opt-in, see protocol.Target
+			TLSClientConfig:  cfg,
 		},
 	}, nil
 }
