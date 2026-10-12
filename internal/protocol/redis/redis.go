@@ -65,6 +65,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/url"
@@ -72,6 +73,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -127,6 +129,7 @@ type Driver struct {
 	password string
 	host     string
 	port     string
+	useTLS   bool
 
 	cmds    []command
 	minRows int
@@ -292,6 +295,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	}
 	d.host = u.Hostname()
 	d.port = port
+	d.useTLS = tlsMode != tlsOff
 
 	// MaxRetries -1 is one attempt. The library turns 0 into three retries,
 	// so 0 would hide a failure. ReadTimeout and WriteTimeout -1 mean no
@@ -624,7 +628,37 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 	if strings.HasPrefix(err.Error(), "redis:") {
 		return errors.New(d.redact(err.Error()))
 	}
-	return fmt.Errorf("redis: %s", d.redact(err.Error()))
+	msg := "redis: " + err.Error()
+	if hint := tlsMismatchHint(d.useTLS, err); hint != "" {
+		msg += " " + hint
+	}
+	return errors.New(d.redact(msg))
+}
+
+// tlsMismatchHint is a sentence added when the failure looks like the wrong
+// TLS mode. It is a hint. A timeout, a refused dial, and any other error
+// get no sentence.
+func tlsMismatchHint(tlsOn bool, err error) string {
+	if err == nil || isNetTimeout(err) || isDial(err) {
+		return ""
+	}
+	if tlsOn && strings.Contains(err.Error(), "first record does not look like a TLS handshake") {
+		return "The server may not use TLS. Try redis://"
+	}
+	closed := errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET)
+	if !closed {
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "read" {
+			closed = true
+		}
+	}
+	if !closed {
+		return ""
+	}
+	if tlsOn {
+		return "The server may not use TLS. Try redis://"
+	}
+	return "The server may need TLS. Try rediss://"
 }
 
 func callTimedOut(ctx context.Context, err error) bool {
