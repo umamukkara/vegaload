@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 func liveBase(t *testing.T) (string, map[string]string) {
@@ -27,6 +28,7 @@ func liveBase(t *testing.T) (string, map[string]string) {
 	if v := os.Getenv("VEGALOAD_TEST_REDIS_TLS"); v != "" {
 		opts["tls"] = v
 	}
+	tlsconf.LiveFiles(opts, "VEGALOAD_TEST_REDIS")
 	return raw, opts
 }
 

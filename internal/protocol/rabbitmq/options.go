@@ -343,6 +343,7 @@ func (d *Driver) checkModeOptions() error {
 		"username": true, "password_env": true, "vhost": true, "tls": true,
 		"connection": true, "channels": true, "heartbeat": true,
 		"connection_name": true, "allow_writes": true, "allow_admin": true,
+		"ca_file": true, "cert_file": true, "key_file": true, "tls_server_name": true,
 		"mode": true,
 	}
 	var job []string

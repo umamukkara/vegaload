@@ -32,14 +32,15 @@ import (
 
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 // Options are the -opt keys this driver accepts.
-var Options = []string{
+var Options = append([]string{
 	"mode", "path", "size", "fill", "expect_size", "expect_sha256", "expect",
 	"limit", "hidden", "username", "password_env", "tls", "tls_verify", "tls_max",
 	"sessions", "connection", "data_host", "epsv", "allow_writes", "allow_admin",
-}
+}, tlsconf.Keys...)
 
 const (
 	modeConnect   = "connect"
@@ -163,6 +164,9 @@ func build(target protocol.Target, timeout time.Duration, password *string, scri
 	if err := d.readConn(password); err != nil {
 		return nil, err
 	}
+	if err := d.applyTLS(); err != nil {
+		return nil, err
+	}
 	if !script {
 		if err := d.readJob(); err != nil {
 			return nil, err
@@ -173,16 +177,28 @@ func build(target protocol.Target, timeout time.Duration, password *string, scri
 		return nil, fmt.Errorf("ftp: %w", err)
 	}
 	d.pool = &pool{slots: make(chan struct{}, d.sessions), salt: hex.EncodeToString(salt[:])}
-	if d.tlsMode != "none" {
-		d.tlsCfg = &tls.Config{
-			ServerName:         d.host,
-			MinVersion:         tls.VersionTLS12,
-			MaxVersion:         d.tlsMax,
-			InsecureSkipVerify: !d.tlsVerify,
-			ClientSessionCache: tls.NewLRUClientSessionCache(32),
-		}
-	}
 	return d, nil
+}
+
+func (d *Driver) applyTLS() error {
+	files := tlsconf.FromOptions(d.target.Options)
+	if d.tlsMode == "none" {
+		if err := files.Apply(nil, false, false); err != nil {
+			return fmt.Errorf("ftp: %w", err)
+		}
+		return nil
+	}
+	d.tlsCfg = &tls.Config{
+		ServerName:         d.host,
+		MinVersion:         tls.VersionTLS12,
+		MaxVersion:         d.tlsMax,
+		InsecureSkipVerify: !d.tlsVerify,
+		ClientSessionCache: tls.NewLRUClientSessionCache(32),
+	}
+	if err := files.Apply(d.tlsCfg, !d.tlsVerify, true); err != nil {
+		return fmt.Errorf("ftp: %w", err)
+	}
+	return nil
 }
 
 // Call returns a driver for one script call. It shares the pool. Close

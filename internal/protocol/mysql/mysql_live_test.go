@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 // These tests need a real MySQL or MariaDB server. They run only when
@@ -57,6 +58,7 @@ func liveTarget(t *testing.T, sql string, opts map[string]string) protocol.Targe
 	for k, v := range opts {
 		o[k] = v
 	}
+	tlsconf.LiveFiles(o, "VEGALOAD_TEST_MYSQL")
 	return protocol.Target{URL: base, Body: []byte(sql), Options: o}
 }
 

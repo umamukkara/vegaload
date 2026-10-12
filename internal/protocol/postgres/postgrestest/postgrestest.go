@@ -5,6 +5,7 @@
 package postgrestest
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
@@ -49,6 +50,7 @@ type Server struct {
 	ln       net.Listener
 	handler  Handler
 	password string
+	tlsConf  *tls.Config
 
 	mu      sync.Mutex
 	conns   int
@@ -59,21 +61,30 @@ type Server struct {
 // Start starts a server on a free local port and stops it when the test ends.
 func Start(t testing.TB, h Handler) *Server {
 	t.Helper()
-	return start(t, h, "")
+	return start(t, h, "", nil)
+}
+
+// StartTLS is Start, and it accepts a TLS connection when the client asks.
+func StartTLS(t testing.TB, h Handler, cfg *tls.Config) *Server {
+	t.Helper()
+	if cfg == nil {
+		t.Fatal("StartTLS needs a TLS config")
+	}
+	return start(t, h, "", cfg)
 }
 
 // StartWithPassword is Start, but a client must log in with this password.
 func StartWithPassword(t testing.TB, h Handler, password string) *Server {
 	t.Helper()
-	return start(t, h, password)
+	return start(t, h, password, nil)
 }
 
-func start(t testing.TB, h Handler, password string) *Server {
+func start(t testing.TB, h Handler, password string, tlsConf *tls.Config) *Server {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{ln: ln, handler: h, password: password}
+	s := &Server{ln: ln, handler: h, password: password, tlsConf: tlsConf}
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -115,9 +126,10 @@ func (s *Server) Startups() []map[string]string {
 	return append([]map[string]string(nil), s.startup...)
 }
 
-func (s *Server) serve(c net.Conn) {
-	defer c.Close()
-	be := pgproto3.NewBackend(c, c)
+func (s *Server) serve(raw net.Conn) {
+	conn := raw
+	defer func() { _ = conn.Close() }()
+	be := pgproto3.NewBackend(conn, conn)
 
 	var params map[string]string
 	for params == nil {
@@ -126,8 +138,24 @@ func (s *Server) serve(c net.Conn) {
 			return
 		}
 		switch m := msg.(type) {
-		case *pgproto3.SSLRequest, *pgproto3.GSSEncRequest:
-			if _, err := c.Write([]byte("N")); err != nil {
+		case *pgproto3.SSLRequest:
+			if s.tlsConf == nil {
+				if _, err := conn.Write([]byte("N")); err != nil {
+					return
+				}
+				continue
+			}
+			if _, err := conn.Write([]byte("S")); err != nil {
+				return
+			}
+			tc := tls.Server(conn, s.tlsConf)
+			if err := tc.Handshake(); err != nil {
+				return
+			}
+			conn = tc
+			be = pgproto3.NewBackend(conn, conn)
+		case *pgproto3.GSSEncRequest:
+			if _, err := conn.Write([]byte("N")); err != nil {
 				return
 			}
 		case *pgproto3.StartupMessage:

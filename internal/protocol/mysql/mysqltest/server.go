@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -59,6 +60,7 @@ type Server struct {
 	ln       net.Listener
 	handler  Handler
 	password string
+	tlsConf  *tls.Config
 
 	mu      sync.Mutex
 	conns   int
@@ -71,21 +73,30 @@ type Server struct {
 // Start starts a server on a free local port and stops it when the test ends.
 func Start(t testing.TB, h Handler) *Server {
 	t.Helper()
-	return start(t, h, "")
+	return start(t, h, "", nil)
+}
+
+// StartTLS is Start, and it offers TLS with cfg after the client asks.
+func StartTLS(t testing.TB, h Handler, cfg *tls.Config) *Server {
+	t.Helper()
+	if cfg == nil {
+		t.Fatal("StartTLS needs a TLS config")
+	}
+	return start(t, h, "", cfg)
 }
 
 // StartWithPassword is Start, but a client must log in with this password.
 func StartWithPassword(t testing.TB, h Handler, password string) *Server {
 	t.Helper()
-	return start(t, h, password)
+	return start(t, h, password, nil)
 }
 
-func start(t testing.TB, h Handler, password string) *Server {
+func start(t testing.TB, h Handler, password string, tlsConf *tls.Config) *Server {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{ln: ln, handler: h, password: password}
+	s := &Server{ln: ln, handler: h, password: password, tlsConf: tlsConf}
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -145,27 +156,41 @@ func (s *Server) sqlMode() string {
 	return s.mode
 }
 
-func (s *Server) serve(c net.Conn) {
-	defer c.Close()
-	br := bufio.NewReader(c)
-	bw := bufio.NewWriter(c)
+func (s *Server) serve(raw net.Conn) {
+	conn := raw
+	defer func() { _ = conn.Close() }()
+	bw := bufio.NewWriter(conn)
 
 	salt := make([]byte, 20)
 	if _, err := rand.Read(salt); err != nil {
 		return
 	}
-	if writePacket(bw, 0, greeting(salt)) != nil || bw.Flush() != nil {
+	if writePacket(bw, 0, greeting(salt, s.tlsConf != nil)) != nil || bw.Flush() != nil {
 		return
 	}
-	seq, payload, err := readPacket(br)
+	// Read this packet from the raw connection. A buffered reader would
+	// pull the following TLS handshake into its buffer and hide it.
+	seq, payload, err := readPacket(conn)
 	if err != nil {
 		return
 	}
-	// A client that insists on TLS sends a short request. This server has
-	// no TLS, so the connection is closed and the client can fall back.
+	// A client that wants TLS sends a short request, then starts the handshake.
 	if len(payload) == 32 && binary.LittleEndian.Uint32(payload)&(1<<11) != 0 {
-		return
+		if s.tlsConf == nil {
+			return
+		}
+		tc := tls.Server(conn, s.tlsConf)
+		if err := tc.Handshake(); err != nil {
+			return
+		}
+		conn = tc
+		seq, payload, err = readPacket(conn)
+		if err != nil {
+			return
+		}
+		bw = bufio.NewWriter(conn)
 	}
+	br := bufio.NewReader(conn)
 	user, db, auth, err := parseHandshake(payload)
 	if err != nil {
 		return
@@ -256,10 +281,11 @@ const (
 	comReset     byte = 0x1f
 )
 
-func greeting(salt []byte) []byte {
-	// Protocol 4.1 greeting. No SSL capability, so a client that prefers
-	// TLS stays on plain text.
-	const caps uint32 = 1 | // long password
+func greeting(salt []byte, ssl bool) []byte {
+	// Protocol 4.1 greeting. The SSL capability is advertised only when this
+	// server has a certificate. Without it, a client that prefers TLS stays
+	// on plain text.
+	caps := uint32(1 | // long password
 		1<<1 | // found rows
 		1<<2 | // long flag
 		1<<3 | // connect with db
@@ -268,7 +294,10 @@ func greeting(salt []byte) []byte {
 		1<<15 | // secure connection
 		1<<16 | // multi statements
 		1<<17 | // multi results
-		1<<19 // plugin auth
+		1<<19) // plugin auth
+	if ssl {
+		caps |= 1 << 11 // client SSL
+	}
 	var b []byte
 	b = append(b, 10)
 	b = append(b, "5.7.40"...)
