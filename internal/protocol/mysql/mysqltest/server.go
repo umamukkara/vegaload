@@ -200,13 +200,15 @@ func (s *Server) serve(raw net.Conn) {
 		_ = bw.Flush()
 		return
 	}
-	if writePacket(bw, seq+1, okPacket(0, 0, statusAutocommit)) != nil || bw.Flush() != nil {
-		return
-	}
+	// Record before the OK packet. The client returns as soon as it reads
+	// that packet, and a test may call Logins in that same moment.
 	s.mu.Lock()
 	s.conns++
 	s.logins = append(s.logins, Login{User: user, DB: db})
 	s.mu.Unlock()
+	if writePacket(bw, seq+1, okPacket(0, 0, statusAutocommit)) != nil || bw.Flush() != nil {
+		return
+	}
 
 	for {
 		_, payload, err = readPacket(br)

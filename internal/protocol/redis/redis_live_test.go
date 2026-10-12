@@ -28,6 +28,8 @@ func liveBase(t *testing.T) (string, map[string]string) {
 	if v := os.Getenv("VEGALOAD_TEST_REDIS_TLS"); v != "" {
 		opts["tls"] = v
 	}
+	// VEGALOAD_TEST_REDIS_CA_FILE, _CERT_FILE, _KEY_FILE and _TLS_SERVER_NAME
+	// are copied into ca_file, cert_file, key_file and tls_server_name.
 	tlsconf.LiveFiles(opts, "VEGALOAD_TEST_REDIS")
 	return raw, opts
 }
