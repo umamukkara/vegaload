@@ -648,22 +648,25 @@ func TestTLSMismatchHint(t *testing.T) {
 	need := "The server may need TLS. Try rediss://"
 	plain := "The server may not use TLS. Try redis://"
 	cases := []struct {
-		name string
-		tls  bool
-		err  error
-		want string
+		name   string
+		tls    bool
+		worked bool
+		err    error
+		want   string
 	}{
-		{"eof", false, io.EOF, need},
-		{"eof on tls", true, io.EOF, plain},
-		{"reset", false, fmt.Errorf("read tcp: %w", syscall.ECONNRESET), need},
-		{"read op", false, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("forcibly closed")}, need},
-		{"timeout", false, &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}, ""},
-		{"dial", false, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, ""},
-		{"handshake", true, errors.New("tls: first record does not look like a TLS handshake"), plain},
+		{"eof", false, false, io.EOF, need},
+		{"eof on tls", true, false, io.EOF, plain},
+		{"eof after a reply", false, true, io.EOF, ""},
+		{"eof on tls after a reply", true, true, io.EOF, ""},
+		{"reset", false, false, fmt.Errorf("read tcp: %w", syscall.ECONNRESET), need},
+		{"read op", false, false, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("forcibly closed")}, need},
+		{"timeout", false, false, &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}, ""},
+		{"dial", false, false, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, ""},
+		{"handshake", true, false, errors.New("tls: first record does not look like a TLS handshake"), plain},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := tlsMismatchHint(c.tls, c.err)
+			got := tlsMismatchHint(c.tls, c.worked, c.err)
 			if got != c.want {
 				t.Fatalf("got %q, want %q", got, c.want)
 			}
@@ -765,5 +768,67 @@ func TestName(t *testing.T) {
 	d := mustDriver(t, "redis://127.0.0.1:1", "PING", nil, 0)
 	if d.Name() != "redis" {
 		t.Fatal(d.Name())
+	}
+}
+
+// A server that answered once and then drops the connection is not a TLS
+// mismatch, so no hint is added.
+func TestRun_NoHintAfterTheServerAnswered(t *testing.T) {
+	srv := redistest.Start(t, nil)
+	srv.CloseAfterUserCommands(2)
+	d := mustDriver(t, srv.URL(), "PING", map[string]string{"pool": "1"}, time.Second)
+	res, err := d.Do(context.Background())
+	if err != nil || !res.Success {
+		t.Fatalf("first call: err=%v res=%v", err, res.Err)
+	}
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == nil {
+		t.Fatal("second call: want an error from the dropped connection")
+	}
+	if strings.Contains(res.Err.Error(), "TLS") {
+		t.Fatalf("hint after the server answered: %v", res.Err)
+	}
+}
+
+// A driver made by Call keeps the TLS flag and the "server answered" flag of
+// its parent, so its hint points the right way.
+func TestCall_KeepsTheTLSHintState(t *testing.T) {
+	plain := redistest.Start(t, nil)
+	parent, err := NewConn(protocol.Target{URL: "rediss://" + plain.Addr(), Options: map[string]string{"tls": "skip-verify"}}, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	child, err := parent.Call(map[string]string{}, []byte("PING"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _ := child.Run(context.Background())
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "The server may not use TLS. Try redis://") {
+		t.Fatalf("tls client, plain server, through Call: %v", res.Err)
+	}
+
+	srv := redistest.Start(t, nil)
+	srv.CloseAfterUserCommands(2)
+	parent2, err := NewConn(protocol.Target{URL: srv.URL(), Options: map[string]string{"pool": "1"}}, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent2.Close()
+	for i := 1; i <= 3; i++ {
+		c, err := parent2.Call(map[string]string{}, []byte("PING"), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, _ := c.Run(context.Background())
+		if i == 1 && r.Err != nil {
+			t.Fatalf("call 1: %v", r.Err)
+		}
+		if r.Err != nil && strings.Contains(r.Err.Error(), "TLS") {
+			t.Fatalf("call %d: hint after the server answered: %v", i, r.Err)
+		}
 	}
 }

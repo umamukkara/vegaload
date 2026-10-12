@@ -73,6 +73,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -130,6 +131,10 @@ type Driver struct {
 	host     string
 	port     string
 	useTLS   bool
+	// worked is set when this client has had any reply from the server. It is
+	// shared with the drivers that Call returns. After that, a dropped
+	// connection is not a TLS mismatch, so no hint is added.
+	worked *atomic.Bool
 
 	cmds    []command
 	minRows int
@@ -172,6 +177,8 @@ func (d *Driver) Call(opts map[string]string, body []byte, timeout time.Duration
 		host:        d.host,
 		port:        d.port,
 		client:      d.client,
+		useTLS:      d.useTLS,
+		worked:      d.worked,
 		owns:        false,
 	}
 	nd.target.Body = body
@@ -192,6 +199,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		script:  connOnly,
 		owns:    true,
 		maxRows: defaultMaxRows,
+		worked:  new(atomic.Bool),
 	}
 
 	u, err := url.Parse(target.URL)
@@ -488,6 +496,9 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	defer cancel()
 
 	values, lastCount, got, err := d.exec(ctx)
+	if _, isReply := serverMessage(err); err == nil || isReply {
+		d.markWorked()
+	}
 	rep := Reply{Values: values, RowCount: lastCount}
 	if len(values) > 0 {
 		rep.Value = values[len(values)-1]
@@ -629,7 +640,7 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 		return errors.New(d.redact(err.Error()))
 	}
 	msg := "redis: " + err.Error()
-	if hint := tlsMismatchHint(d.useTLS, err); hint != "" {
+	if hint := tlsMismatchHint(d.useTLS, d.hasWorked(), err); hint != "" {
 		msg += " " + hint
 	}
 	return errors.New(d.redact(msg))
@@ -637,9 +648,9 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 
 // tlsMismatchHint is a sentence added when the failure looks like the wrong
 // TLS mode. It is a hint. A timeout, a refused dial, and any other error
-// get no sentence.
-func tlsMismatchHint(tlsOn bool, err error) string {
-	if err == nil || isNetTimeout(err) || isDial(err) {
+// get no sentence. Once the server has answered, there is no hint.
+func tlsMismatchHint(tlsOn, worked bool, err error) string {
+	if worked || err == nil || isNetTimeout(err) || isDial(err) {
 		return ""
 	}
 	if tlsOn && strings.Contains(err.Error(), "first record does not look like a TLS handshake") {
@@ -659,6 +670,16 @@ func tlsMismatchHint(tlsOn bool, err error) string {
 		return "The server may not use TLS. Try redis://"
 	}
 	return "The server may need TLS. Try rediss://"
+}
+
+func (d *Driver) markWorked() {
+	if d.worked != nil {
+		d.worked.Store(true)
+	}
+}
+
+func (d *Driver) hasWorked() bool {
+	return d.worked != nil && d.worked.Load()
 }
 
 func callTimedOut(ctx context.Context, err error) bool {
