@@ -232,10 +232,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.BoolVar(&cfg.NoOpen, "no-open", false, "don't auto-open the HTML report in the default browser")
 
 	// FR-CLI-11: pass/fail thresholds.
-	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\" or \"fast: error_rate < 1%\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
+	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\", \"p95{step=\\\"login\\\"} < 300ms\" or \"p95{protocol=\\\"ftp\\\"} < 500ms\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
 	fs.BoolVar(&cfg.AbortOnBreach, "abort-on-breach", false, "stop the run as soon as a threshold is broken beyond recovery, and exit 3. Needs -threshold or -thresholds. Thresholds like \"failed < 5\" stop it at once; statistics like p95 or error_rate must stay broken for three seconds, after a warm-up. Thresholds that need the whole run (rps, total >=) wait for the end")
 	fs.DurationVar(&cfg.AbortGrace, "abort-grace", 0, "with -abort-on-breach: the warm-up in which p95, error_rate and other statistics are not judged (default: 5s, or a quarter of the run if shorter; 0 means no warm-up)")
-	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, or the output of `vegaload diagnose -output json`)")
+	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, with optional step, protocol and op, or the output of `vegaload diagnose -output json`)")
 
 	// FR-CLI-14: baseline gate.
 	fs.StringVar(&cfg.BaselinePath, "baseline", "", "JSON report of an earlier run (from -out) to compare this run with. If p95 or the error rate is worse by more than -max-regression, the run exits 3")

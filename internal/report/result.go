@@ -123,6 +123,16 @@ type MeasureResult struct {
 	Latency Latency `json:"latency"`
 }
 
+// Operation returns the operation with the given name.
+func (p ProtocolResult) Operation(name string) (OperationResult, bool) {
+	for _, o := range p.Operations {
+		if o.Name == name {
+			return o, true
+		}
+	}
+	return OperationResult{}, false
+}
+
 // Protocol returns the protocol with the given name, if the run recorded one.
 func (r *Result) Protocol(name string) (ProtocolResult, bool) {
 	for _, p := range r.Protocols {
@@ -214,7 +224,11 @@ type ThresholdResult struct {
 	Metric string `json:"metric"`
 	// Step is the step the threshold judges (FR-CLI-18). It is empty for a
 	// threshold on the whole run.
-	Step     string `json:"step,omitempty"`
+	Step string `json:"step,omitempty"`
+	// Protocol and Op are the protocol, and optionally one operation, the
+	// threshold judges. They are empty for a threshold on the whole run.
+	Protocol string `json:"protocol,omitempty"`
+	Op       string `json:"op,omitempty"`
 	Operator string `json:"operator"`
 	Value    string `json:"value"`
 	Observed string `json:"observed"`

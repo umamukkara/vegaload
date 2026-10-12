@@ -10,10 +10,13 @@
 // measured. It never looks outside the run, and it produces a verdict
 // (pass or fail) and nothing else.
 //
-// A threshold can judge one named step of a scenario (FR-CLI-18) instead of
-// the whole run, by adding a selector after the metric:
+// A threshold can judge one named step of a scenario (FR-CLI-18), one
+// protocol, or one operation of a protocol, instead of the whole run, by
+// adding a selector after the metric:
 //
 //	login-fast: p95{step="login"} < 300ms
+//	ftp-fast: p95{protocol="ftp"} < 500ms
+//	rt-ok: error_rate{protocol="ftp",op="roundtrip"} < 1%
 package threshold
 
 import (
@@ -66,7 +69,12 @@ type Threshold struct {
 	Metric string
 	// Step is the named step this threshold judges (FR-CLI-18). It is empty
 	// for a threshold on the whole run.
-	Step     string
+	Step string
+	// Protocol and Op judge one protocol, or one operation of it. They are
+	// empty for a threshold on the whole run. A threshold names a step or a
+	// protocol, never both. Op is set only together with Protocol.
+	Protocol string
+	Op       string
 	Operator string
 	// Value is the canonical text of the limit: a duration such as
 	// "300ms", or a plain number such as "0.01".
@@ -86,8 +94,8 @@ func Parse(expr string) (Threshold, error) {
 	}
 
 	name := ""
-	// The name ends at the first ':' that comes before a step selector, so a
-	// step name such as "a:b" inside {step="a:b"} is not read as a name.
+	// The name ends at the first ':' that comes before a selector, so a
+	// name such as "a:b" inside {step="a:b"} is not read as a name.
 	colon, brace := strings.Index(expr, ":"), strings.Index(expr, "{")
 	if colon >= 0 && (brace < 0 || colon < brace) {
 		name = strings.TrimSpace(expr[:colon])
@@ -97,17 +105,17 @@ func Parse(expr string) (Threshold, error) {
 		}
 	}
 
-	step := ""
+	step, protocol, operation := "", "", ""
 	var metric, rest string
 	if lb := strings.Index(expr, "{"); lb >= 0 {
 		var err error
-		if step, rest, err = parseSelector(expr[lb:]); err != nil {
+		if step, protocol, operation, rest, err = parseSelector(expr[lb:]); err != nil {
 			return Threshold{}, fmt.Errorf("threshold %q: %w", orig, err)
 		}
 		metric = strings.ToLower(strings.TrimSpace(expr[:lb]))
 		rest = strings.TrimSpace(rest)
 		if !strings.HasPrefix(rest, "<") && !strings.HasPrefix(rest, ">") {
-			return Threshold{}, fmt.Errorf("threshold %q: want an operator (<, <=, >, >=) and a value after the step selector", orig)
+			return Threshold{}, fmt.Errorf("threshold %q: want an operator (<, <=, >, >=) and a value after the selector", orig)
 		}
 	} else {
 		idx := strings.IndexAny(expr, "<>")
@@ -133,8 +141,8 @@ func Parse(expr string) (Threshold, error) {
 	if valueText == "" {
 		return Threshold{}, fmt.Errorf("threshold %q: missing value after %q", orig, op)
 	}
-	if step != "" && metric == "check_rate" {
-		return Threshold{}, fmt.Errorf("threshold %q: check_rate is for the whole run and cannot target a step", orig)
+	if (step != "" || protocol != "" || operation != "") && metric == "check_rate" {
+		return Threshold{}, fmt.Errorf("threshold %q: check_rate is for the whole run and cannot target a step or a protocol", orig)
 	}
 
 	limit, canonical, err := parseValue(k, metric, valueText)
@@ -142,23 +150,28 @@ func Parse(expr string) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("threshold %q: %w", orig, err)
 	}
 
-	t := Threshold{Name: name, Metric: metric, Step: step, Operator: op, Value: canonical, limit: limit}
+	t := Threshold{Name: name, Metric: metric, Step: step, Protocol: protocol, Op: operation, Operator: op, Value: canonical, limit: limit}
 	if t.Name == "" {
 		t.Name = t.core()
 	}
 	return t, nil
 }
 
-// parseSelector reads {step="name"} from the start of s and returns the
-// step name and the text after the closing brace. The name may be in
-// double or single quotes, or bare when it has no spaces or braces.
-func parseSelector(s string) (step, rest string, err error) {
+func selectorFormError() error {
+	return fmt.Errorf("the selector must be {step=NAME}, {protocol=NAME}, or {protocol=NAME,op=NAME}, for example p95{step=\"login\"} < 300ms, p95{protocol=\"ftp\"} < 500ms, or error_rate{protocol=\"ftp\",op=\"roundtrip\"} < 1%%")
+}
+
+// parseSelector reads a selector from the start of s and returns the step,
+// protocol and operation, plus the text after the closing brace. A name may
+// be in double or single quotes, or bare when it has no spaces or braces.
+// The keys are case sensitive.
+func parseSelector(s string) (step, protocol, operation, rest string, err error) {
 	end := strings.Index(s, "}")
-	if q := strings.IndexAny(s, "\"'"); q >= 0 && q < end {
+	if q := strings.IndexAny(s, "\"'"); q >= 0 && (end < 0 || q < end) {
 		// A quoted name may contain '}' so look for the closing quote first.
 		closeQ := strings.IndexByte(s[q+1:], s[q])
 		if closeQ < 0 {
-			return "", "", fmt.Errorf("the step name in the selector is missing its closing quote")
+			return "", "", "", "", fmt.Errorf("the selector is missing its closing quote")
 		}
 		end = strings.Index(s[q+1+closeQ:], "}")
 		if end >= 0 {
@@ -166,32 +179,120 @@ func parseSelector(s string) (step, rest string, err error) {
 		}
 	}
 	if end < 0 {
-		return "", "", fmt.Errorf("the step selector is missing its closing '}'")
+		return "", "", "", "", fmt.Errorf("the selector is missing its closing '}'")
 	}
-	inner := strings.TrimSpace(s[1:end])
-	key, val, ok := strings.Cut(inner, "=")
-	if !ok || strings.TrimSpace(key) != "step" {
-		return "", "", fmt.Errorf("the selector must be {step=NAME}, for example p95{step=\"login\"} < 300ms")
+	pairs, err := splitSelector(s[1:end])
+	if err != nil {
+		return "", "", "", "", err
 	}
-	val = strings.TrimSpace(val)
+	if len(pairs) == 0 {
+		return "", "", "", "", selectorFormError()
+	}
+	for _, pair := range pairs {
+		key, val, ok := strings.Cut(pair, "=")
+		if !ok {
+			return "", "", "", "", selectorFormError()
+		}
+		key = strings.TrimSpace(key)
+		val, err = selectorName(key, strings.TrimSpace(val))
+		if err != nil {
+			return "", "", "", "", err
+		}
+		switch key {
+		case "step":
+			if step != "" {
+				return "", "", "", "", fmt.Errorf("the selector names %q more than once", key)
+			}
+			step = val
+		case "protocol":
+			if protocol != "" {
+				return "", "", "", "", fmt.Errorf("the selector names %q more than once", key)
+			}
+			protocol = val
+		case "op":
+			if operation != "" {
+				return "", "", "", "", fmt.Errorf("the selector names %q more than once", key)
+			}
+			operation = val
+		default:
+			return "", "", "", "", selectorFormError()
+		}
+	}
+	if step != "" && (protocol != "" || operation != "") {
+		return "", "", "", "", fmt.Errorf("a selector cannot name a step and a protocol")
+	}
+	if operation != "" && protocol == "" {
+		return "", "", "", "", fmt.Errorf("op needs a protocol, for example error_rate{protocol=\"ftp\",op=\"roundtrip\"} < 1%%")
+	}
+	if step == "" && protocol == "" {
+		return "", "", "", "", selectorFormError()
+	}
+	return step, protocol, operation, s[end+1:], nil
+}
+
+func splitSelector(inner string) ([]string, error) {
+	var parts []string
+	var b strings.Builder
+	var quote byte
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if quote != 0 {
+			b.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			quote = c
+			b.WriteByte(c)
+			continue
+		}
+		if c == ',' {
+			parts = append(parts, strings.TrimSpace(b.String()))
+			b.Reset()
+			continue
+		}
+		b.WriteByte(c)
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("the selector is missing its closing quote")
+	}
+	if s := strings.TrimSpace(b.String()); s != "" {
+		parts = append(parts, s)
+	}
+	return parts, nil
+}
+
+func selectorName(key, val string) (string, error) {
+	if key != "step" && key != "protocol" && key != "op" {
+		return "", selectorFormError()
+	}
 	if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
 		val = val[1 : len(val)-1]
 	}
 	if val == "" {
-		return "", "", fmt.Errorf("the step name in the selector is empty")
+		return "", fmt.Errorf("the %s name in the selector is empty", key)
 	}
 	if strings.ContainsAny(val, "\"'") {
-		return "", "", fmt.Errorf("a step name with a quote mark cannot be used in a threshold")
+		return "", fmt.Errorf("a %s name with a quote mark cannot be used in a threshold", key)
 	}
-	return val, s[end+1:], nil
+	return val, nil
 }
 
-// selector is the text after the metric that names the step, or "".
+// selector is the text after the metric that names the step, protocol or
+// operation, or "".
 func (t Threshold) selector() string {
-	if t.Step == "" {
+	switch {
+	case t.Step != "":
+		return fmt.Sprintf("{step=%q}", t.Step)
+	case t.Protocol != "" && t.Op != "":
+		return fmt.Sprintf("{protocol=%q,op=%q}", t.Protocol, t.Op)
+	case t.Protocol != "":
+		return fmt.Sprintf("{protocol=%q}", t.Protocol)
+	default:
 		return ""
 	}
-	return fmt.Sprintf("{step=%q}", t.Step)
 }
 
 // core is the metric, selector, operator and value as text.
@@ -273,7 +374,7 @@ func (t Threshold) Expression() string {
 func Evaluate(ts []Threshold, res *report.Result) []report.ThresholdResult {
 	out := make([]report.ThresholdResult, 0, len(ts))
 	for _, t := range ts {
-		r := report.ThresholdResult{Name: t.Name, Metric: t.Metric, Step: t.Step, Operator: t.Operator, Value: t.Value}
+		r := report.ThresholdResult{Name: t.Name, Metric: t.Metric, Step: t.Step, Protocol: t.Protocol, Op: t.Op, Operator: t.Operator, Value: t.Value}
 		if t.Step != "" {
 			s, ok := res.Step(t.Step)
 			if !ok {
@@ -282,6 +383,19 @@ func Evaluate(ts []Threshold, res *report.Result) []report.ThresholdResult {
 				continue
 			}
 			view := &report.Result{Total: s.Total, Failed: s.Failed, ErrorRate: s.ErrorRate, Latency: s.Latency, Elapsed: res.Elapsed}
+			observed := observe(t.Metric, view)
+			r.Observed = formatObserved(t.Metric, observed)
+			r.Passed = compare(observed, t.Operator, t.limit)
+			out = append(out, r)
+			continue
+		}
+		if t.Protocol != "" {
+			view, ok := protocolView(res, t.Protocol, t.Op)
+			if !ok {
+				r.Observed = noProtocolCalls(t)
+				out = append(out, r)
+				continue
+			}
 			observed := observe(t.Metric, view)
 			r.Observed = formatObserved(t.Metric, observed)
 			r.Passed = compare(observed, t.Operator, t.limit)
@@ -322,6 +436,36 @@ func AllPassed(rs []report.ThresholdResult) bool {
 		}
 	}
 	return true
+}
+
+func noProtocolCalls(t Threshold) string {
+	if t.Op != "" {
+		return fmt.Sprintf("no calls to protocol %q op %q ran", t.Protocol, t.Op)
+	}
+	return fmt.Sprintf("no calls to protocol %q ran", t.Protocol)
+}
+
+// protocolView is the protocol's, or one operation's, totals and latency,
+// with the run's elapsed time so rps is calls of that protocol per second
+// of the run. ok is false when that protocol or operation recorded nothing.
+func protocolView(res *report.Result, protocol, op string) (*report.Result, bool) {
+	p, ok := res.Protocol(protocol)
+	if !ok || p.Total == 0 {
+		return nil, false
+	}
+	view := &report.Result{Total: p.Total, Failed: p.Failed, ErrorRate: p.ErrorRate, Latency: p.Latency, Elapsed: res.Elapsed}
+	if op == "" {
+		return view, true
+	}
+	o, ok := p.Operation(op)
+	if !ok || o.Total == 0 {
+		return nil, false
+	}
+	view.Total = o.Total
+	view.Failed = o.Failed
+	view.ErrorRate = o.ErrorRate
+	view.Latency = o.Latency
+	return view, true
 }
 
 func observe(metric string, res *report.Result) float64 {

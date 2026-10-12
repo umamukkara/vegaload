@@ -68,6 +68,20 @@ func (t Threshold) LiveBreach(res *report.Result) (observed string, breached boo
 		if !ok || s.Total < need {
 			return "", false
 		}
+	case t.Protocol != "":
+		total := int64(0)
+		if p, ok := res.Protocol(t.Protocol); ok {
+			if t.Op != "" {
+				if o, ok := p.Operation(t.Op); ok {
+					total = o.Total
+				}
+			} else {
+				total = p.Total
+			}
+		}
+		if total < need {
+			return "", false
+		}
 	case t.Metric == "check_rate":
 		var total int64
 		for _, c := range res.Checks {

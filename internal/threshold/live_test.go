@@ -18,21 +18,24 @@ func mustParse(t *testing.T, s string) Threshold {
 
 func TestLive_Kinds(t *testing.T) {
 	cases := map[string]LiveKind{
-		"failed < 5":           LiveSticky,
-		"failed <= 5":          LiveSticky,
-		"max < 1s":             LiveSticky,
-		"total < 100":          LiveSticky,
-		"min > 1ms":            LiveSticky,
-		"failed > 5":           LiveNone,
-		"total >= 1000":        LiveNone,
-		"min < 1s":             LiveNone,
-		"rps >= 100":           LiveNone,
-		"p95 < 300ms":          LiveSustained,
-		"error_rate < 1%":      LiveSustained,
-		"check_rate >= 99%":    LiveSustained,
-		`p99{step="x"} < 1s`:   LiveSustained,
-		`failed{step="x"} < 1`: LiveSticky,
-		"mean < 1s":            LiveSustained,
+		"failed < 5":                             LiveSticky,
+		"failed <= 5":                            LiveSticky,
+		"max < 1s":                               LiveSticky,
+		"total < 100":                            LiveSticky,
+		"min > 1ms":                              LiveSticky,
+		"failed > 5":                             LiveNone,
+		"total >= 1000":                          LiveNone,
+		"min < 1s":                               LiveNone,
+		"rps >= 100":                             LiveNone,
+		"p95 < 300ms":                            LiveSustained,
+		"error_rate < 1%":                        LiveSustained,
+		"check_rate >= 99%":                      LiveSustained,
+		`p99{step="x"} < 1s`:                     LiveSustained,
+		`failed{step="x"} < 1`:                   LiveSticky,
+		`p95{protocol="ftp"} < 1s`:               LiveSustained,
+		`error_rate{protocol="ftp",op="x"} < 1%`: LiveSustained,
+		`failed{protocol="ftp"} < 1`:             LiveSticky,
+		"mean < 1s":                              LiveSustained,
 	}
 	for expr, want := range cases {
 		if got := mustParse(t, expr).Live(); got != want {
@@ -80,6 +83,24 @@ func TestLiveBreach_NeedsEvidence(t *testing.T) {
 	checks := &report.Result{Total: 50, Checks: []report.CheckResult{{Name: "a", Passes: 10, Fails: 20}}}
 	if _, b := cr.LiveBreach(checks); !b {
 		t.Error("a low check rate with 30 checks should breach")
+	}
+
+	// A protocol that has not run, or has too few calls, is not a breach.
+	pt := mustParse(t, `error_rate{protocol="ftp"} < 1%`)
+	if _, b := pt.LiveBreach(enough); b {
+		t.Error("a protocol that never ran is settled at the end, not live")
+	}
+	fewProto := &report.Result{Total: 50, Protocols: []report.ProtocolResult{{Name: "ftp", Total: 5, ErrorRate: 1}}}
+	if _, b := pt.LiveBreach(fewProto); b {
+		t.Error("5 calls is too few to judge a protocol error rate")
+	}
+	slowProto := &report.Result{Total: 50, Protocols: []report.ProtocolResult{{Name: "ftp", Total: 30, ErrorRate: 1}}}
+	if _, b := pt.LiveBreach(slowProto); !b {
+		t.Error("30 failed ftp calls should breach")
+	}
+	op := mustParse(t, `error_rate{protocol="ftp",op="roundtrip"} < 1%`)
+	if _, b := op.LiveBreach(slowProto); b {
+		t.Error("an operation that never ran is not a live breach")
 	}
 
 	// A threshold that is not live is never a live breach.

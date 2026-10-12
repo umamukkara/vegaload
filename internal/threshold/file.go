@@ -13,6 +13,8 @@ type fileEntry struct {
 	Name     string          `json:"name"`
 	Metric   string          `json:"metric"`
 	Step     string          `json:"step"`
+	Protocol string          `json:"protocol"`
+	Op       string          `json:"op"`
 	Operator string          `json:"operator"`
 	Value    json.RawMessage `json:"value"`
 }
@@ -84,9 +86,20 @@ func fromEntries(data []byte) ([]Threshold, error) {
 		if err != nil {
 			return nil, fmt.Errorf("threshold %d: value: %w", i+1, err)
 		}
+		if e.Step != "" && (e.Protocol != "" || e.Op != "") {
+			return nil, fmt.Errorf("threshold %d: a selector cannot name a step and a protocol", i+1)
+		}
+		if e.Op != "" && e.Protocol == "" {
+			return nil, fmt.Errorf("threshold %d: op needs a protocol", i+1)
+		}
 		metric := e.Metric
-		if e.Step != "" {
+		switch {
+		case e.Step != "":
 			metric += fmt.Sprintf("{step=%q}", e.Step)
+		case e.Protocol != "" && e.Op != "":
+			metric += fmt.Sprintf("{protocol=%q,op=%q}", e.Protocol, e.Op)
+		case e.Protocol != "":
+			metric += fmt.Sprintf("{protocol=%q}", e.Protocol)
 		}
 		expr := metric + " " + e.Operator + " " + val
 		if e.Name != "" {
