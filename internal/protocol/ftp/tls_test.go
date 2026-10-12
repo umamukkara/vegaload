@@ -104,6 +104,47 @@ func TestTLSFiles_Handshake(t *testing.T) {
 	}
 }
 
+func TestTLS_DataAndControlLabels(t *testing.T) {
+	m := tlstest.New(t)
+	other := tlstest.New(t)
+	t.Setenv("FTP_PW", "certificate")
+	s := ftptest.StartTLSConfig(t, m.ServerConfig(false))
+	s.Apply(ftptest.Config{
+		Users: map[string]string{"load": "certificate"},
+		Files: map[string][]byte{"/pub/a.bin": []byte("hello")},
+	})
+	s.DataTLS(other.ServerConfig(false))
+	data := runFTP(t, s.URL(), map[string]string{
+		"mode": "download", "path": "/pub/a.bin", "tls": "explicit",
+		"username": "load", "password_env": "FTP_PW",
+		"ca_file": m.CACertPath, "tls_server_name": tlstest.Name,
+	})
+	if data.Success || data.Err == nil {
+		t.Fatal(data.Err)
+	}
+	msg := data.Err.Error()
+	if !strings.Contains(msg, "(data)") || !strings.Contains(msg, "use -insecure for a test server") || strings.Contains(msg, "(control)") {
+		t.Fatal(msg)
+	}
+	if strings.Contains(msg, "certificate") || !strings.Contains(msg, "****") {
+		t.Fatalf("redaction: %s", msg)
+	}
+
+	ctrl := ftptest.StartImplicitTLS(t)
+	ctrl.Apply(ftptest.Config{Users: map[string]string{"load": "certificate"}})
+	res := runFTP(t, ctrl.URL(), map[string]string{
+		"mode": "connect", "tls": "implicit",
+		"username": "load", "password_env": "FTP_PW",
+	})
+	if res.Success || res.Err == nil {
+		t.Fatal(res.Err)
+	}
+	msg = res.Err.Error()
+	if !strings.Contains(msg, "(control)") || strings.Contains(msg, "(data)") || strings.Contains(msg, "certificate") || !strings.Contains(msg, "****") {
+		t.Fatal(msg)
+	}
+}
+
 func TestTLSFiles_CallKeepsFiles(t *testing.T) {
 	m := tlstest.New(t)
 	s := ftptest.StartTLSConfig(t, m.ServerConfig(false))

@@ -43,6 +43,7 @@ type Server struct {
 	ln       net.Listener
 	implicit bool
 	tlsConf  *tls.Config
+	dataTLS  *tls.Config
 
 	mu        sync.Mutex
 	cfg       Config
@@ -277,6 +278,14 @@ func (s *Server) ReplyOn(cmd string, code int, text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reply[strings.ToUpper(cmd)] = replySpec{code, text}
+}
+
+// DataTLS makes data connections present this certificate instead of the
+// control connection's certificate.
+func (s *Server) DataTLS(cfg *tls.Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dataTLS = cfg
 }
 
 // Delay waits before every reply.
@@ -621,12 +630,16 @@ func (c *ctrl) acceptData(ln net.Listener, ch chan dataConn) {
 	}
 	c.s.mu.Lock()
 	c.s.dataN++
+	conf := c.s.tlsConf
+	if c.s.dataTLS != nil {
+		conf = c.s.dataTLS
+	}
 	c.s.mu.Unlock()
 	out := dataConn{c: dc}
-	if c.protP && c.s.tlsConf != nil {
+	if c.protP && conf != nil {
 		// The handshake waits until the transfer command has been
 		// answered. Doing it here stalls the command loop.
-		out.c = tls.Server(dc, c.s.tlsConf)
+		out.c = tls.Server(dc, conf)
 	}
 	select {
 	case ch <- out:
