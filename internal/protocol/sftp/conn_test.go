@@ -206,6 +206,22 @@ func TestTimeout_EveryStall(t *testing.T) {
 	}
 }
 
+func TestTimeout_HandshakeDelayCloses(t *testing.T) {
+	s := srv(t)
+	s.HandshakeDelay(400 * time.Millisecond)
+	before := s.OpenConns()
+	goroutines := runtime.NumGoroutine()
+	res, _ := run(t, s, modeConnect, nil, "", 100*time.Millisecond)
+	if res.Success || !strings.Contains(res.Err.Error(), "timed out") {
+		t.Fatal(res.Err)
+	}
+	waitOpen(t, s, before)
+	waitIdle(goroutines + 8)
+	if runtime.NumGoroutine() > goroutines+8 {
+		t.Fatalf("goroutines %d, before %d", runtime.NumGoroutine(), goroutines)
+	}
+}
+
 func TestTimeout_HandshakeAndAuth(t *testing.T) {
 	s := srv(t)
 	s.HandshakeDelay(5 * time.Second)

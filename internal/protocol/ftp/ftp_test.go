@@ -496,6 +496,28 @@ func TestUpload_EmptyFileOverTLS(t *testing.T) {
 	}
 }
 
+func TestTimeout_BannerDelayCloses(t *testing.T) {
+	s := srv(t)
+	s.Delay(400 * time.Millisecond)
+	before := s.OpenConns()
+	goroutines := runtime.NumGoroutine()
+	res, _ := run(t, s.URL(), modeConnect, nil, "", 100*time.Millisecond)
+	if res.Success || !strings.Contains(res.Err.Error(), "timed out") {
+		t.Fatal(res.Err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && s.OpenConns() > before {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.OpenConns() > before {
+		t.Fatalf("open connections = %d, before %d", s.OpenConns(), before)
+	}
+	waitIdle(goroutines + 8)
+	if runtime.NumGoroutine() > goroutines+8 {
+		t.Fatalf("goroutines %d, before %d", runtime.NumGoroutine(), goroutines)
+	}
+}
+
 func TestTimeout_StallEndsTheCall(t *testing.T) {
 	s := srv(t)
 	for _, cmd := range []string{"RETR", "STOR", "LIST", "PASV", "226"} {
