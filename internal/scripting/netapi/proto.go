@@ -57,8 +57,9 @@ type ProtoCall struct {
 
 // ProtoFunctions lists the calls a script can make, by namespace: tcp.send,
 // mqtt.publish and so on. Each scripting language builds its globals from
-// this list, so they cannot differ. Kept out of line so the map is not
-// copied into every caller.
+// this list, so they cannot differ. It stays out of line so the compiler
+// does not copy this body into every caller. That copy is what makes the
+// binary larger.
 //
 //go:noinline
 func ProtoFunctions() map[string][]string {
