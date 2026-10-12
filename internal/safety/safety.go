@@ -9,6 +9,7 @@
 package safety
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -132,4 +133,22 @@ func ParseExtraPort(hostport string) (host string, port string) {
 // FormatLimits renders limits for a confirmation prompt or error message.
 func FormatLimits(l Limits) string {
 	return fmt.Sprintf("vus<=%d duration<=%s rate<=%s", l.MaxVUs, l.MaxDuration, strconv.FormatFloat(l.MaxRate, 'g', -1, 64))
+}
+
+// hostRefusal is a target the safety rules stopped before any bytes moved.
+type hostRefusal struct{ host string }
+
+func (e *hostRefusal) Error() string {
+	return fmt.Sprintf("host %q is not localhost or allowlisted (pass -yes, or add it with -allow-target)", e.host)
+}
+
+// HostRefusal refuses host. The caller records nothing for it.
+func HostRefusal(host string) error {
+	return &hostRefusal{host: host}
+}
+
+// IsHostRefusal reports whether err is a HostRefusal.
+func IsHostRefusal(err error) bool {
+	var h *hostRefusal
+	return errors.As(err, &h)
 }

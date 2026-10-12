@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/report"
 )
 
@@ -92,5 +95,34 @@ func TestCmdCompare_ReportWithoutProtocols(t *testing.T) {
 	}
 	if code := cmdCompare([]string{base, cand}); code != 0 {
 		t.Errorf("compare of reports with no protocols exited %d, want 0", code)
+	}
+}
+
+func TestCmdCompare_PrintsProtocolLinesWithoutGating(t *testing.T) {
+	dir := t.TempDir()
+	base := &report.Result{
+		Elapsed: 10 * time.Second, Total: 100, ErrorRate: 0,
+		Latency:   report.Latency{P95: 50 * time.Millisecond},
+		Protocols: []report.ProtocolResult{{Name: "ftp", Total: 10, ErrorRate: 0, Latency: report.Latency{P95: 10 * time.Millisecond}}},
+	}
+	cand := &report.Result{
+		Elapsed: 10 * time.Second, Total: 100, ErrorRate: 0,
+		Latency: report.Latency{P95: 50 * time.Millisecond},
+		Protocols: []report.ProtocolResult{
+			{Name: "ftp", Total: 10, ErrorRate: 0.2, Latency: report.Latency{P95: 80 * time.Millisecond}},
+			{Name: "redis", Total: 1, ErrorRate: 0, Latency: report.Latency{P95: time.Millisecond}},
+		},
+	}
+	baseline := writeCompareFixture(t, dir, "baseline.json", base)
+	candidate := writeCompareFixture(t, dir, "candidate.json", cand)
+	if code := cmdCompare([]string{baseline, candidate}); code != 0 {
+		t.Fatalf("a worse protocol p95 exited %d, want 0", code)
+	}
+	diff := compare.Compare(base, cand, compare.Options{})
+	var buf bytes.Buffer
+	printCompare(&buf, diff)
+	text := buf.String()
+	if !strings.Contains(text, "ftp  p95 10ms -> 80ms") || !strings.Contains(text, "redis  only in candidate") {
+		t.Fatalf("protocol lines:\n%s", text)
 	}
 }

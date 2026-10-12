@@ -77,8 +77,9 @@ func (c *Collector) RecordMeasure(protocol, name string, d time.Duration) {
 	p.measures[name] = append(samples, d)
 }
 
-// callName redacts a stored name. Kept out of line so both record methods
-// share one copy.
+// callName redacts a stored name. It stays out of line so the compiler does
+// not copy this body into every caller. That copy is what makes the binary
+// larger.
 //
 //go:noinline
 func callName(name string) string {
@@ -90,8 +91,9 @@ func callName(name string) string {
 }
 
 // protoLocked returns the protocol bucket, creating it or folding a new
-// name into "(other)" once the cap is reached. Kept out of line so both
-// record methods share one copy.
+// name into "(other)" once the cap is reached. It stays out of line so the
+// compiler does not copy this body into every caller. That copy is what
+// makes the binary larger.
 //
 //go:noinline
 func (c *Collector) protoLocked(name string) *callProto {
@@ -111,8 +113,9 @@ func (c *Collector) protoLocked(name string) *callProto {
 	return p
 }
 
-// opLocked returns the operation bucket. Kept out of line so the cap logic
-// is not copied into the record method.
+// opLocked returns the operation bucket. It stays out of line so the
+// compiler does not copy this body into every caller. That copy is what
+// makes the binary larger.
 //
 //go:noinline
 func (p *callProto) opLocked(name string) *callOp {

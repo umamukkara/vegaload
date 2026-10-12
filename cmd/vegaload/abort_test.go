@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vegaload/vegaload/internal/protocol/ftp/ftptest"
 	"github.com/vegaload/vegaload/internal/report"
 	"github.com/vegaload/vegaload/internal/threshold"
 )
@@ -243,5 +244,24 @@ func TestCmdRun_AbortGraceZero_JudgesStatisticsFromTheStart(t *testing.T) {
 	// automatic warm-up of 5 seconds this run would last longer.
 	if took := time.Since(began); took > 4800*time.Millisecond {
 		t.Errorf("took %s; with -abort-grace 0 it should stop after about 3s", took)
+	}
+}
+
+func TestCmdRun_AbortOnProtocolErrorRate(t *testing.T) {
+	srv := ftptest.Start(t)
+	dir := t.TempDir()
+	began := time.Now()
+	code := cmdRun([]string{
+		"-target", srv.URL(), "-protocol", "ftp", "-vus", "4", "-duration", "30s", "-no-report",
+		"-audit-log", filepath.Join(dir, "audit.log"),
+		"-opt", "mode=download", "-opt", "path=/missing.bin",
+		"-abort-on-breach", "-abort-grace", "0",
+		"-threshold", `error_rate{protocol="ftp"} < 5%`,
+	})
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3", code)
+	}
+	if took := time.Since(began); took > 8*time.Second {
+		t.Errorf("took %s; a broken protocol error rate should stop the run", took)
 	}
 }

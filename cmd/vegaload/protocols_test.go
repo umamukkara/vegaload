@@ -411,6 +411,8 @@ func TestCmdRun_FTPProtocol(t *testing.T) {
 	}
 	if res := run("-opt", "mode=roundtrip", "-opt", "path=/rt-{id}.bin", "-opt", "size=1KiB", "-opt", "allow_writes=true"); res.Total == 0 || res.Failed != 0 {
 		t.Errorf("roundtrip: total %d failed %d", res.Total, res.Failed)
+	} else {
+		assertPhaseCounts(t, res)
 	}
 	res := run("-opt", "mode=delete", "-opt", "path=/pub/gone.bin", "-opt", "allow_writes=true", "-opt", "allow_admin=true")
 	if res.Total == 0 {
@@ -468,6 +470,8 @@ func TestCmdRun_SFTPProtocol(t *testing.T) {
 	}
 	if res := run("-opt", "mode=roundtrip", "-opt", "path=/rt-{id}.bin", "-opt", "size=1KiB", "-opt", "allow_writes=true"); res.Total == 0 || res.Failed != 0 {
 		t.Errorf("roundtrip: total %d failed %d", res.Total, res.Failed)
+	} else {
+		assertPhaseCounts(t, res)
 	}
 	res := run("-opt", "mode=delete", "-opt", "path=/pub/gone.bin", "-opt", "allow_writes=true", "-opt", "allow_admin=true")
 	if res.Total == 0 {
@@ -559,6 +563,25 @@ func TestCmdRun_ScenarioRecordsProtocols(t *testing.T) {
 				t.Errorf("ftp measures = %+v", res.Protocols[2].Measures)
 			}
 		})
+	}
+}
+
+// A successful roundtrip records every phase, including one that finished
+// in under a millisecond. The count matches the calls.
+func assertPhaseCounts(t *testing.T, res report.Result) {
+	t.Helper()
+	if len(res.Protocols) != 1 {
+		t.Fatalf("protocols = %+v", res.Protocols)
+	}
+	p := res.Protocols[0]
+	counts := map[string]int64{}
+	for _, m := range p.Measures {
+		counts[m.Name] = m.Count
+	}
+	for _, name := range []string{"upload_time", "download_time", "delete_time"} {
+		if counts[name] != p.Total {
+			t.Errorf("%s %s count %d, calls %d, measures %+v", p.Name, name, counts[name], p.Total, p.Measures)
+		}
 	}
 }
 

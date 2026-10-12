@@ -1,6 +1,8 @@
 package compare
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,5 +218,46 @@ func TestCompare_ARunCountChangeAloneIsNotARegression(t *testing.T) {
 	}
 	if m := metric(got, "check_rate"); m == nil || m.Baseline != 0.5 || m.Candidate != 0.5 {
 		t.Errorf("overall rate should be the plain average: %+v", m)
+	}
+}
+
+func TestCompare_ProtocolLinesDoNotGate(t *testing.T) {
+	base := baseResult()
+	cand := baseResult()
+	base.Protocols = []report.ProtocolResult{{Name: "ftp", Total: 10, ErrorRate: 0, Latency: report.Latency{P95: 10 * time.Millisecond}}}
+	cand.Protocols = []report.ProtocolResult{
+		{Name: "ftp", Total: 10, ErrorRate: 0.5, Latency: report.Latency{P95: time.Second}},
+		{Name: "redis", Total: 2, ErrorRate: 0, Latency: report.Latency{P95: time.Millisecond}},
+	}
+	got := Compare(base, cand, Options{})
+	if got.Regressed {
+		t.Fatal("a protocol line must not change the verdict")
+	}
+	if len(got.Protocols) != 2 || got.Protocols[0].Status != "both" || got.Protocols[0].Name != "ftp" {
+		t.Fatalf("both: %+v", got.Protocols)
+	}
+	if got.Protocols[0].CandidateP95 <= got.Protocols[0].BaselineP95 || got.Protocols[0].ErrorDelta <= 0 {
+		t.Fatalf("ftp diff %+v", got.Protocols[0])
+	}
+	if got.Protocols[1].Name != "redis" || got.Protocols[1].Status != "candidate" {
+		t.Fatalf("candidate only %+v", got.Protocols[1])
+	}
+
+	onlyBase := baseResult()
+	onlyBase.Protocols = base.Protocols
+	gone := Compare(onlyBase, baseResult(), Options{})
+	if gone.Regressed || len(gone.Protocols) != 1 || gone.Protocols[0].Status != "baseline" {
+		t.Fatalf("only in baseline: regressed %v %+v", gone.Regressed, gone.Protocols)
+	}
+}
+
+func TestCompare_NoProtocolsOmitsTheField(t *testing.T) {
+	got := Compare(baseResult(), baseResult(), Options{})
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "protocols") {
+		t.Fatalf("compare JSON gained protocols: %s", b)
 	}
 }

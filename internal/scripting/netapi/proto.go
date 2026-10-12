@@ -27,6 +27,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/sftp"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
+	"github.com/vegaload/vegaload/internal/safety"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
@@ -57,8 +58,9 @@ type ProtoCall struct {
 
 // ProtoFunctions lists the calls a script can make, by namespace: tcp.send,
 // mqtt.publish and so on. Each scripting language builds its globals from
-// this list, so they cannot differ. Kept out of line so the map is not
-// copied into every caller.
+// this list, so they cannot differ. It stays out of line so the compiler
+// does not copy this body into every caller. That copy is what makes the
+// binary larger.
 //
 //go:noinline
 func ProtoFunctions() map[string][]string {
@@ -83,6 +85,9 @@ func ProtoFunctions() map[string][]string {
 func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*ProtoReply, error) {
 	start := time.Now()
 	reply, err := c.dispatch(ctx, name, call)
+	if reply == nil && safety.IsHostRefusal(err) {
+		reply = &ProtoReply{Refused: true, Error: err.Error()}
+	}
 	c.observeCall(ctx, name, time.Since(start), reply, err)
 	return reply, err
 }
@@ -470,6 +475,8 @@ type ProtoReply struct {
 	IsRabbit       bool
 	RabbitMessages []RabbitMessage
 	RabbitText     string
+	// Refused is true when the call was stopped before any bytes moved.
+	Refused bool
 	// IsXfer is true for an FTP or SFTP reply. XferEntries are the names a
 	// list or stat returned. XferText is the short answer. Times are UTC.
 	IsXfer      bool
@@ -561,34 +568,45 @@ func (c *ProtoClient) observeCall(ctx context.Context, name string, d time.Durat
 	}
 	c.calls.RecordCall(ns, fn, d, !reply.OK, reply.BytesSent, reply.BytesReceived)
 	if reply.IsXfer && (ns == "ftp" || ns == "sftp") {
-		recordXferMeasures(c.calls, ns, fn, reply.OK, reply.XferTiming)
+		RecordXferMeasures(c.calls, ns, fn, reply.OK, reply.XferTiming)
 	}
 }
 
-func knownProtoFn(ns, fn string) bool {
-	for _, name := range ProtoFunctions()[ns] {
-		if name == fn {
-			return true
+// protoFnSet is the script call list, built once from ProtoFunctions so
+// the check on every call does not allocate.
+var protoFnSet = func() map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	for ns, fns := range ProtoFunctions() {
+		set := map[string]struct{}{}
+		for _, fn := range fns {
+			set[fn] = struct{}{}
 		}
+		out[ns] = set
 	}
-	return false
+	return out
+}()
+
+// knownProtoFn reports whether a script can call namespace.fn.
+func knownProtoFn(ns, fn string) bool {
+	_, ok := protoFnSet[ns][fn]
+	return ok
 }
 
 // refusedBeforeSend is a call the safety rules or a missing write flag
 // stopped before any bytes moved. That is a script error, not a latency.
 func refusedBeforeSend(reply *ProtoReply) bool {
-	if reply.OK || reply.BytesSent != 0 || reply.BytesReceived != 0 {
-		return false
-	}
-	msg := reply.Error
-	return strings.Contains(msg, "allow_writes") ||
-		strings.Contains(msg, "allow_admin") ||
-		strings.Contains(msg, "needs {id}") ||
-		strings.Contains(msg, "not localhost") ||
-		strings.Contains(msg, "allowlisted")
+	return reply.Refused
 }
 
-// recordXferMeasures records the phases an FTP or SFTP call ran.
+// XferTimingFrom copies phase times from a file-transfer driver.
+func XferTimingFrom(t xfercommon.Timing) XferTiming {
+	return XferTiming{
+		ConnectMs: t.ConnectMs, LoginMs: t.LoginMs, TransferMs: t.TransferMs,
+		UploadMs: t.UploadMs, DownloadMs: t.DownloadMs, DeleteMs: t.DeleteMs,
+	}
+}
+
+// RecordXferMeasures records the phases an FTP or SFTP call ran.
 // The times are whole milliseconds, so a 0 can mean "did not run" or "ran in
 // under 1 ms". A call that worked ran every phase its mode has, so those are
 // recorded even at 0. A call that failed is recorded only for a phase that
@@ -596,7 +614,7 @@ func refusedBeforeSend(reply *ProtoReply) bool {
 // connect_time and login_time are recorded only above 0: a reused connection
 // reports 0, and a 0 would pull the percentiles down. A connect or login
 // under 1 ms is therefore not counted.
-func recordXferMeasures(rec CallRecorder, protocol, op string, ok bool, t XferTiming) {
+func RecordXferMeasures(rec CallRecorder, protocol, op string, ok bool, t XferTiming) {
 	phase := func(name string, ms int64) {
 		if ok || ms > 0 {
 			rec.RecordMeasure(protocol, name, time.Duration(ms)*time.Millisecond)
@@ -1368,7 +1386,7 @@ func (c *ProtoClient) timeoutFor(call ProtoCall) time.Duration {
 }
 
 func fromResult(res protocol.Result) *ProtoReply {
-	r := &ProtoReply{OK: res.Success, BytesSent: res.BytesSent, BytesReceived: res.BytesReceived}
+	r := &ProtoReply{OK: res.Success, BytesSent: res.BytesSent, BytesReceived: res.BytesReceived, Refused: res.Refused}
 	if res.Err != nil {
 		r.Error = res.Err.Error()
 	}

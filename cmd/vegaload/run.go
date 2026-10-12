@@ -47,6 +47,7 @@ import (
 	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/engine"
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 	"github.com/vegaload/vegaload/internal/report"
 	"github.com/vegaload/vegaload/internal/safety"
 	"github.com/vegaload/vegaload/internal/scripting/js"
@@ -231,10 +232,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.BoolVar(&cfg.NoOpen, "no-open", false, "don't auto-open the HTML report in the default browser")
 
 	// FR-CLI-11: pass/fail thresholds.
-	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\" or \"fast: error_rate < 1%\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
+	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\", \"p95{step=\\\"login\\\"} < 300ms\" or \"p95{protocol=\\\"ftp\\\"} < 500ms\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
 	fs.BoolVar(&cfg.AbortOnBreach, "abort-on-breach", false, "stop the run as soon as a threshold is broken beyond recovery, and exit 3. Needs -threshold or -thresholds. Thresholds like \"failed < 5\" stop it at once; statistics like p95 or error_rate must stay broken for three seconds, after a warm-up. Thresholds that need the whole run (rps, total >=) wait for the end")
 	fs.DurationVar(&cfg.AbortGrace, "abort-grace", 0, "with -abort-on-breach: the warm-up in which p95, error_rate and other statistics are not judged (default: 5s, or a quarter of the run if shorter; 0 means no warm-up)")
-	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, or the output of `vegaload diagnose -output json`)")
+	fs.StringVar(&thresholdsFile, "thresholds", "", "JSON file of thresholds (a list of {name, metric, operator, value}, with optional step, protocol and op, or the output of `vegaload diagnose -output json`)")
 
 	// FR-CLI-14: baseline gate.
 	fs.StringVar(&cfg.BaselinePath, "baseline", "", "JSON report of an earlier run (from -out) to compare this run with. If p95 or the error rate is worse by more than -max-regression, the run exits 3")
@@ -465,7 +466,7 @@ func buildSafetyCheck(cfg *runConfig) netapi.SafetyCheck {
 		if cfg.Yes {
 			return nil
 		}
-		return fmt.Errorf("host %q is not localhost or allowlisted (pass -yes, or add it with -allow-target)", host)
+		return safety.HostRefusal(host)
 	}
 }
 
@@ -493,8 +494,10 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 	op := protocolOp(driver.Name(), target.Options)
 	iter := func(ctx context.Context) error {
 		start := time.Now()
-		res, err := driver.Do(ctx)
-		recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err)
+		res, timing, timed, err := doProtocol(driver, ctx)
+		if recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err) && timed {
+			netapi.RecordXferMeasures(calls, driver.Name(), op, res.Success, netapi.XferTimingFrom(timing))
+		}
 		if err != nil {
 			return err
 		}
@@ -547,41 +550,44 @@ func oneOf(s string, allowed ...string) bool {
 	return false
 }
 
-func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName, op string, d time.Duration, res protocol.Result, err error) {
-	if rec == nil {
-		return
+// timedDriver is a driver that can report the phase times of the call it
+// just made. FTP and SFTP do. The times are not a field of protocol.Result,
+// because every other driver would then carry a type it does not use.
+type timedDriver interface {
+	DoTimed(ctx context.Context) (protocol.Result, xfercommon.Timing, error)
+}
+
+func doProtocol(driver protocol.Protocol, ctx context.Context) (protocol.Result, xfercommon.Timing, bool, error) {
+	if td, ok := driver.(timedDriver); ok {
+		res, timing, err := td.DoTimed(ctx)
+		return res, timing, true, err
+	}
+	res, err := driver.Do(ctx)
+	return res, xfercommon.Timing{}, false, err
+}
+
+func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName, op string, d time.Duration, res protocol.Result, err error) bool {
+	if rec == nil || driverRefused(res) {
+		return false
 	}
 	if err != nil {
 		if netapi.RunEnded(ctx) {
-			return
+			return false
 		}
 		rec.RecordCall(protocolName, op, d, true, res.BytesSent, res.BytesReceived)
-		return
+		return true
 	}
 	if !res.Success && netapi.RunEnded(ctx) {
-		return
-	}
-	if driverRefused(res) {
-		return
+		return false
 	}
 	rec.RecordCall(protocolName, op, d, !res.Success, res.BytesSent, res.BytesReceived)
+	return true
 }
 
 // driverRefused is a call the safety rules or a missing write flag stopped
 // before any bytes moved. It is a script or option error, not a latency.
 func driverRefused(res protocol.Result) bool {
-	if res.Success || res.Err == nil {
-		return false
-	}
-	if res.BytesSent != 0 || res.BytesReceived != 0 {
-		return false
-	}
-	msg := res.Err.Error()
-	return strings.Contains(msg, "allow_writes") ||
-		strings.Contains(msg, "allow_admin") ||
-		strings.Contains(msg, "needs {id}") ||
-		strings.Contains(msg, "not localhost") ||
-		strings.Contains(msg, "allowlisted")
+	return res.Refused
 }
 
 // scriptedIteration loads cfg.ScenarioPath (as JavaScript/TypeScript or

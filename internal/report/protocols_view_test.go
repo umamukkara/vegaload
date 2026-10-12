@@ -52,7 +52,7 @@ func TestShowProtocolsAndViews(t *testing.T) {
 		t.Fatalf("html missing the operation, measure, or bytes:\n%s", page)
 	}
 	text := MarkdownSummary(mixed)
-	if !strings.Contains(text, "### Protocols") || !strings.Contains(text, "<ftp>") || !strings.Contains(text, "upload_time") || !strings.Contains(text, "2.0 KiB") {
+	if !strings.Contains(text, "### Protocols") || !strings.Contains(text, "<ftp>") || !strings.Contains(text, "↳ roundtrip") || !strings.Contains(text, "upload_time") || !strings.Contains(text, "2.0 KiB") {
 		t.Fatalf("markdown:\n%s", text)
 	}
 

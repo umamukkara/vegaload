@@ -55,16 +55,30 @@ type CheckDiff struct {
 	Regressed     bool    `json:"regressed"`
 }
 
+// ProtocolDiff is one protocol compared across the two runs. It is printed
+// and never gated: a change here does not set Regressed.
+type ProtocolDiff struct {
+	Name           string  `json:"name"`
+	Status         string  `json:"status"` // "both", "baseline" (only in the baseline) or "candidate"
+	BaselineP95    float64 `json:"baseline_p95_ns,omitempty"`
+	CandidateP95   float64 `json:"candidate_p95_ns,omitempty"`
+	P95Delta       float64 `json:"p95_delta_ns,omitempty"`
+	BaselineError  float64 `json:"baseline_error_rate,omitempty"`
+	CandidateError float64 `json:"candidate_error_rate,omitempty"`
+	ErrorDelta     float64 `json:"error_rate_delta,omitempty"`
+}
+
 // Result is the structured outcome of Compare — the same shape printed
 // as text or JSON by `vegaload compare`, and returned by the MCP
 // compare_reports tool.
 type Result struct {
-	BaselinePath  string      `json:"baseline_path,omitempty"`
-	CandidatePath string      `json:"candidate_path,omitempty"`
-	Metrics       []Metric    `json:"metrics"`
-	Checks        []CheckDiff `json:"checks,omitempty"`
-	Regressed     bool        `json:"regressed"`
-	Notes         []string    `json:"notes"`
+	BaselinePath  string         `json:"baseline_path,omitempty"`
+	CandidatePath string         `json:"candidate_path,omitempty"`
+	Metrics       []Metric       `json:"metrics"`
+	Checks        []CheckDiff    `json:"checks,omitempty"`
+	Protocols     []ProtocolDiff `json:"protocols,omitempty"`
+	Regressed     bool           `json:"regressed"`
+	Notes         []string       `json:"notes"`
 }
 
 // Compare diffs candidate against baseline. Paths are optional labels
@@ -140,6 +154,7 @@ func Compare(baseline, candidate *report.Result, opts Options) Result {
 	if !opts.SkipChecks {
 		compareChecks(baseline, candidate, opts, &out)
 	}
+	out.Protocols = compareProtocols(baseline, candidate)
 
 	for _, m := range out.Metrics {
 		if m.Regressed {
@@ -174,6 +189,42 @@ func latencyMetric(name string, base, cand time.Duration, gate bool, ratio float
 		m.Regressed = true
 	}
 	return m
+}
+
+func compareProtocols(baseline, candidate *report.Result) []ProtocolDiff {
+	if len(baseline.Protocols) == 0 && len(candidate.Protocols) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []ProtocolDiff
+	for _, p := range baseline.Protocols {
+		seen[p.Name] = true
+		c, ok := candidate.Protocol(p.Name)
+		if !ok {
+			out = append(out, ProtocolDiff{
+				Name: p.Name, Status: "baseline",
+				BaselineP95: float64(p.Latency.P95), BaselineError: p.ErrorRate,
+			})
+			continue
+		}
+		out = append(out, ProtocolDiff{
+			Name: p.Name, Status: "both",
+			BaselineP95: float64(p.Latency.P95), CandidateP95: float64(c.Latency.P95),
+			P95Delta:      float64(c.Latency.P95 - p.Latency.P95),
+			BaselineError: p.ErrorRate, CandidateError: c.ErrorRate,
+			ErrorDelta: c.ErrorRate - p.ErrorRate,
+		})
+	}
+	for _, p := range candidate.Protocols {
+		if seen[p.Name] {
+			continue
+		}
+		out = append(out, ProtocolDiff{
+			Name: p.Name, Status: "candidate",
+			CandidateP95: float64(p.Latency.P95), CandidateError: p.ErrorRate,
+		})
+	}
+	return out
 }
 
 func overallRPS(r *report.Result) float64 {

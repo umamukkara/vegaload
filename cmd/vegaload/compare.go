@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -30,6 +31,7 @@ func cmdCompare(args []string) int {
 		fmt.Fprintln(fs.Output(), "non-zero when error rate or p95 latency regresses beyond the")
 		fmt.Fprintln(fs.Output(), "optional slack flags (defaults are strict: any increase fails).")
 		fmt.Fprintln(fs.Output(), "Checks are compared too: a check whose pass rate falls is a regression.")
+		fmt.Fprintln(fs.Output(), "Each protocol's p95 and error rate are printed. They do not change the exit code.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -95,7 +97,7 @@ func loadReportJSON(path string) (*report.Result, error) {
 	return &res, nil
 }
 
-func printCompare(w *os.File, r compare.Result) {
+func printCompare(w io.Writer, r compare.Result) {
 	fmt.Fprintf(w, "baseline:   %s\n", r.BaselinePath)
 	fmt.Fprintf(w, "candidate:  %s\n", r.CandidatePath)
 	if r.Regressed {
@@ -131,6 +133,25 @@ func printCompare(w *os.File, r compare.Result) {
 			}
 		}
 	}
+	if len(r.Protocols) > 0 {
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, "protocols")
+		for _, p := range r.Protocols {
+			switch p.Status {
+			case "baseline":
+				fmt.Fprintf(w, "%s  only in baseline  p95 %s  error rate %.2f%%\n",
+					p.Name, time.Duration(p.BaselineP95).Round(1e3), p.BaselineError*100)
+			case "candidate":
+				fmt.Fprintf(w, "%s  only in candidate  p95 %s  error rate %.2f%%\n",
+					p.Name, time.Duration(p.CandidateP95).Round(1e3), p.CandidateError*100)
+			default:
+				fmt.Fprintf(w, "%s  p95 %s -> %s (%s)  error rate %.2f%% -> %.2f%% (%+.2fpp)\n",
+					p.Name,
+					time.Duration(p.BaselineP95).Round(1e3), time.Duration(p.CandidateP95).Round(1e3), protocolDelta(p.P95Delta),
+					p.BaselineError*100, p.CandidateError*100, p.ErrorDelta*100)
+			}
+		}
+	}
 	fmt.Fprintln(w, "notes:")
 	for _, n := range r.Notes {
 		fmt.Fprintf(w, "  - %s\n", n)
@@ -150,6 +171,14 @@ func formatMetric(v float64, unit string) string {
 	default:
 		return fmt.Sprintf("%g", v)
 	}
+}
+
+func protocolDelta(ns float64) string {
+	d := time.Duration(ns).Round(1e3)
+	if ns >= 0 {
+		return "+" + d.String()
+	}
+	return d.String()
 }
 
 func formatDelta(m compare.Metric) string {

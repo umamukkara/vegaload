@@ -261,7 +261,7 @@ func (d *Driver) Do(parent context.Context) (protocol.Result, error) {
 // Run runs one call and returns the reply a scenario script reads.
 func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	if err := d.refuse(); err != nil {
-		return protocol.Result{Err: err}, Reply{}
+		return protocol.Result{Err: err, Refused: true}, Reply{}
 	}
 	ctx, cancel := context.WithTimeout(parent, d.timeout)
 	defer cancel()

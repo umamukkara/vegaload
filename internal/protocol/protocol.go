@@ -107,6 +107,9 @@ type Result struct {
 	// Err describes why Success is false. It is informational only —
 	// unlike Do's returned error, a non-nil Err does not stop the run.
 	Err error
+	// Refused is true when the call was stopped before any bytes moved.
+	// That is an option or safety error, not a latency.
+	Refused bool
 }
 
 // Protocol is implemented by each wire protocol driver. The engine package

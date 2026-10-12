@@ -487,7 +487,7 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	// Check every command first. If one is refused, nothing is sent.
 	for _, cmd := range d.cmds {
 		if err := refuse(cmd, d.allowWrites, d.allowAdmin, d.script); err != nil {
-			return protocol.Result{Err: err}, Reply{}
+			return protocol.Result{Err: err, Refused: true}, Reply{}
 		}
 	}
 

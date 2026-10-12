@@ -18,7 +18,9 @@ baselines. For a quick check that an API works under a few users, use the
   one into the next, under the same per-call allowlist described below.
   Scripts can also call `check(value, {name: test})` to count named
   assertions without failing the iteration; gate on them with the
-  `check_rate` threshold metric.
+  `check_rate` threshold metric. A threshold can target one step
+  (`p95{step="login"} < 300ms`), one protocol (`p95{protocol="ftp"} < 500ms`)
+  or one operation (`error_rate{protocol="ftp",op="roundtrip"} < 1%`).
 - `run_test` — run a load test against a scenario file or a protocol-direct
   target (`target` + `protocol`). Choose `executor`: `fixed-vus`, `ramp`,
   `step`, or `constant-arrival-rate`. Pass `baseline_path` (and `max_regression`,
@@ -32,7 +34,9 @@ baselines. For a quick check that an API works under a few users, use the
   `yes: true` is set — this MCP server has no terminal to prompt a human on,
   so treat `yes` as a deliberate choice, and confirm with the user before
   sending load at anything that isn't localhost or a target they named.
-- `get_results` — read back a previously-written report JSON file.
+- `get_results` — read back a previously-written report JSON file. It includes
+  `protocols` when the run recorded calls. A script HTTP 4xx or 5xx counts as
+  a success in that row.
 - `suggest_thresholds` — suggest p95 latency and error-rate ceilings from a
   baseline run's report.
 - `diagnose_failure` — rule-based findings on a report (failure rate, latency
@@ -40,7 +44,8 @@ baselines. For a quick check that an API works under a few users, use the
   `VEGALOAD_LLM_PROVIDER` is configured for this MCP server.
 - `compare_reports` — diff a candidate JSON report against a baseline
   (`vegaload compare`); reports whether error rate, p95 latency or a check's
-  pass rate regressed.
+  pass rate regressed. It also lists each protocol's p95 and error rate.
+  Those lines do not change the verdict.
 - `generate_from_spec` — write a runnable scenario (every operation as a named
   step) and a runbook of `vegaload run` commands from a JSON OpenAPI spec (JSON
   only, not YAML). The order is a guess: validate it and edit it.
