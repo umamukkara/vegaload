@@ -140,10 +140,12 @@ func (b *Broker) serve(c net.Conn) {
 		case 3:
 			qos := byte(hdr>>1) & 3
 			topic, rest := mstr(body)
+			var pid []byte
 			if qos > 0 {
-				b.send(c, append([]byte{0x40, 2}, rest[:2]...))
-				rest = rest[2:]
+				pid, rest = rest[:2], rest[2:]
 			}
+			// Record before PUBACK. The client returns as soon as it reads
+			// the ack, and a test may call Published in that same moment.
 			b.mu.Lock()
 			b.pubs = append(b.pubs, topic+"="+string(rest))
 			var targets []net.Conn
@@ -155,6 +157,9 @@ func (b *Broker) serve(c net.Conn) {
 				}
 			}
 			b.mu.Unlock()
+			if qos > 0 {
+				b.send(c, append([]byte{0x40, 2}, pid...))
+			}
 			pkt := append([]byte{byte(0x30)}, mvar(2+len(topic)+len(rest))...)
 			pkt = append(pkt, byte(len(topic)>>8), byte(len(topic)))
 			pkt = append(append(pkt, topic...), rest...)

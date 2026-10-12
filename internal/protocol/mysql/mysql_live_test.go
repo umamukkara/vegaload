@@ -20,6 +20,8 @@ import (
 // in the URL here, the test moves them into options). A password comes
 // from the environment variable named by VEGALOAD_TEST_MYSQL_PASSWORD_ENV.
 // The tests create and drop their own tables.
+// VEGALOAD_TEST_MYSQL_CA_FILE, _CERT_FILE, _KEY_FILE and _TLS_SERVER_NAME
+// are copied into ca_file, cert_file, key_file and tls_server_name when set.
 
 func liveTarget(t *testing.T, sql string, opts map[string]string) protocol.Target {
 	t.Helper()

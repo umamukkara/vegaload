@@ -17,6 +17,8 @@ import (
 // postgres://postgres@localhost:5432/postgres?sslmode=disable (the user and
 // sslmode may be put in the URL here, the test moves them into options).
 // A password comes from PGPASSWORD. The tests create and drop one table.
+// VEGALOAD_TEST_POSTGRES_CA_FILE, _CERT_FILE, _KEY_FILE and _TLS_SERVER_NAME
+// are copied into ca_file, cert_file, key_file and tls_server_name when set.
 
 func liveTarget(t *testing.T, sql string, opts map[string]string) protocol.Target {
 	t.Helper()
