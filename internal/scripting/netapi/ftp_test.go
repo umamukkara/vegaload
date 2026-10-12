@@ -18,8 +18,8 @@ func TestFTP_PoolAndReplyShape(t *testing.T) {
 		r, err := c.FTP(context.Background(), "download", ProtoCall{
 			URL: s.URL(), Options: map[string]string{"path": "/pub/data.bin", "expect_size": "9"},
 		})
-		if err != nil || !r.OK || r.FTPSize != 9 {
-			t.Fatalf("call %d: %v ok=%v size=%d err=%s", i, err, r.OK, r.FTPSize, r.Error)
+		if err != nil || !r.OK || r.XferSize != 9 {
+			t.Fatalf("call %d: %v ok=%v size=%d err=%s", i, err, r.OK, r.XferSize, r.Error)
 		}
 	}
 	if n := s.ConnCount(); n != 1 {
@@ -55,7 +55,7 @@ func TestFTP_PoolAndReplyShape(t *testing.T) {
 	rt, err := c.FTP(context.Background(), "roundtrip", ProtoCall{
 		URL: s.URL(), Options: map[string]string{"path": "/rt-{id}", "size": "8", "allow_writes": "true"},
 	})
-	if err != nil || !rt.OK || rt.FTPSize != 8 {
+	if err != nil || !rt.OK || rt.XferSize != 8 {
 		t.Fatalf("%v %+v", err, rt)
 	}
 	c.Close()

@@ -189,110 +189,21 @@ func (d *Driver) readConn(password *string) error {
 }
 
 func (d *Driver) readJob() error {
-	if len(d.target.Body) > xfercommon.MaxBody {
-		return fmt.Errorf("ftp: the body is %d bytes, the most is %d", len(d.target.Body), xfercommon.MaxBody)
-	}
-	d.mode = d.target.Option("mode", modeDownload)
-	switch d.mode {
-	case modeConnect, modeDownload, modeUpload, modeList, modeStat, modeDelete, modeRoundtrip:
-	default:
-		return fmt.Errorf("ftp: mode=%q, want connect, download, upload, list, stat, delete, or roundtrip", d.mode)
-	}
-	if err := d.rejectForeignOptions(); err != nil {
+	job, err := xfercommon.ParseJob("ftp", d.target.Options, d.target.Body, connOption, ".", true)
+	if err != nil {
 		return err
 	}
-	d.path = d.target.Option("path", "")
-	if d.mode == modeList && d.path == "" {
-		d.path = "."
-	}
-	if d.mode != modeConnect {
-		if err := xfercommon.CheckPath(d.path); err != nil {
-			return fmt.Errorf("ftp: %w", err)
-		}
-	}
-	if d.mode == modeList && strings.HasPrefix(d.path, "-") {
-		return fmt.Errorf("ftp: a list path must not start with -")
-	}
-	if _, ok := d.target.Options["size"]; ok {
-		n, err := xfercommon.ParseSize(d.target.Options["size"])
-		if err != nil {
-			return fmt.Errorf("ftp: %w", err)
-		}
-		d.size = n
-		d.sizeSet = true
-	}
-	d.fill = d.target.Option("fill", "random")
-	switch d.fill {
-	case "random", "zero", "text":
-	default:
-		return fmt.Errorf("ftp: fill=%q, want random, zero, or text", d.fill)
-	}
-	if _, ok := d.target.Options["expect_size"]; ok {
-		n, err := xfercommon.ParseSize(d.target.Options["expect_size"])
-		if err != nil {
-			return fmt.Errorf("ftp: %w", err)
-		}
-		d.expectSize = n
-		d.expectSizeSet = true
-	}
-	d.expectSHA = d.target.Option("expect_sha256", "")
-	if d.expectSHA != "" && !xfercommon.ValidSHA256(d.expectSHA) {
-		return fmt.Errorf("ftp: expect_sha256 must be 64 hex characters")
-	}
-	d.expect = d.target.Option("expect", "")
-	limit, err := d.target.OptionInt("limit", 1000)
-	if err != nil {
-		return fmt.Errorf("ftp: %w", err)
-	}
-	if limit < 1 || limit > 100000 {
-		return fmt.Errorf("ftp: limit must be from 1 to 100000")
-	}
-	d.limit = limit
-	d.hidden, err = d.target.OptionBool("hidden", false)
-	if err != nil {
-		return fmt.Errorf("ftp: %w", err)
-	}
-	if d.sizeSet && len(d.target.Body) > 0 {
-		return fmt.Errorf("ftp: use size or a body, not both")
-	}
-	if (d.mode == modeUpload || d.mode == modeRoundtrip) && !d.sizeSet && len(d.target.Body) == 0 {
-		return fmt.Errorf("ftp: upload needs size or a body")
-	}
-	return nil
-}
-
-// rejectForeignOptions refuses a job option that the mode does not use.
-// Connection options are checked in readConn.
-func (d *Driver) rejectForeignOptions() error {
-	bodyModes := map[string]bool{modeUpload: true, modeRoundtrip: true}
-	allowed := map[string]bool{"mode": true}
-	add := func(keys ...string) {
-		for _, k := range keys {
-			allowed[k] = true
-		}
-	}
-	switch d.mode {
-	case modeConnect:
-	case modeDownload:
-		add("path", "expect_size", "expect_sha256", "expect")
-	case modeUpload, modeRoundtrip:
-		add("path", "size", "fill")
-	case modeList:
-		add("path", "expect", "limit", "hidden")
-	case modeStat, modeDelete:
-		add("path")
-	}
-	for k := range d.target.Options {
-		if connOption(k) {
-			continue
-		}
-		if !allowed[k] {
-			return fmt.Errorf("ftp: option %s is not used in mode %s", k, d.mode)
-		}
-	}
-	if len(d.target.Body) > 0 && !bodyModes[d.mode] {
-		return fmt.Errorf("ftp: a body is not used in mode %s", d.mode)
-	}
+	d.mode = job.Mode
+	d.path = job.Path
+	d.size = job.Size
+	d.sizeSet = job.SizeSet
+	d.fill = job.Fill
+	d.expectSize = job.ExpectSize
+	d.expectSizeSet = job.ExpectSizeSet
+	d.expectSHA = job.ExpectSHA
+	d.expect = job.Expect
+	d.limit = job.Limit
+	d.hidden = job.Hidden
 	return nil
 }
 

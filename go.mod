@@ -10,11 +10,13 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/jlaffaye/ftp v0.2.0
+	github.com/pkg/sftp v1.13.9
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/twmb/franz-go v1.18.1
 	github.com/twmb/franz-go/pkg/kadm v1.16.0
 	github.com/twmb/franz-go/pkg/kmsg v1.9.0
+	golang.org/x/crypto v0.32.0
 	golang.org/x/net v0.32.0
 	google.golang.org/grpc v1.70.0
 	google.golang.org/protobuf v1.35.2
@@ -33,8 +35,8 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
-	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.21.0 // indirect

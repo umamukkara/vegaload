@@ -14,10 +14,8 @@ package ftp
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -52,32 +50,10 @@ const (
 	modeRoundtrip = "roundtrip"
 )
 
-// Entry is one name from a listing.
-type Entry struct {
-	Name string
-	Type string
-	Size int64
-	Time time.Time
-}
-
-// Timing is how long the parts of a call took, in milliseconds.
-type Timing struct {
-	ConnectMs  int64
-	LoginMs    int64
-	TransferMs int64
-	UploadMs   int64
-	DownloadMs int64
-	DeleteMs   int64
-}
-
-// Reply is what a call returns besides the byte counts.
-type Reply struct {
-	Entries []Entry
-	Size    int64
-	Total   int
-	Timing  Timing
-	Text    string
-}
+// Entry, Timing and Reply are the shared file-transfer values.
+type Entry = xfercommon.Entry
+type Timing = xfercommon.Timing
+type Reply = xfercommon.Reply
 
 // Driver is an FTP protocol.Protocol.
 type Driver struct {
@@ -121,8 +97,7 @@ type pool struct {
 	slots  chan struct{}
 	idle   []*session
 	closed bool
-	salt   string
-	seq    atomic.Uint64
+	ids    *xfercommon.IDs
 }
 
 type session struct {
@@ -172,11 +147,11 @@ func build(target protocol.Target, timeout time.Duration, password *string, scri
 			return nil, err
 		}
 	}
-	var salt [4]byte
-	if _, err := rand.Read(salt[:]); err != nil {
+	ids, err := xfercommon.NewIDs()
+	if err != nil {
 		return nil, fmt.Errorf("ftp: %w", err)
 	}
-	d.pool = &pool{slots: make(chan struct{}, d.sessions), salt: hex.EncodeToString(salt[:])}
+	d.pool = &pool{slots: make(chan struct{}, d.sessions), ids: ids}
 	return d, nil
 }
 
@@ -306,14 +281,14 @@ func (d *Driver) exec(ctx context.Context, held *atomic.Pointer[session]) (rep R
 	}
 	s.readN.Store(0)
 	s.writeN.Store(0)
-	id := d.pool.salt + "-" + fmt.Sprintf("%d", d.pool.seq.Add(1))
-	path := strings.ReplaceAll(d.path, "{id}", id)
+	id := d.pool.ids.Next()
+	path := xfercommon.ReplaceID(d.path, id)
 	if err = xfercommonCheck(path); err != nil {
 		return Reply{}, 0, 0, reused, err
 	}
 	body := append([]byte(nil), d.target.Body...)
 	if len(body) > 0 {
-		body = []byte(strings.ReplaceAll(string(body), "{id}", id))
+		body = []byte(xfercommon.ReplaceID(string(body), id))
 	}
 	start := time.Now()
 	switch d.mode {

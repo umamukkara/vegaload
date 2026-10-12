@@ -1,6 +1,6 @@
 // Package xfercommon holds helpers for a file transfer that do not know
-// which protocol is moving the bytes. FTP uses them. A later protocol can
-// use the same ones.
+// which protocol is moving the bytes. FTP and SFTP use them. This package
+// has no FTP code and no SSH code.
 package xfercommon
 
 import (

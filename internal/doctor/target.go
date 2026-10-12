@@ -49,6 +49,7 @@ var schemes = map[string]scheme{
 	"amqp":       {port: "5672", protocol: "rabbitmq"},
 	"amqps":      {port: "5671", protocol: "rabbitmq"},
 	"ftp":        {port: "21", protocol: "ftp"},
+	"sftp":       {port: "22", protocol: "sftp"},
 	"ftps":       {port: "990", protocol: "ftp"},
 	"tcp":        {protocol: "tcp"},
 	"udp":        {protocol: "udp", udp: true},
