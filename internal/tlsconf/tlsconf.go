@@ -70,8 +70,11 @@ func (f Files) Apply(cfg *tls.Config, insecure, tlsOn bool) error {
 	if f.CAFile != "" && insecure {
 		return errors.New("ca_file cannot be used with -insecure")
 	}
-	if (f.CertFile == "") != (f.KeyFile == "") {
-		return errors.New("cert_file needs key_file and key_file needs cert_file")
+	if f.CertFile != "" && f.KeyFile == "" {
+		return errors.New("cert_file needs key_file")
+	}
+	if f.KeyFile != "" && f.CertFile == "" {
+		return errors.New("key_file needs cert_file")
 	}
 
 	var pool *x509.CertPool
@@ -107,9 +110,9 @@ func (f Files) Apply(cfg *tls.Config, insecure, tlsOn bool) error {
 	return nil
 }
 
-// LiveFiles copies VEGALOAD_TEST_<NAME>_CA_FILE, _CERT_FILE and _KEY_FILE
-// into opts when they are set. prefix is the part before those suffixes,
-// such as VEGALOAD_TEST_REDIS.
+// LiveFiles copies VEGALOAD_TEST_<NAME>_CA_FILE, _CERT_FILE, _KEY_FILE and
+// _TLS_SERVER_NAME into opts when they are set. prefix is the part before
+// those suffixes, such as VEGALOAD_TEST_REDIS.
 func LiveFiles(opts map[string]string, prefix string) {
 	if opts == nil {
 		return
@@ -118,6 +121,7 @@ func LiveFiles(opts map[string]string, prefix string) {
 		{prefix + "_CA_FILE", "ca_file"},
 		{prefix + "_CERT_FILE", "cert_file"},
 		{prefix + "_KEY_FILE", "key_file"},
+		{prefix + "_TLS_SERVER_NAME", "tls_server_name"},
 	} {
 		if v := os.Getenv(pair.env); v != "" {
 			opts[pair.key] = v
