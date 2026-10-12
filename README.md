@@ -132,7 +132,7 @@ The `tcp` options are `read`, `until`, `expect`, `max`, `tls` and `escape`.
 The `udp` options are `reply`, `expect` and `escape`. In `-body`, `expect`
 and `until`, the text may use `\n`, `\r`, `\t`, `\0`, `\\` and `\xNN`. Pass
 `-opt escape=false` to send backslashes as they are. Use `-opt tls=true` for
-a TLS service, with `-insecure` if its certificate is not trusted. A
+a TLS service, with `-insecure` if its certificate is not trusted. `tls=true` takes the four options under "TLS with your own CA". UDP has no TLS, so those options are an error. A
 misspelled option is an error, not ignored. The same host allowlist and
 caps apply as for HTTP targets. Each iteration opens a new connection, so a
 very high rate on one machine can run out of local ports. Keep the rate
@@ -164,14 +164,14 @@ and `keepalive`. Put the password in an environment variable and pass its
 name with `-opt password_env=NAME` (it needs `username`), so it is not on
 the command line. In `roundtrip` mode the body must contain `{id}`, so each
 user can tell its own message from the messages of other users. Use `mqtts://` for TLS, with `-insecure` if the certificate is not
-trusted. Every iteration uses a new client id, because a broker closes an
+trusted. `mqtts://` takes the four options under "TLS with your own CA". Every iteration uses a new client id, because a broker closes an
 older connection that has the same id. The same host allowlist and caps
 apply as for HTTP targets.
 
 ### Test a Kafka cluster
 
 The `kafka` driver uses a pure Go client, so there is nothing to install.
-The target is `kafka://host:9092`, or `kafkas://host:9093` for TLS. The job
+The target is `kafka://host:9092`, or `kafkas://host:9093` for TLS. `kafkas://` takes the four options under "TLS with your own CA". The job
 of each iteration is set with `-opt mode=...`:
 
 ```
@@ -712,7 +712,7 @@ server.
 
 ### TLS with your own CA
 
-These four options are the same for Redis, RabbitMQ, FTP, MySQL and PostgreSQL. Pass them with `-opt`, or in a scenario options object. They are not separate flags.
+These four options are the same for Redis, RabbitMQ, FTP, MySQL, PostgreSQL, HTTPS (`http1` and `http2`), WebSocket (`wss`), gRPC (`grpcs`), MQTT (`mqtts`), Kafka (`kafkas`) and TCP with `tls=true`. Pass them with `-opt`, or in a scenario options object. They are not separate flags. Plain `http`, `ws`, `grpc`, `mqtt`, `kafka` and UDP reject them, because TLS is off.
 
 | Key | Meaning |
 | --- | --- |
@@ -855,7 +855,7 @@ export default function () {
   server with `encoding: "base64"`: `body` and the reply are then the encoded
   message in base64. A server's error status is a reply with `ok` false, not
   an exception. Only unary methods work for now. `url` is `host:port`,
-  `grpc://host:port` or `grpcs://host:port` for TLS. One connection is made on
+  `grpc://host:port` or `grpcs://host:port` for TLS. `grpcs://` takes the four options under "TLS with your own CA". One connection is made on
   the first call and kept for the rest of that virtual user's run.
 - `postgres.query(url, options)` runs one SQL text, given as `body`, and takes
   the other PostgreSQL `-opt` keys (`username`, `database`, `sslmode`, `args`,

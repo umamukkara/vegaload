@@ -11,6 +11,15 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol"
 )
 
+func mustNew(t *testing.T, tg protocol.Target, timeout time.Duration) *Driver {
+	t.Helper()
+	d, err := New(tg, timeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 func TestDriver_Do_SuccessOn2xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -18,7 +27,7 @@ func TestDriver_Do_SuccessOn2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(protocol.Target{URL: srv.URL}, time.Second)
+	d := mustNew(t, protocol.Target{URL: srv.URL}, time.Second)
 	defer d.Close()
 
 	res, err := d.Do(context.Background())
@@ -42,7 +51,7 @@ func TestDriver_Do_FailureOnServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(protocol.Target{URL: srv.URL}, time.Second)
+	d := mustNew(t, protocol.Target{URL: srv.URL}, time.Second)
 	defer d.Close()
 
 	res, err := d.Do(context.Background())
@@ -62,7 +71,7 @@ func TestDriver_Do_ConnectionErrorIsNotAFatalError(t *testing.T) {
 	// the transport level, which Do reports as a failed Result, not a
 	// returned error — only a config-level problem (e.g. a malformed
 	// URL) should stop the whole run.
-	d := New(protocol.Target{URL: "http://127.0.0.1:1"}, 200*time.Millisecond)
+	d := mustNew(t, protocol.Target{URL: "http://127.0.0.1:1"}, 200*time.Millisecond)
 	defer d.Close()
 
 	res, err := d.Do(context.Background())
@@ -78,7 +87,7 @@ func TestDriver_Do_ConnectionErrorIsNotAFatalError(t *testing.T) {
 }
 
 func TestDriver_Do_FatalErrorOnMalformedTarget(t *testing.T) {
-	d := New(protocol.Target{URL: "not a url", Method: "BAD METHOD"}, time.Second)
+	d := mustNew(t, protocol.Target{URL: "not a url", Method: "BAD METHOD"}, time.Second)
 	defer d.Close()
 
 	if _, err := d.Do(context.Background()); err == nil {
@@ -97,7 +106,7 @@ func TestDriver_Do_SendsMethodHeadersAndBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(protocol.Target{
+	d := mustNew(t, protocol.Target{
 		URL:     srv.URL,
 		Method:  http.MethodPost,
 		Headers: map[string]string{"X-VegaLoad": "test"},
@@ -132,7 +141,7 @@ func TestDriver_StaysOnHTTP1(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(protocol.Target{URL: srv.URL}, time.Second)
+	d := mustNew(t, protocol.Target{URL: srv.URL}, time.Second)
 	defer d.Close()
 
 	// TLSNextProto being a non-nil, empty map is what stops the

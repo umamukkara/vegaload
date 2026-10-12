@@ -72,16 +72,17 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
 // table uses the same list, so the two cannot differ.
-var Options = []string{
+var Options = append([]string{
 	"mode", "topic", "key", "acks", "compression", "count", "expect", "from",
 	"action", "partitions", "replication", "sasl", "username", "password_env",
 	"client_id",
-}
+}, tlsconf.Keys...)
 
 const (
 	modeProduce   = "produce"
@@ -204,7 +205,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	if connOnly {
 		// Only the connection is made here. Every call sets its own job.
 		d.mode = modeProduce
-		if err := d.target.RejectUnknownOptions("client_id", "sasl", "username", "password_env", "acks", "compression"); err != nil {
+		if err := d.target.RejectUnknownOptions(append([]string{"client_id", "sasl", "username", "password_env", "acks", "compression"}, tlsconf.Keys...)...); err != nil {
 			return nil, fmt.Errorf("kafka: %w", err)
 		}
 	} else if err := d.readOptions(); err != nil {
@@ -236,11 +237,20 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		kgo.UnknownTopicRetries(0),
 		kgo.WithLogger(d.problems),
 	}
+	files := tlsconf.FromOptions(target.Options)
 	if useTLS {
-		d.base = append(d.base, kgo.DialTLSConfig(&tls.Config{
-			InsecureSkipVerify: target.InsecureSkipVerify,
+		// ServerName stays empty so each broker is checked under its own
+		// name. tls_server_name sets one name for every broker.
+		cfg := &tls.Config{
+			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 			MinVersion:         tls.VersionTLS12,
-		}))
+		}
+		if err := files.Apply(cfg, target.InsecureSkipVerify, true); err != nil {
+			return nil, fmt.Errorf("kafka: %w", err)
+		}
+		d.base = append(d.base, kgo.DialTLSConfig(cfg))
+	} else if err := files.Apply(nil, false, false); err != nil {
+		return nil, fmt.Errorf("kafka: %w", err)
 	}
 	if mech != nil {
 		d.base = append(d.base, kgo.SASL(mech))

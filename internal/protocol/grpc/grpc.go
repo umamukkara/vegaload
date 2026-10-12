@@ -15,6 +15,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,8 +27,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
+
+// Options are the -opt keys this driver accepts.
+var Options = slices.Clone(tlsconf.Keys)
 
 // rawCodec marshals and unmarshals gRPC messages as plain []byte, with no
 // protobuf encoding step — what the driver sends is exactly the bytes in
@@ -88,7 +93,7 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 		return nil, fmt.Errorf("grpc: target.Method must be set to the full RPC method, e.g. /package.Service/Method")
 	}
 
-	addr, creds, err := parseAddr(target.URL, target.InsecureSkipVerify)
+	addr, creds, err := parseAddr(target.URL, target.InsecureSkipVerify, tlsconf.FromOptions(target.Options))
 	if err != nil {
 		return nil, fmt.Errorf("grpc: %w", err)
 	}
@@ -112,8 +117,11 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 
 // parseAddr interprets target.URL as described on New, returning the bare
 // address to dial and the transport credentials to use.
-func parseAddr(target string, insecureSkipVerify bool) (addr string, creds credentials.TransportCredentials, err error) {
+func parseAddr(target string, insecureSkipVerify bool, files tlsconf.Files) (addr string, creds credentials.TransportCredentials, err error) {
 	if !strings.Contains(target, "://") {
+		if err := files.Apply(nil, false, false); err != nil {
+			return "", nil, err
+		}
 		return target, insecure.NewCredentials(), nil
 	}
 
@@ -124,9 +132,21 @@ func parseAddr(target string, insecureSkipVerify bool) (addr string, creds crede
 
 	switch u.Scheme {
 	case "grpc":
+		if err := files.Apply(nil, false, false); err != nil {
+			return "", nil, err
+		}
 		return u.Host, insecure.NewCredentials(), nil
 	case "grpcs":
-		return u.Host, credentials.NewTLS(&tls.Config{InsecureSkipVerify: insecureSkipVerify}), nil //nolint:gosec // opt-in, see protocol.Target
+		// ServerName stays empty so each address is checked as itself.
+		// tls_server_name sets it when the name to check is different.
+		cfg := &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: insecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
+		}
+		if err := files.Apply(cfg, insecureSkipVerify, true); err != nil {
+			return "", nil, err
+		}
+		return u.Host, credentials.NewTLS(cfg), nil
 	default:
 		return "", nil, fmt.Errorf("unsupported scheme %q, want grpc:// or grpcs:// (or a bare host:port)", u.Scheme)
 	}

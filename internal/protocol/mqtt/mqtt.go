@@ -57,15 +57,16 @@ import (
 	paho "github.com/eclipse/paho.mqtt.golang"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
 // table uses the same list, so the two cannot differ.
-var Options = []string{
+var Options = append([]string{
 	"mode", "topic", "qos", "retain", "username", "password_env",
 	"client_id", "count", "expect", "keepalive",
-}
+}, tlsconf.Keys...)
 
 const (
 	modePublish   = "publish"
@@ -90,6 +91,9 @@ type Driver struct {
 	count    int
 	expect   []byte
 	alive    time.Duration
+	host     string
+	tlsOn    bool
+	tlsCfg   *tls.Config
 
 	salt string // random, per Driver, so two runs never share client ids
 	seq  atomic.Uint64
@@ -128,6 +132,7 @@ func newDriver(target protocol.Target, timeout time.Duration, password *string) 
 		}
 		d.broker = "tcp://" + net.JoinHostPort(u.Hostname(), port)
 	case "mqtts":
+		d.tlsOn = true
 		if port == "" {
 			port = "8883"
 		}
@@ -138,6 +143,7 @@ func newDriver(target protocol.Target, timeout time.Duration, password *string) 
 	if u.Hostname() == "" {
 		return nil, fmt.Errorf("mqtt: target %q has no host", urlerr.Mask(target.URL))
 	}
+	d.host = u.Hostname()
 
 	if err := target.RejectUnknownOptions(Options...); err != nil {
 		return nil, fmt.Errorf("mqtt: %w", err)
@@ -218,6 +224,20 @@ func newDriver(target protocol.Target, timeout time.Duration, password *string) 
 		return nil, fmt.Errorf("mqtt: making a client id: %w", err)
 	}
 	d.salt = hex.EncodeToString(b[:])
+
+	files := tlsconf.FromOptions(target.Options)
+	if d.tlsOn {
+		d.tlsCfg = &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			ServerName:         d.host,
+			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
+		}
+		if err := files.Apply(d.tlsCfg, target.InsecureSkipVerify, true); err != nil {
+			return nil, fmt.Errorf("mqtt: %w", err)
+		}
+	} else if err := files.Apply(nil, false, false); err != nil {
+		return nil, fmt.Errorf("mqtt: %w", err)
+	}
 	return d, nil
 }
 
@@ -297,8 +317,11 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, []Message) {
 		SetAutoReconnect(false).
 		SetConnectRetry(false).
 		SetOrderMatters(false).
-		SetCustomOpenConnectionFn(open(ctx)).
-		SetTLSConfig(&tls.Config{InsecureSkipVerify: d.target.InsecureSkipVerify}) //nolint:gosec // opt-in, see protocol.Target
+		SetCustomOpenConnectionFn(open(ctx))
+	if d.tlsCfg != nil {
+		// Clone per dial. Paho may write the config, and many users share one driver.
+		opts.SetTLSConfig(d.tlsCfg.Clone())
+	}
 	if d.username != "" {
 		opts.SetUsername(d.username)
 		opts.SetPassword(d.password)

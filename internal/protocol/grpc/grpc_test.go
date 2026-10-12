@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 // echoHandler is a grpc.StreamHandler registered as the server's
@@ -148,7 +149,7 @@ func TestParseAddr(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			addr, creds, err := parseAddr(c.target, false)
+			addr, creds, err := parseAddr(c.target, false, tlsconf.Files{})
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got nil")

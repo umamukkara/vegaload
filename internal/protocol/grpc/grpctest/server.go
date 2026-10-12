@@ -5,6 +5,8 @@ package grpctest
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -45,12 +47,42 @@ func StartAlphaOnly(t *testing.T) *Server {
 	return start(t, "alpha")
 }
 
+// StartTLS is Start with TLS and without reflection. cfg is the server's
+// TLS config.
+func StartTLS(t *testing.T, cfg *tls.Config) *Server {
+	t.Helper()
+	cfg = cfg.Clone()
+	cfg.NextProtos = []string{"h2"}
+	lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+	if err != nil {
+		t.Fatalf("grpctest: %v", err)
+	}
+	return serve(t, keepListener{Listener: lis}, "none")
+}
+
+// keepListener lets the server keep accepting after a failed handshake.
+type keepListener struct{ net.Listener }
+
+func (k keepListener) Accept() (net.Conn, error) {
+	for {
+		c, err := k.Listener.Accept()
+		if err == nil || errors.Is(err, net.ErrClosed) {
+			return c, err
+		}
+	}
+}
+
 func start(t *testing.T, mode string) *Server {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("grpctest: %v", err)
 	}
+	return serve(t, lis, mode)
+}
+
+func serve(t *testing.T, lis net.Listener, mode string) *Server {
+	t.Helper()
 	s := &Server{Addr: lis.Addr().String()}
 	srv := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, h grpc.UnaryHandler) (any, error) {
 		if md, ok := metadata.FromIncomingContext(ctx); ok {
