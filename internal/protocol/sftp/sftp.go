@@ -430,6 +430,10 @@ func (d *Driver) sshConfig() *ssh.ClientConfig {
 	cfg := &ssh.ClientConfig{
 		User: d.username,
 		Auth: auth,
+		// A server often has several host keys. The server picks the first
+		// type in this list that it has. Use the same order as OpenSSH, so
+		// the fingerprint that ssh-keyscan shows first is the one we meet.
+		HostKeyAlgorithms: hostKeyOrder,
 	}
 	if d.insecure {
 		// Only -insecure skips the host key check.
@@ -438,6 +442,17 @@ func (d *Driver) sshConfig() *ssh.ClientConfig {
 		cfg.HostKeyCallback = d.checkHostKey
 	}
 	return cfg
+}
+
+// hostKeyOrder is the order in which the client offers host key types.
+var hostKeyOrder = []string{
+	ssh.KeyAlgoED25519,
+	ssh.KeyAlgoECDSA256,
+	ssh.KeyAlgoECDSA384,
+	ssh.KeyAlgoECDSA521,
+	ssh.KeyAlgoRSASHA512,
+	ssh.KeyAlgoRSASHA256,
+	ssh.KeyAlgoRSA,
 }
 
 func (d *Driver) checkHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
@@ -451,7 +466,7 @@ func (d *Driver) checkHostKey(hostname string, remote net.Addr, key ssh.PublicKe
 			return nil
 		}
 	}
-	return fmt.Errorf("sftp: the host key of %s does not match (%s)", d.addr(), shown)
+	return fmt.Errorf("sftp: the host key of %s does not match (%s). A server can have several host keys: list the fingerprint of every one in host_key (ssh-keyscan shows them)", d.addr(), shown)
 }
 
 func (sh *shared) track(l *live) bool {
@@ -531,6 +546,10 @@ func (l *live) cause() string {
 
 func (d *Driver) loginErr(err error) error {
 	msg := err.Error()
+	// Our own host key error comes back inside "ssh: handshake failed: ".
+	if i := strings.Index(msg, "sftp: the host key"); i >= 0 {
+		return errors.New(msg[i:])
+	}
 	if strings.Contains(msg, "unable to authenticate") {
 		return fmt.Errorf("sftp: the server refused the login (user %q) (offered: %s)", d.username, d.offered())
 	}

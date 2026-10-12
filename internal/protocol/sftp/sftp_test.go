@@ -199,3 +199,31 @@ func TestSource_OneInsecureHostKey(t *testing.T) {
 		t.Fatalf("InsecureIgnoreHostKey appears %d times, want 1", hits)
 	}
 }
+
+func TestHostKey_ServerWithTwoKeyTypes(t *testing.T) {
+	s := srv(t)
+	if err := s.AddRSA(); err != nil {
+		t.Fatal(err)
+	}
+	// The usual key to pin is the Ed25519 one. It must work when the server
+	// also has an RSA key.
+	res, _ := run(t, s, modeConnect, map[string]string{"host_key": s.HostKeyFingerprint()}, "", 0)
+	if !res.Success {
+		t.Fatalf("pinning the Ed25519 key of a two-key server: %v", res.Err)
+	}
+	// A fingerprint of a key the client does not meet is refused. The error
+	// says what to do, and it does not carry the library's own prefix.
+	res, _ = run(t, s, modeConnect, map[string]string{"host_key": s.RSAFingerprint()}, "", 0)
+	if res.Success || res.Err == nil {
+		t.Fatal("pinning only the RSA key must not match the Ed25519 key that is offered first")
+	}
+	msg := res.Err.Error()
+	if !strings.HasPrefix(msg, "sftp: the host key of ") || strings.Contains(msg, "handshake failed") ||
+		!strings.Contains(msg, "list the fingerprint of every one") || strings.Contains(msg, "-insecure") {
+		t.Fatalf("unexpected text: %s", msg)
+	}
+	res, _ = run(t, s, modeConnect, map[string]string{"insecure": "false"}, "", 0)
+	if res.Success || !strings.HasPrefix(res.Err.Error(), "sftp: the host key of ") || strings.Contains(res.Err.Error(), "handshake failed") {
+		t.Fatalf("unknown key text: %v", res.Err)
+	}
+}

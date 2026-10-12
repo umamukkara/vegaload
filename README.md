@@ -639,7 +639,7 @@ are in [TLS with your own CA](#tls-with-your-own-ca).
 FTP_PASSWORD=secret ./vegaload run -vus 4 -duration 10s -protocol ftp \
   -target ftp://localhost -opt mode=roundtrip -opt path=/upload/vl-{id}.bin \
   -opt size=1MiB -opt allow_writes=true -opt username=vegaload \
-  -opt password_env=FTP_PASSWORD -secret-env FTP_PASSWORD
+  -opt password_env=FTP_PASSWORD
 ```
 
 `-target` is `ftp://host` (port 21, or 990 with `-opt tls=implicit`) or `ftps://host` (implicit TLS, port 990). A port in the URL always wins. `vegaload doctor` takes no `-opt`, so it reads only the URL: it checks port 21 for `ftp://host`. To check port 990, give it `ftps://host` or `ftp://host:990`.
@@ -719,15 +719,14 @@ server.
 SFTP_PASSWORD=secret ./vegaload run -vus 4 -duration 10s -protocol sftp \
   -target sftp://localhost -opt mode=roundtrip -opt path=upload/vl-{id}.bin \
   -opt size=1MiB -opt allow_writes=true -opt username=vegaload \
-  -opt password_env=SFTP_PASSWORD -opt host_key=SHA256:your-fingerprint \
-  -secret-env SFTP_PASSWORD
+  -opt password_env=SFTP_PASSWORD -opt host_key=SHA256:your-fingerprint
 ```
 
 `-target` is `sftp://host` (port 22). `ssh://` is refused. A port in the URL always wins. Do not put a password in the URL, and do not put a query string or a path there. Put the remote path in `-opt path`. The path may be relative. A username is required. Set it in the URL or with `-opt username`. When both are set they must be the same. There is no anonymous login.
 
 Set `password_env` or `key_file`, or both. With both, the key is offered first and then the password. `key_file` is an OpenSSH or PEM private key (RSA, ECDSA or Ed25519). It is read once. Protect that file (mode 600). `key_passphrase_env` is the passphrase for an encrypted key, and it needs `key_file`. There is no agent and no keyboard-interactive login.
 
-The host key is checked by SHA256 fingerprint. `host_key` is one fingerprint, or several separated by commas, each `SHA256:` and 43 base64 characters. Without it, the client refuses the key and the error shows the type and the fingerprint. `-insecure` skips that check for a test server. `host_key` together with `-insecure` is an error. A fingerprint that does not match does not suggest `-insecure`. A server can have more than one key type, so you can list more than one fingerprint.
+The host key is checked by SHA256 fingerprint. `host_key` is one fingerprint, or several separated by commas, each `SHA256:` and 43 base64 characters. Without it, the client refuses the key and the error shows the type and the fingerprint. `-insecure` skips that check for a test server. `host_key` together with `-insecure` is an error. A fingerprint that does not match does not suggest `-insecure`. A server can have more than one key type. The client offers Ed25519 first, then ECDSA, then RSA, and the server answers with the first one it has, as OpenSSH does. If the error shows a type you did not pin, list the fingerprint of every host key (`ssh-keyscan host` shows them).
 
 `-opt` keys:
 

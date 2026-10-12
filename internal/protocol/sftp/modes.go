@@ -104,6 +104,12 @@ func (d *Driver) list(l *live, path string) (xfercommon.Reply, error) {
 	entries, err := l.cli.ReadDir(path)
 	if err != nil {
 		low := strings.ToLower(err.Error())
+		// Some servers answer "no such file" when the path is a file.
+		if errors.Is(err, os.ErrNotExist) {
+			if fi, serr := l.cli.Stat(path); serr == nil && !fi.IsDir() {
+				return xfercommon.Reply{}, fmt.Errorf("sftp: %s is not a directory", path)
+			}
+		}
 		if strings.Contains(low, "not a directory") {
 			return xfercommon.Reply{}, fmt.Errorf("sftp: %s is not a directory", path)
 		}
