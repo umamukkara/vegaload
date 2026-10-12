@@ -19,7 +19,12 @@
 //	                  URL. The default is the user name.
 //	sslmode           disable, prefer (default), require, or verify-full.
 //	                  With -insecure, verify-full does not check the
-//	                  certificate.
+//	                  certificate. ca_file needs verify-full: prefer and
+//	                  require do not check the certificate.
+//	ca_file           PEM CAs. They replace the system roots. See tlsconf.
+//	cert_file         PEM client certificate. It needs key_file.
+//	key_file          PEM private key for cert_file. Encrypted keys are refused.
+//	tls_server_name   Name to send as SNI and to check on the certificate.
 //	application_name  The name the server shows for these connections
 //	                  (default "vegaload").
 //	pool              The most connections the run opens (default 10).
@@ -74,22 +79,23 @@ import (
 
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/sqlcommon"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
 // table uses the same list, so the two cannot differ.
-var Options = []string{
+var Options = append([]string{
 	"username", "password_env", "database", "sslmode", "application_name",
 	"pool", "allow_writes", "query_mode", "args", "min_rows", "expect", "max_rows",
-}
+}, tlsconf.Keys...)
 
 // connOptions are the keys that make up the connection. The rest describe
 // the job of one call.
-var connOptions = []string{
+var connOptions = append([]string{
 	"username", "password_env", "database", "sslmode", "application_name",
 	"pool", "allow_writes", "query_mode",
-}
+}, tlsconf.Keys...)
 
 const (
 	defaultPool    = 10
@@ -330,6 +336,14 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 			skipVerify(fb.TLSConfig)
 		}
 	}
+	// prefer and require skip verification, so a CA file would be ignored.
+	// It is refused. verify-full checks the certificate. The CA is applied
+	// here, not as sslrootcert in the URL, because that would turn require
+	// into verify-ca.
+	insecure := target.InsecureSkipVerify || sslmode == "prefer" || sslmode == "require"
+	if err := applyPostgresTLS(cfg, tlsconf.FromOptions(target.Options), insecure, sslmode != "disable"); err != nil {
+		return nil, fmt.Errorf("postgres: %w", err)
+	}
 	// pgx can read a password from the environment (PGPASSWORD) or from
 	// ~/.pgpass. That is the standard PostgreSQL behaviour, so it stays on.
 
@@ -339,6 +353,39 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	}
 	d.pool = pool
 	return d, nil
+}
+
+func applyPostgresTLS(cfg *pgxpool.Config, files tlsconf.Files, insecure, tlsOn bool) error {
+	if !files.Set() || !tlsOn {
+		return files.Apply(nil, insecure, tlsOn)
+	}
+	if err := applyOneTLS(&cfg.ConnConfig.TLSConfig, files, insecure); err != nil {
+		return err
+	}
+	for i := range cfg.ConnConfig.Fallbacks {
+		if cfg.ConnConfig.Fallbacks[i].TLSConfig == nil {
+			continue
+		}
+		if err := applyOneTLS(&cfg.ConnConfig.Fallbacks[i].TLSConfig, files, insecure); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyOneTLS(dst **tls.Config, files tlsconf.Files, insecure bool) error {
+	base := &tls.Config{}
+	if *dst != nil {
+		base = (*dst).Clone()
+	}
+	if insecure {
+		base.InsecureSkipVerify = true
+	}
+	if err := files.Apply(base, insecure, true); err != nil {
+		return err
+	}
+	*dst = base
+	return nil
 }
 
 func skipVerify(c *tls.Config) {

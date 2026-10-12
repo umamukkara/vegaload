@@ -32,6 +32,10 @@
 //	              rediss:// means true. true checks the certificate and the
 //	              host name. With -insecure, true does not check the
 //	              certificate. tls=false with rediss:// is an error.
+//	ca_file       PEM CAs. They replace the system roots. See tlsconf.
+//	cert_file     PEM client certificate. It needs key_file.
+//	key_file      PEM private key for cert_file. Encrypted keys are refused.
+//	tls_server_name  Name to send as SNI and to check on the certificate.
 //	pool          The most connections the run opens (default 10).
 //	protocol      2 (default) or 3. 2 is RESP2. 3 is RESP3.
 //	allow_writes  true to let a command change data. The default is
@@ -74,21 +78,22 @@ import (
 
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/sqlcommon"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
 // table uses the same list, so the two cannot differ.
-var Options = []string{
+var Options = append([]string{
 	"username", "password_env", "database", "tls", "pool", "protocol",
 	"allow_writes", "allow_admin", "transaction", "args", "min_rows", "expect", "max_rows",
-}
+}, tlsconf.Keys...)
 
 // connOptions are the keys that make up one client. The rest describe one call.
-var connOptions = []string{
+var connOptions = append([]string{
 	"username", "password_env", "database", "tls", "pool", "protocol",
 	"allow_writes", "allow_admin",
-}
+}, tlsconf.Keys...)
 
 const (
 	defaultPool    = 10
@@ -311,12 +316,21 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		DialTimeout:           10 * time.Second,
 		PoolTimeout:           30 * time.Second,
 	}
-	if tlsMode != tlsOff {
-		opt.TLSConfig = &tls.Config{
+	files := tlsconf.FromOptions(target.Options)
+	if tlsMode == tlsOff {
+		if err := files.Apply(nil, false, false); err != nil {
+			return nil, fmt.Errorf("redis: %w", err)
+		}
+	} else {
+		tc := &tls.Config{
 			MinVersion:         tls.VersionTLS12,
 			ServerName:         d.host,
 			InsecureSkipVerify: tlsMode == tlsSkip,
 		}
+		if err := files.Apply(tc, tlsMode == tlsSkip, true); err != nil {
+			return nil, fmt.Errorf("redis: %w", err)
+		}
+		opt.TLSConfig = tc
 	}
 	d.client = goredis.NewClient(opt)
 

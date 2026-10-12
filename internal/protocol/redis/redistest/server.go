@@ -106,6 +106,22 @@ func StartTLS(t testing.TB, h Handler) *Server {
 	return start(t, h, "", true)
 }
 
+// StartTLSConfig is Start behind the given TLS config. The URL is rediss://.
+func StartTLSConfig(t testing.TB, h Handler, cfg *tls.Config) *Server {
+	t.Helper()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{ln: ln, handler: h, tlsOn: true}
+	if s.handler == nil {
+		s.handler = func([]string) Value { return SimpleString("OK") }
+	}
+	go s.accept()
+	t.Cleanup(func() { _ = ln.Close() })
+	return s
+}
+
 func start(t testing.TB, h Handler, password string, useTLS bool) *Server {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

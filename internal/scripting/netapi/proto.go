@@ -23,6 +23,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/rabbitmq"
 	"github.com/vegaload/vegaload/internal/protocol/redis"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
@@ -628,7 +629,7 @@ func (c *ProtoClient) kafkaConn(call ProtoCall, opts map[string]string) (*kafka.
 // postgresConnOptions are the options that make up a PostgreSQL pool. They
 // are the same for every call of one client. The rest of a call's options
 // describe the job.
-var postgresConnOptions = []string{"username", "database", "sslmode", "application_name", "pool", "allow_writes", "query_mode"}
+var postgresConnOptions = append([]string{"username", "database", "sslmode", "application_name", "pool", "allow_writes", "query_mode"}, tlsconf.Keys...)
 
 // Postgres runs one SQL text. The pool is kept for the next call with the
 // same connection options, as an application keeps its pool. It has one
@@ -767,7 +768,7 @@ func (c *ProtoClient) grpcConn(call ProtoCall) (*grpc.Conn, error) {
 // mysqlConnOptions are the options that make up a MySQL pool. They are
 // the same for every call of one client. The rest of a call's options
 // describe the job.
-var mysqlConnOptions = []string{"username", "database", "tls", "pool", "allow_writes", "query_mode"}
+var mysqlConnOptions = append([]string{"username", "database", "tls", "pool", "allow_writes", "query_mode"}, tlsconf.Keys...)
 
 // MySQL runs one SQL text. The pool is kept for the next call with the
 // same connection options, as an application keeps its pool. It has one
@@ -846,7 +847,7 @@ func (c *ProtoClient) mysqlConn(call ProtoCall, opts map[string]string) (*mysql.
 // redisConnOptions are the options that make up a Redis client. They are
 // the same for every call of one client. The rest of a call's options
 // describe the job.
-var redisConnOptions = []string{"username", "database", "tls", "pool", "protocol", "allow_writes", "allow_admin"}
+var redisConnOptions = append([]string{"username", "database", "tls", "pool", "protocol", "allow_writes", "allow_admin"}, tlsconf.Keys...)
 
 // Redis runs one command, or several as a pipeline. The client is kept for
 // the next call with the same connection options. It has one connection,
@@ -956,10 +957,10 @@ func (c *ProtoClient) Close() {
 // rabbitConnOptions are the options that make up a RabbitMQ connection.
 // They are the same for every call of one client. The rest of a call's
 // options describe the job.
-var rabbitConnOptions = []string{
+var rabbitConnOptions = append([]string{
 	"username", "vhost", "tls", "connection", "channels", "heartbeat",
 	"connection_name", "allow_writes", "allow_admin",
-}
+}, tlsconf.Keys...)
 
 // RabbitMQ does one RabbitMQ job. mode is publish, consume, roundtrip or
 // admin. The connection is kept for the next call with the same connection
@@ -1038,10 +1039,10 @@ func (c *ProtoClient) rabbitConn(call ProtoCall, opts map[string]string) (*rabbi
 // ftpConnOptions are the options that make up an FTP session pool. They
 // are the same for every call of one client. The rest of a call's options
 // describe the job.
-var ftpConnOptions = []string{
+var ftpConnOptions = append([]string{
 	"username", "tls", "tls_verify", "sessions", "connection",
 	"data_host", "epsv", "allow_writes", "allow_admin",
-}
+}, tlsconf.Keys...)
 
 // FTP does one FTP job. mode is connect, download, upload, list, stat,
 // delete or roundtrip. The session pool is kept for the next call with

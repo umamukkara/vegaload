@@ -250,6 +250,9 @@ speak the PostgreSQL protocol, such as CockroachDB, YugabyteDB and Aurora.
 The options are `username`, `password_env`, `database`, `sslmode`
 (`disable`, `prefer`, `require`, `verify-full`), `application_name`, `pool`,
 `allow_writes`, `query_mode`, `args`, `min_rows`, `expect` and `max_rows`.
+`ca_file`, `cert_file`, `key_file` and `tls_server_name` are in
+[TLS with your own CA](#tls-with-your-own-ca). `ca_file` needs
+`sslmode=verify-full`.
 
 - The connections are kept in a pool that all users share, like an
   application's pool. `pool` is the most connections to open (default 10).
@@ -322,6 +325,10 @@ Aurora MySQL and Percona Server.
 The options are `username`, `password_env`, `database`, `tls`
 (`preferred`, `false`, `true`, `skip-verify`), `pool`, `allow_writes`,
 `query_mode`, `args`, `min_rows`, `expect` and `max_rows`.
+`ca_file`, `cert_file`, `key_file` and `tls_server_name` are in
+[TLS with your own CA](#tls-with-your-own-ca). With `tls=preferred` and
+no `ca_file`, the certificate is not checked. With `ca_file`, it is
+checked, and a server that does not offer TLS still uses plain text.
 
 - The connections are kept in a pool that all users share, like an
   application's pool. `pool` is the most connections to open (default 10).
@@ -406,7 +413,8 @@ string, and a password in the URL is refused. It is tested with Redis 6 and
 The options are `username`, `password_env`, `database`, `tls`
 (`false`, `true`, `skip-verify`), `pool`, `protocol` (`2` or `3`),
 `allow_writes`, `allow_admin`, `transaction`, `args`, `min_rows`, `expect`
-and `max_rows`.
+and `max_rows`. `ca_file`, `cert_file`, `key_file` and `tls_server_name`
+are in [TLS with your own CA](#tls-with-your-own-ca).
 
 - The connections are kept in a pool that all users share. `pool` is the
   most connections to open (default 10). Waiting for a free connection
@@ -526,7 +534,8 @@ The job options are `mode` (`publish`, `consume`, `roundtrip`, `admin`),
 The connection options are `username`, `password_env`, `vhost`, `tls`
 (`false`, `true`, `skip-verify`), `connection` (`shared` or `per_call`),
 `channels`, `heartbeat`, `connection_name`, `allow_writes` and
-`allow_admin`.
+`allow_admin`. `ca_file`, `cert_file`, `key_file` and `tls_server_name`
+are in [TLS with your own CA](#tls-with-your-own-ca).
 
 - Publishing is always allowed. `consume` with `ack=requeue` (the default)
   is always allowed, and it puts the messages back. That is a peek: the
@@ -656,6 +665,7 @@ server.
 | `tls` | from the URL | `none`, `explicit` or `implicit`. With `implicit` and no port in the URL, the port is 990. |
 | `tls_verify` | true | Check the server certificate. `-insecure` turns this off. |
 | `tls_max` | `1.2` | Highest TLS version, `1.2` or `1.3`. It is `1.2` because vsftpd 3.0.5 fails large uploads over TLS 1.3 (`426 Failure reading network stream`). Use `1.3` for a server that needs it. |
+| `ca_file`, `cert_file`, `key_file`, `tls_server_name` | | See [TLS with your own CA](#tls-with-your-own-ca). |
 | `sessions` | `10` | How many control connections this run may hold. Match it to `-vus`. Extra users wait. |
 | `connection` | `shared` | `per_call` dials a new session and drops it. It still takes one of the `sessions` slots, so the number in flight stays bounded. |
 | `data_host` | `control` | `control` dials the data connection to the host you named. `announced` uses the PASV address, which must be an IP. |
@@ -699,6 +709,44 @@ server.
   is UTC, such as `2020-01-02T15:04:05Z`, or `""` when the server gave
   none. Give the password as `password: env.FTP_PASSWORD`.
 - The host allowlist and caps apply as for HTTP targets.
+
+### TLS with your own CA
+
+These four options are the same for Redis, RabbitMQ, FTP, MySQL and PostgreSQL. Pass them with `-opt`, or in a scenario options object. They are not separate flags.
+
+| Key | Meaning |
+| --- | --- |
+| `ca_file` | A PEM file with one or more CA certificates. These are the only CAs that are trusted. The system roots are not used. To trust the system roots as well, put them in this file too. |
+| `cert_file` | A PEM client certificate. Put intermediates after it. |
+| `key_file` | The PEM private key for `cert_file`. |
+| `tls_server_name` | The name to send as SNI and to check on the certificate. Use it when you connect by IP, or by a name that is not on the certificate. |
+
+`cert_file` and `key_file` go together. One without the other is an error. With both, the client certificate is sent when the server asks for it.
+
+`ca_file` cannot be combined with `-insecure`, `tls=skip-verify`, `tls_verify=false`, or PostgreSQL `sslmode=require` or `sslmode=prefer`. Those modes do not check the certificate. `cert_file` and `key_file` are allowed with them.
+
+If TLS is off, any of the four is an error. The files are read when the client is built, not on every call.
+
+An encrypted private key is refused. PKCS#12 and JKS are not read. CRLs and OCSP are not checked. A certificate is not pinned by fingerprint. FTP still defaults to TLS 1.2 (`tls_max`).
+
+```
+# A private CA, connecting by IP. The certificate is for redis.internal.example.
+./vegaload run -target rediss://10.0.0.5:6379 -protocol redis \
+  -body PING \
+  -opt ca_file=./certs/ca.pem \
+  -opt tls_server_name=redis.internal.example
+
+# Mutual TLS. The server asks for the client certificate.
+./vegaload run -target amqps://10.0.0.8:5671 -protocol rabbitmq \
+  -opt mode=publish -opt mandatory=false \
+  -body hello \
+  -opt ca_file=./certs/ca.pem \
+  -opt cert_file=./certs/client.pem \
+  -opt key_file=./certs/client.key \
+  -opt tls_server_name=rabbit.internal.example
+```
+
+A scenario passes the same keys, for example `ca_file: "certs/ca.pem"`.
 
 ### 2. Or write a scenario file
 

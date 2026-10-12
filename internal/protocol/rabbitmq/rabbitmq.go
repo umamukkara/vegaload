@@ -37,18 +37,19 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
 // table uses the same list, so the two cannot differ.
-var Options = []string{
+var Options = append([]string{
 	"mode", "exchange", "routing_key", "queue", "bind_key", "count",
 	"confirm", "mandatory", "persistent", "content_type", "priority",
 	"expiration", "headers", "ack", "prefetch", "expect", "action",
 	"durable", "auto_delete", "queue_type", "exchange_type",
 	"username", "password_env", "vhost", "tls", "connection", "channels",
 	"heartbeat", "connection_name", "allow_writes", "allow_admin",
-}
+}, tlsconf.Keys...)
 
 const (
 	modePublish   = "publish"
@@ -87,6 +88,7 @@ type Driver struct {
 	vhost         string
 	useTLS        bool
 	skipVerify    bool
+	tlsCfg        *tls.Config
 	insecure      bool
 	perCall       bool
 	channels      int
@@ -164,6 +166,7 @@ func (d *Driver) Call(opts map[string]string, body []byte, timeout time.Duration
 		vhost:       d.vhost,
 		useTLS:      d.useTLS,
 		skipVerify:  d.skipVerify,
+		tlsCfg:      d.tlsCfg,
 		insecure:    d.insecure,
 		perCall:     d.perCall,
 		channels:    d.channels,
@@ -212,6 +215,9 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		return nil, err
 	}
 	if err := d.readConn(password != nil); err != nil {
+		return nil, err
+	}
+	if err := d.applyTLS(); err != nil {
 		return nil, err
 	}
 	if !connOnly {
@@ -547,6 +553,26 @@ func (l *link) arm(c *amqp.Connection) {
 	}()
 }
 
+func (d *Driver) applyTLS() error {
+	files := tlsconf.FromOptions(d.target.Options)
+	if !d.useTLS {
+		if err := files.Apply(nil, false, false); err != nil {
+			return fmt.Errorf("rabbitmq: %w", err)
+		}
+		return nil
+	}
+	tc := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		ServerName:         d.host,
+		InsecureSkipVerify: d.skipVerify,
+	}
+	if err := files.Apply(tc, d.skipVerify, true); err != nil {
+		return fmt.Errorf("rabbitmq: %w", err)
+	}
+	d.tlsCfg = tc
+	return nil
+}
+
 func (d *Driver) dial(ctx context.Context) (*amqp.Connection, error) {
 	_ = ctx
 	scheme := "amqp"
@@ -572,11 +598,8 @@ func (d *Driver) dial(ctx context.Context) (*amqp.Connection, error) {
 		Dial:       amqp.DefaultDial(d.timeout),
 	}
 	if d.useTLS {
-		cfg.TLSClientConfig = &tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			ServerName:         d.host,
-			InsecureSkipVerify: d.skipVerify,
-		}
+		// A fresh copy for this dial. The stored config is not written again.
+		cfg.TLSClientConfig = d.tlsCfg.Clone()
 	}
 	return amqp.DialConfig(raw, cfg)
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 )
 
 // Live tests run only when VEGALOAD_TEST_FTP is set to an ftp:// or ftps://
@@ -16,7 +17,8 @@ import (
 // names the environment variable that holds the password.
 // VEGALOAD_TEST_FTP_DIR is the scratch directory (default /).
 // VEGALOAD_TEST_FTP_TLS is explicit or implicit. VEGALOAD_TEST_FTP_INSECURE=1
-// skips certificate checks.
+// skips certificate checks. VEGALOAD_TEST_FTP_CA_FILE, _CERT_FILE and
+// _KEY_FILE are passed as ca_file, cert_file and key_file when set.
 func TestLive_UploadListDownloadAndRoundtrip(t *testing.T) {
 	raw := os.Getenv("VEGALOAD_TEST_FTP")
 	if raw == "" {
@@ -103,6 +105,7 @@ func liveOpts(t *testing.T) map[string]string {
 	if os.Getenv("VEGALOAD_TEST_FTP_INSECURE") == "1" {
 		opts["tls_verify"] = "false"
 	}
+	tlsconf.LiveFiles(opts, "VEGALOAD_TEST_FTP")
 	return opts
 }
 

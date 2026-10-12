@@ -299,7 +299,8 @@ func (d *Driver) rejectForeignOptions() error {
 func connOption(k string) bool {
 	switch k {
 	case "username", "password_env", "tls", "tls_verify", "tls_max", "sessions", "connection",
-		"data_host", "epsv", "allow_writes", "allow_admin":
+		"data_host", "epsv", "allow_writes", "allow_admin",
+		"ca_file", "cert_file", "key_file", "tls_server_name":
 		return true
 	}
 	return false

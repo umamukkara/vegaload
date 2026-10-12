@@ -206,6 +206,18 @@ func StartTLS(t testingT) *Server {
 	return s
 }
 
+// StartTLSConfig is Start behind the given TLS config. The URL is amqps://.
+func StartTLSConfig(t testingT, cfg *tls.Config) *Server {
+	t.Helper()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s := newServer(t, ln, cfg)
+	go s.accept()
+	return s
+}
+
 func newServer(t testingT, ln net.Listener, tlsCfg *tls.Config) *Server {
 	s := &Server{
 		t: t, ln: ln, tlsCfg: tlsCfg,

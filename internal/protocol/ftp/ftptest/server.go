@@ -70,15 +70,22 @@ type replySpec struct {
 }
 
 // Start listens for plain FTP.
-func Start(t *testing.T) *Server { return start(t, false, false) }
+func Start(t *testing.T) *Server { return start(t, false, false, nil) }
 
 // StartTLS listens for plain FTP and allows AUTH TLS.
-func StartTLS(t *testing.T) *Server { return start(t, true, false) }
+func StartTLS(t *testing.T) *Server { return start(t, true, false, nil) }
 
 // StartImplicitTLS listens with TLS from the first byte.
-func StartImplicitTLS(t *testing.T) *Server { return start(t, true, true) }
+func StartImplicitTLS(t *testing.T) *Server { return start(t, true, true, nil) }
 
-func start(t *testing.T, withTLS, implicit bool) *Server {
+// StartTLSConfig is StartTLS with the given server config, including a
+// client certificate check when the config asks for one.
+func StartTLSConfig(t *testing.T, cfg *tls.Config) *Server {
+	t.Helper()
+	return start(t, true, false, cfg)
+}
+
+func start(t *testing.T, withTLS, implicit bool, cfg *tls.Config) *Server {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -97,14 +104,17 @@ func start(t *testing.T, withTLS, implicit bool) *Server {
 		closed: make(chan struct{}),
 	}
 	if withTLS {
-		cert, err := selfSigned()
-		if err != nil {
-			t.Fatal(err)
+		if cfg == nil {
+			cert, err := selfSigned()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg = &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				MinVersion:   tls.VersionTLS12,
+			}
 		}
-		s.tlsConf = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		}
+		s.tlsConf = cfg
 	}
 	if implicit {
 		s.ln = tls.NewListener(ln, s.tlsConf)

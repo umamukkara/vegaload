@@ -19,7 +19,12 @@
 //	              true checks the certificate and the host name. With
 //	              -insecure, true does not check the certificate.
 //	              preferred uses TLS when the server offers it, and plain
-//	              text when it does not.
+//	              text when it does not. With ca_file, preferred checks
+//	              the certificate and still falls back to plain text.
+//	ca_file       PEM CAs. They replace the system roots. See tlsconf.
+//	cert_file     PEM client certificate. It needs key_file.
+//	key_file      PEM private key for cert_file. Encrypted keys are refused.
+//	tls_server_name  Name to send as SNI and to check on the certificate.
 //	pool          The most connections the run opens (default 10).
 //	allow_writes  true to let the SQL change data. The default is read-only:
 //	              every new connection runs SET SESSION TRANSACTION READ ONLY,
@@ -59,6 +64,7 @@ package mysql
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
@@ -78,22 +84,23 @@ import (
 
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/sqlcommon"
+	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
 // Options are the -opt keys this driver accepts. The command's protocol
 // table uses the same list, so the two cannot differ.
-var Options = []string{
+var Options = append([]string{
 	"username", "password_env", "database", "tls",
 	"pool", "allow_writes", "query_mode", "args", "min_rows", "expect", "max_rows",
-}
+}, tlsconf.Keys...)
 
 // connOptions are the keys that make up the connection. The rest describe
 // the job of one call.
-var connOptions = []string{
+var connOptions = append([]string{
 	"username", "password_env", "database", "tls",
 	"pool", "allow_writes", "query_mode",
-}
+}, tlsconf.Keys...)
 
 const (
 	defaultPool    = 10
@@ -343,6 +350,13 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	cfg.MultiStatements = d.simple
 	cfg.ParseTime = false
 	cfg.TLSConfig = tlsName
+	// A custom config is stored on cfg.TLS and the name is cleared, so nothing
+	// is put in the driver's global TLS registry. cfg is not changed after
+	// this. Each Connect builds a new connector from it, because the handshake
+	// can clear TLS on the connector's own copy.
+	if err := applyMySQLTLS(cfg, d.host, tlsName, tlsconf.FromOptions(target.Options)); err != nil {
+		return nil, fmt.Errorf("mysql: %w", err)
+	}
 	// AllowAllFiles stays off, so LOAD DATA LOCAL INFILE cannot read a file.
 	// AllowNativePasswords stays at the library default.
 	// v1.9 asks the server for its public key when the login is not inside
@@ -358,6 +372,28 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	d.db = db
 	d.ownsDB = true
 	return d, nil
+}
+
+func applyMySQLTLS(cfg *gomysql.Config, host, tlsName string, files tlsconf.Files) error {
+	tlsOn := tlsName != "false"
+	// preferred without a CA file does not check the certificate, which is
+	// what the library's "preferred" config does. With a CA file it checks.
+	insecure := tlsName == "skip-verify" || (tlsName == "preferred" && files.CAFile == "")
+	if !files.Set() {
+		return files.Apply(nil, insecure, tlsOn)
+	}
+	tc := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		ServerName:         host,
+		InsecureSkipVerify: insecure,
+	}
+	if err := files.Apply(tc, insecure, tlsOn); err != nil {
+		return err
+	}
+	cfg.TLS = tc
+	cfg.TLSConfig = ""
+	cfg.AllowFallbackToPlaintext = tlsName == "preferred"
+	return nil
 }
 
 // sessionConnector runs the read-only setting and reads sql_mode on every
