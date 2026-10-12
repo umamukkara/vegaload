@@ -27,6 +27,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/sftp"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
+	"github.com/vegaload/vegaload/internal/safety"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
@@ -84,6 +85,9 @@ func ProtoFunctions() map[string][]string {
 func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*ProtoReply, error) {
 	start := time.Now()
 	reply, err := c.dispatch(ctx, name, call)
+	if reply == nil && safety.IsHostRefusal(err) {
+		reply = &ProtoReply{Refused: true, Error: err.Error()}
+	}
 	c.observeCall(ctx, name, time.Since(start), reply, err)
 	return reply, err
 }
@@ -471,6 +475,8 @@ type ProtoReply struct {
 	IsRabbit       bool
 	RabbitMessages []RabbitMessage
 	RabbitText     string
+	// Refused is true when the call was stopped before any bytes moved.
+	Refused bool
 	// IsXfer is true for an FTP or SFTP reply. XferEntries are the names a
 	// list or stat returned. XferText is the short answer. Times are UTC.
 	IsXfer      bool
@@ -589,15 +595,7 @@ func knownProtoFn(ns, fn string) bool {
 // refusedBeforeSend is a call the safety rules or a missing write flag
 // stopped before any bytes moved. That is a script error, not a latency.
 func refusedBeforeSend(reply *ProtoReply) bool {
-	if reply.OK || reply.BytesSent != 0 || reply.BytesReceived != 0 {
-		return false
-	}
-	msg := reply.Error
-	return strings.Contains(msg, "allow_writes") ||
-		strings.Contains(msg, "allow_admin") ||
-		strings.Contains(msg, "needs {id}") ||
-		strings.Contains(msg, "not localhost") ||
-		strings.Contains(msg, "allowlisted")
+	return reply.Refused
 }
 
 // recordXferMeasures records the phases an FTP or SFTP call ran.
@@ -1380,7 +1378,7 @@ func (c *ProtoClient) timeoutFor(call ProtoCall) time.Duration {
 }
 
 func fromResult(res protocol.Result) *ProtoReply {
-	r := &ProtoReply{OK: res.Success, BytesSent: res.BytesSent, BytesReceived: res.BytesReceived}
+	r := &ProtoReply{OK: res.Success, BytesSent: res.BytesSent, BytesReceived: res.BytesReceived, Refused: res.Refused}
 	if res.Err != nil {
 		r.Error = res.Err.Error()
 	}

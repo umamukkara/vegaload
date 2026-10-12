@@ -12,6 +12,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/ftp/ftptest"
 	"github.com/vegaload/vegaload/internal/protocol/sftp/sftptest"
 	"github.com/vegaload/vegaload/internal/report"
+	"github.com/vegaload/vegaload/internal/safety"
 )
 
 func TestCall_RecordsOneFinishedCall(t *testing.T) {
@@ -43,7 +44,7 @@ func TestCall_RecordsOneFinishedCall(t *testing.T) {
 		Options: map[string]string{"path": "/up-{id}"},
 		Body:    []byte("x"),
 	})
-	if err != nil || denied.OK || !strings.Contains(denied.Error, "allow_writes") {
+	if err != nil || denied.OK || !denied.Refused || !strings.Contains(denied.Error, "allow_writes") {
 		t.Fatalf("denied: %v %+v", err, denied)
 	}
 	if got := col.Finish("fixed-vus", time.Second).Protocols[0].Total; got != 1 {
@@ -265,6 +266,80 @@ func TestXferMeasures_ZeroMeansRanOnlyWhenTheCallWorked(t *testing.T) {
 	got = counts("roundtrip", false, XferTiming{UploadMs: 7})
 	if got["upload_time"] != 1 || len(got) != 1 {
 		t.Fatalf("failed roundtrip: %v", got)
+	}
+}
+
+// Each refusal kind sets Refused. The wording of the error is not what
+// decides whether the call is recorded.
+func TestRefusalFlag_AllowWrites(t *testing.T) {
+	assertRefused(t, "ftp.upload", ProtoCall{
+		URL: "ftp://127.0.0.1:9/", Options: map[string]string{"path": "/up-{id}"}, Body: []byte("x"),
+	})
+	pw := "secret"
+	assertRefused(t, "sftp.upload", ProtoCall{
+		URL: "sftp://127.0.0.1:9/", Options: map[string]string{"username": "vegaload", "path": "/up-{id}"}, Body: []byte("x"),
+		Password: &pw, Insecure: true,
+	})
+}
+
+func TestRefusalFlag_AllowAdmin(t *testing.T) {
+	assertRefused(t, "ftp.upload", ProtoCall{
+		URL: "ftp://127.0.0.1:9/", Options: map[string]string{"path": "/fixed.bin", "allow_writes": "true"}, Body: []byte("x"),
+	})
+}
+
+func TestRefusalFlag_NeedsID(t *testing.T) {
+	assertRefused(t, "ftp.roundtrip", ProtoCall{
+		URL: "ftp://127.0.0.1:9/", Options: map[string]string{"path": "/fixed.bin", "allow_writes": "true", "size": "1"},
+	})
+}
+
+func TestRefusalFlag_NotLocalhost(t *testing.T) {
+	c := NewProtoClient(func(host string) error {
+		if safety.IsAllowed(host, nil) {
+			return nil
+		}
+		return safety.HostRefusal(host)
+	}, time.Second)
+	defer c.Close()
+	col := report.NewCollector()
+	c.SetCallRecorder(col)
+	reply, err := c.Call(context.Background(), "ftp.connect", ProtoCall{URL: "ftp://example.com/"})
+	if !safety.IsHostRefusal(err) || reply == nil || !reply.Refused {
+		t.Fatalf("not localhost: err=%v reply=%+v", err, reply)
+	}
+	if col.Finish("fixed-vus", time.Second).Protocols != nil {
+		t.Fatal("a refused host was recorded")
+	}
+}
+
+func TestRefusalFlag_Allowlisted(t *testing.T) {
+	check := func(host string) error {
+		if safety.IsAllowed(host, []string{"example.com"}) {
+			return nil
+		}
+		return safety.HostRefusal(host)
+	}
+	if err := check("example.com"); err != nil || safety.IsHostRefusal(err) {
+		t.Fatalf("allowlisted host was refused: %v", err)
+	}
+	if !safety.IsHostRefusal(check("other.example")) {
+		t.Fatal("a host off the list was not refused")
+	}
+}
+
+func assertRefused(t *testing.T, name string, call ProtoCall) {
+	t.Helper()
+	c := NewProtoClient(nil, time.Second)
+	defer c.Close()
+	col := report.NewCollector()
+	c.SetCallRecorder(col)
+	reply, err := c.Call(context.Background(), name, call)
+	if err != nil || reply == nil || reply.OK || !reply.Refused {
+		t.Fatalf("%s: err=%v reply=%+v", name, err, reply)
+	}
+	if col.Finish("fixed-vus", time.Second).Protocols != nil {
+		t.Fatalf("%s was recorded", name)
 	}
 }
 

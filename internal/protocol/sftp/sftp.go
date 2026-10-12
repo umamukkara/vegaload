@@ -171,7 +171,7 @@ func (d *Driver) Do(ctx context.Context) (protocol.Result, error) {
 // Run runs one call and returns the reply a script reads.
 func (d *Driver) Run(parent context.Context) (protocol.Result, xfercommon.Reply) {
 	if err := xfercommon.Refuse("sftp", d.mode, d.path, d.allowWrites, d.allowAdmin, d.script); err != nil {
-		return protocol.Result{Err: err}, xfercommon.Reply{}
+		return protocol.Result{Err: err, Refused: true}, xfercommon.Reply{}
 	}
 	ctx, cancel := context.WithTimeout(parent, d.timeout)
 	defer cancel()

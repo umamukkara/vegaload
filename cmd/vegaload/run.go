@@ -465,7 +465,7 @@ func buildSafetyCheck(cfg *runConfig) netapi.SafetyCheck {
 		if cfg.Yes {
 			return nil
 		}
-		return fmt.Errorf("host %q is not localhost or allowlisted (pass -yes, or add it with -allow-target)", host)
+		return safety.HostRefusal(host)
 	}
 }
 
@@ -548,7 +548,7 @@ func oneOf(s string, allowed ...string) bool {
 }
 
 func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName, op string, d time.Duration, res protocol.Result, err error) {
-	if rec == nil {
+	if rec == nil || driverRefused(res) {
 		return
 	}
 	if err != nil {
@@ -561,27 +561,13 @@ func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName
 	if !res.Success && netapi.RunEnded(ctx) {
 		return
 	}
-	if driverRefused(res) {
-		return
-	}
 	rec.RecordCall(protocolName, op, d, !res.Success, res.BytesSent, res.BytesReceived)
 }
 
 // driverRefused is a call the safety rules or a missing write flag stopped
 // before any bytes moved. It is a script or option error, not a latency.
 func driverRefused(res protocol.Result) bool {
-	if res.Success || res.Err == nil {
-		return false
-	}
-	if res.BytesSent != 0 || res.BytesReceived != 0 {
-		return false
-	}
-	msg := res.Err.Error()
-	return strings.Contains(msg, "allow_writes") ||
-		strings.Contains(msg, "allow_admin") ||
-		strings.Contains(msg, "needs {id}") ||
-		strings.Contains(msg, "not localhost") ||
-		strings.Contains(msg, "allowlisted")
+	return res.Refused
 }
 
 // scriptedIteration loads cfg.ScenarioPath (as JavaScript/TypeScript or
