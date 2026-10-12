@@ -861,7 +861,9 @@ fit your real flow. `sample-app.vegaload-plan.md` is a runbook with one
 ready-to-run `vegaload run` command per endpoint, for loading one endpoint at a
 time.
 
-### Call TCP, UDP, MQTT, Kafka, gRPC, PostgreSQL, MySQL, Redis, RabbitMQ, FTP and SFTP from a scenario
+### Call other protocols from a scenario
+
+The full list, with options and examples, is in [Supported protocols](#supported-protocols).
 
 A JavaScript scenario can also use the `tcp`, `udp`, `mqtt`, `kafka`, `grpc`, `postgres`, `mysql`, `redis`, `rabbitmq`, `ftp` and `sftp` globals. Each
 function is one call that does one job and returns what it read:
@@ -1441,9 +1443,9 @@ rules files (`.cursor/rules/vegaload.mdc` and `.cursor/rules/vegaload-smoke.mdc`
 and an MCP server entry merged
 into both `.mcp.json` and `.cursor/mcp.json`, pointing at this same compiled
 binary running `vegaload mcp serve`. Open the project in Claude Code or
-Cursor afterward and the agent has eight tools — `create_scenario`,
+Cursor afterward and the agent has nine tools — `create_scenario`,
 `run_test`, `get_results`, `suggest_thresholds`, `diagnose_failure`,
-`compare_reports`, `generate_from_spec`, `validate_scenario` — each one calling the exact CLI
+`compare_reports`, `generate_from_spec`, `validate_scenario`, `list_protocols` — each one calling the exact CLI
 command shown above and parsing its `-output json` result; there is no
 agent-only path that skips the CLI.
 
@@ -1507,7 +1509,7 @@ agent host it finds (Cursor, Claude Code, and Claude Desktop on macOS), and
 optionally at a target. For a host that is installed but has no VegaLoad
 MCP entry, that is a warning, not a failure — using the CLI alone is
 healthy. When VegaLoad *is* registered, doctor starts the configured
-server, performs a real MCP handshake, and expects all eight tools. An
+server, performs a real MCP handshake, and expects every tool. An
 installed editor with no VegaLoad setup does not fail the command.
 
 ```
@@ -1528,6 +1530,32 @@ credentials.
 See [`examples/scenarios/README.md`](./examples/scenarios/README.md) for
 this same walkthrough as a standalone, copy-pasteable script.
 
+## Supported protocols
+
+`vegaload protocols` prints this list. `vegaload protocols NAME` prints one
+protocol, including its options. `vegaload protocols -output json` prints the
+same data as JSON. Example paths are relative to a checkout of this repository.
+A released binary does not include the examples folder.
+
+<!-- vegaload:protocols -->
+| Protocol | Since | URL schemes | Example |
+| --- | --- | --- | --- |
+| http1 | 0.1.0 | http, https | [crud-flow.vl.js](examples/scenarios/crud-flow.vl.js) |
+| http2 | 0.1.0 | https | [crud-flow.vl.js](examples/scenarios/crud-flow.vl.js) |
+| grpc | 0.1.0 | grpc, grpcs | (none yet) |
+| websocket | 0.1.0 | ws, wss | [http-ws-chain.vl.js](examples/scenarios/http-ws-chain.vl.js) |
+| mqtt | 0.6.0 | mqtt, mqtts | [mqtt-tcp.vl.js](examples/scenarios/mqtt-tcp.vl.js) |
+| kafka | 0.6.0 | kafka, kafkas | [kafka-orders.vl.js](examples/scenarios/kafka-orders.vl.js) |
+| postgres | 0.7.0 | postgres, postgresql | [postgres-orders.vl.js](examples/scenarios/postgres-orders.vl.js) |
+| mysql | 0.7.0 | mariadb, mysql | [mysql-orders.vl.js](examples/scenarios/mysql-orders.vl.js) |
+| redis | 0.7.0 | redis, rediss | [redis-cache.vl.js](examples/scenarios/redis-cache.vl.js) |
+| rabbitmq | 0.7.0 | amqp, amqps | [rabbitmq-orders.vl.js](examples/scenarios/rabbitmq-orders.vl.js) |
+| ftp | 0.7.0 | ftp, ftps | [ftp-transfer.vl.js](examples/scenarios/ftp-transfer.vl.js) |
+| sftp | 0.9.0 | sftp | [sftp-transfer.vl.js](examples/scenarios/sftp-transfer.vl.js) |
+| tcp | 0.6.0 | tcp | (none yet) |
+| udp | 0.6.0 | udp | (none yet) |
+<!-- /vegaload:protocols -->
+
 ## Command reference
 
 | Command                 | What it does                                                          |
@@ -1541,6 +1569,7 @@ this same walkthrough as a standalone, copy-pasteable script.
 | `vegaload mcp eval`      | Run the versioned MCP tool-calling eval suite against this binary     |
 | `vegaload init`          | Register the MCP server and skill bundles (`-editor`, `-status`)      |
 | `vegaload doctor`        | Check the CLI, agent hosts, and a target; `-fix` repairs what it can   |
+| `vegaload protocols`     | List the supported protocols, with options and examples               |
 
 Every command supports `-output text` (default), `json`, or (`run` only)
 `jsonl`. Run `vegaload <command> -h` for its full flag list, or `vegaload

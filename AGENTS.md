@@ -69,6 +69,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - `vegaload compare <baseline.json> <candidate.json>` — diff a candidate report against a baseline; exits non-zero on regression. It also prints each protocol's p95 and error rate. Those lines do not change the exit code.
 - `vegaload mcp serve` — start the MCP server (stdio by default).
 - `vegaload doctor` — check the setup (CLI, agent hosts, target). Run it first when something is not working; `-fix` repairs what it safely can.
+- `vegaload protocols` — list every supported protocol, with options and examples. `vegaload protocols NAME` prints one. `-output json` prints the same data. An unknown `-protocol` exits 2 and prints this list.
 - `vegaload --move-to-harness <test-name|all>` — push a test to Harness RT.
 - `go test ./...` — run the test suite. Run this before proposing any change as finished.
 
