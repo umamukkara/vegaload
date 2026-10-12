@@ -565,13 +565,24 @@ func (c *ProtoClient) observeCall(ctx context.Context, name string, d time.Durat
 	}
 }
 
-func knownProtoFn(ns, fn string) bool {
-	for _, name := range ProtoFunctions()[ns] {
-		if name == fn {
-			return true
+// protoFnSet is the script call list, built once from ProtoFunctions so
+// the check on every call does not allocate.
+var protoFnSet = func() map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	for ns, fns := range ProtoFunctions() {
+		set := map[string]struct{}{}
+		for _, fn := range fns {
+			set[fn] = struct{}{}
 		}
+		out[ns] = set
 	}
-	return false
+	return out
+}()
+
+// knownProtoFn reports whether a script can call namespace.fn.
+func knownProtoFn(ns, fn string) bool {
+	_, ok := protoFnSet[ns][fn]
+	return ok
 }
 
 // refusedBeforeSend is a call the safety rules or a missing write flag

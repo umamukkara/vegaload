@@ -267,3 +267,25 @@ func TestXferMeasures_ZeroMeansRanOnlyWhenTheCallWorked(t *testing.T) {
 		t.Fatalf("failed roundtrip: %v", got)
 	}
 }
+
+// The check runs on every script call, so it must not allocate.
+func TestKnownProtoFn_NoAlloc(t *testing.T) {
+	ftp := ProtoFunctions()["ftp"]
+	sftp := ProtoFunctions()["sftp"]
+	if len(ftp) == 0 || len(sftp) == 0 {
+		t.Fatal("ftp and sftp calls are missing from ProtoFunctions")
+	}
+	allocs := testing.AllocsPerRun(1000, func() {
+		for _, fn := range ftp {
+			knownProtoFn("ftp", fn)
+		}
+		for _, fn := range sftp {
+			knownProtoFn("sftp", fn)
+		}
+		knownProtoFn("ftp", "not-a-call")
+		knownProtoFn("nope", "download")
+	})
+	if allocs != 0 {
+		t.Fatalf("knownProtoFn allocated %v times per run", allocs)
+	}
+}
