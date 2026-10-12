@@ -86,7 +86,9 @@ func (d *Driver) upload(l *live, path string, body []byte) (int64, xfercommon.Re
 	cr := &xfercommon.CountingReader{R: r}
 	var werr error
 	if want > 0 {
-		_, werr = io.Copy(f, cr)
+		// The sftp package uses concurrent writes only when the reader
+		// says how much it has left. A CountingReader does not say that.
+		_, werr = io.Copy(f, &sizedReader{Reader: cr, size: want})
 	}
 	cerr := f.Close()
 	rep := xfercommon.Reply{Size: cr.N}
@@ -261,6 +263,15 @@ func (d *Driver) cleanup(l *live, path string, rep xfercommon.Reply) xfercommon.
 	rep.Timing.DeleteMs = time.Since(start).Milliseconds()
 	return rep
 }
+
+// sizedReader tells the sftp package the upload size. With concurrent_writes
+// on, that is what lets File.ReadFrom send several writes at once.
+type sizedReader struct {
+	io.Reader
+	size int64
+}
+
+func (r *sizedReader) Size() int64 { return r.size }
 
 func kind(m os.FileMode) string {
 	switch {

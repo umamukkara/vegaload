@@ -1,12 +1,16 @@
 package sftp
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"golang.org/x/crypto/ssh"
 
@@ -167,6 +171,10 @@ func (d *Driver) readConn(password, passphrase *string) error {
 	if d.allowAdmin && !d.allowWrites {
 		return fmt.Errorf("sftp: allow_admin=true needs allow_writes=true as well")
 	}
+	d.concurrentWrites, err = d.target.OptionBool("concurrent_writes", false)
+	if err != nil {
+		return fmt.Errorf("sftp: %w", err)
+	}
 	return nil
 }
 
@@ -192,13 +200,55 @@ func (d *Driver) readJob() error {
 func connOption(k string) bool {
 	switch k {
 	case "username", "password_env", "key_file", "key_passphrase_env", "host_key",
-		"connections", "connection", "allow_writes", "allow_admin":
+		"connections", "connection", "allow_writes", "allow_admin", "concurrent_writes":
 		return true
 	}
 	return false
 }
 
+// A signer is safe to share across goroutines. The cache key is the file
+// path, its size and modification time, and a hash of the passphrase.
+// The passphrase text is not stored. Failures are not cached.
+type signerCacheKey struct {
+	path    string
+	size    int64
+	modNano int64
+	hasPass bool
+	passSum string
+}
+
+var (
+	signerMu    sync.Mutex
+	signerCache = map[signerCacheKey]ssh.Signer{}
+	signerLoads atomic.Int64
+)
+
 func loadKey(path, passphrase string, hasPass bool) (ssh.Signer, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("sftp: key_file %s: cannot read", path)
+	}
+	id := signerCacheKey{
+		path: path, size: info.Size(), modNano: info.ModTime().UnixNano(), hasPass: hasPass,
+	}
+	if hasPass {
+		sum := sha256.Sum256([]byte(passphrase))
+		id.passSum = hex.EncodeToString(sum[:])
+	}
+	signerMu.Lock()
+	defer signerMu.Unlock()
+	if s, ok := signerCache[id]; ok {
+		return s, nil
+	}
+	signer, err := parseKeyFile(path, passphrase, hasPass)
+	if err != nil {
+		return nil, err
+	}
+	signerCache[id] = signer
+	return signer, nil
+}
+
+func parseKeyFile(path, passphrase string, hasPass bool) (ssh.Signer, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("sftp: key_file %s: cannot read", path)
@@ -208,6 +258,7 @@ func loadKey(path, passphrase string, hasPass bool) (ssh.Signer, error) {
 			b[i] = 0
 		}
 	}()
+	signerLoads.Add(1)
 	var signer ssh.Signer
 	if hasPass {
 		pw := []byte(passphrase)

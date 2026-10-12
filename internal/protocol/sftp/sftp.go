@@ -31,6 +31,7 @@ var Options = []string{
 	"mode", "path", "size", "fill", "expect_size", "expect_sha256", "expect",
 	"limit", "hidden", "username", "password_env", "key_file", "key_passphrase_env",
 	"host_key", "connections", "connection", "allow_writes", "allow_admin",
+	"concurrent_writes",
 }
 
 // Driver is an SFTP protocol.Protocol.
@@ -38,18 +39,19 @@ type Driver struct {
 	target  protocol.Target
 	timeout time.Duration
 
-	host, port  string
-	username    string
-	password    string
-	passphrase  string
-	signer      ssh.Signer
-	hostKeys    []string
-	insecure    bool
-	perCall     bool
-	conns       int
-	allowWrites bool
-	allowAdmin  bool
-	script      bool
+	host, port       string
+	username         string
+	password         string
+	passphrase       string
+	signer           ssh.Signer
+	hostKeys         []string
+	insecure         bool
+	perCall          bool
+	conns            int
+	allowWrites      bool
+	allowAdmin       bool
+	concurrentWrites bool
+	script           bool
 
 	mode          string
 	path          string
@@ -398,7 +400,11 @@ func (d *Driver) open(ctx context.Context, held *atomic.Pointer[live]) (*live, e
 		_ = raw.Close()
 		return nil, context.DeadlineExceeded
 	}
-	cli, err := sftp.NewClient(sshc)
+	var clientOpts []sftp.ClientOption
+	if d.concurrentWrites {
+		clientOpts = append(clientOpts, sftp.UseConcurrentWrites(true))
+	}
+	cli, err := sftp.NewClient(sshc, clientOpts...)
 	if err != nil {
 		l.kill()
 		return nil, d.loginErr(err)

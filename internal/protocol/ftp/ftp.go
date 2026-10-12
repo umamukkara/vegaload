@@ -497,7 +497,7 @@ func (s *session) dialFunc(network, address string) (net.Conn, error) {
 		}
 		conn = tc
 	}
-	wrapped := &byteConn{Conn: conn}
+	wrapped := &byteConn{Conn: conn, data: !first}
 	if !first {
 		wrapped.readN = &s.readN
 		wrapped.writeN = &s.writeN
@@ -563,9 +563,22 @@ type byteConn struct {
 	net.Conn
 	readN  *atomic.Int64
 	writeN *atomic.Int64
+	data   bool
+	hsOnce sync.Once
+	hsErr  error
 }
 
+// dataTLSError is a TLS handshake failure on the data connection.
+// The control connection labels its own handshake before this exists.
+type dataTLSError struct{ err error }
+
+func (e *dataTLSError) Error() string { return e.err.Error() }
+func (e *dataTLSError) Unwrap() error { return e.err }
+
 func (c *byteConn) Read(p []byte) (int, error) {
+	if err := c.ready(); err != nil {
+		return 0, err
+	}
 	n, err := c.Conn.Read(p)
 	if n > 0 && c.readN != nil {
 		c.readN.Add(int64(n))
@@ -574,6 +587,9 @@ func (c *byteConn) Read(p []byte) (int, error) {
 }
 
 func (c *byteConn) Write(p []byte) (int, error) {
+	if err := c.ready(); err != nil {
+		return 0, err
+	}
 	n, err := c.Conn.Write(p)
 	if n > 0 && c.writeN != nil {
 		c.writeN.Add(int64(n))
@@ -582,10 +598,31 @@ func (c *byteConn) Write(p []byte) (int, error) {
 }
 
 func (c *byteConn) Handshake() error {
+	if c.data {
+		return c.ready()
+	}
 	if h, ok := c.Conn.(interface{ Handshake() error }); ok {
 		return h.Handshake()
 	}
 	return nil
+}
+
+// ready runs the data-connection handshake on the first read or write.
+// The server starts that handshake only after the transfer command.
+func (c *byteConn) ready() error {
+	if !c.data {
+		return nil
+	}
+	c.hsOnce.Do(func() {
+		h, ok := c.Conn.(interface{ Handshake() error })
+		if !ok {
+			return
+		}
+		if err := h.Handshake(); err != nil {
+			c.hsErr = &dataTLSError{err: err}
+		}
+	})
+	return c.hsErr
 }
 
 func keepSession(err error) bool {
@@ -611,6 +648,14 @@ func (d *Driver) explain(parent, ctx context.Context, err error, reused bool) er
 	}
 	if callTimedOut(ctx, err) {
 		return errors.New(d.redact(fmt.Sprintf("ftp: timed out after %s", d.timeout)))
+	}
+	var de *dataTLSError
+	if errors.As(err, &de) {
+		msg := fmt.Sprintf("ftp: the TLS handshake with the server failed (data): %s", cut(de.Error(), 300))
+		if certErr(de) {
+			msg += ": use -insecure for a test server"
+		}
+		return errors.New(d.redact(msg))
 	}
 	if strings.HasPrefix(err.Error(), "ftp:") {
 		return errors.New(d.redact(cut(err.Error(), 300)))
