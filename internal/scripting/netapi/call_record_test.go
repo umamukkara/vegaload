@@ -130,8 +130,8 @@ func TestHTTP_RecordsAndSkipsRefused(t *testing.T) {
 
 func TestXferMeasures_NewConnectionAndSkippedPhase(t *testing.T) {
 	rec := report.NewCollector()
-	recordXferMeasures(rec, "ftp", "upload", XferTiming{UploadMs: 0, ConnectMs: 0, LoginMs: 0})
-	recordXferMeasures(rec, "ftp", "list", XferTiming{ConnectMs: 4, LoginMs: 2})
+	recordXferMeasures(rec, "ftp", "upload", true, XferTiming{UploadMs: 0, ConnectMs: 0, LoginMs: 0})
+	recordXferMeasures(rec, "ftp", "list", true, XferTiming{ConnectMs: 4, LoginMs: 2})
 	got := rec.Finish("fixed-vus", time.Second)
 	// The list call above did not record a call, only measures. upload_time
 	// is present at 0 because upload ran that phase. connect_time is not,
@@ -236,4 +236,34 @@ func errText(r *ProtoReply) string {
 		return ""
 	}
 	return r.Error
+}
+
+// A phase that took under 1 ms reports 0. When the call worked it did run,
+// so it must be counted, or the percentiles keep only the slow runs. When the
+// call failed, a 0 may mean the phase was never reached.
+func TestXferMeasures_ZeroMeansRanOnlyWhenTheCallWorked(t *testing.T) {
+	counts := func(op string, ok bool, tm XferTiming) map[string]int64 {
+		rec := report.NewCollector()
+		recordXferMeasures(rec, "ftp", op, ok, tm)
+		out := map[string]int64{}
+		res := rec.Finish("fixed-vus", time.Second)
+		if len(res.Protocols) == 0 {
+			return out
+		}
+		for _, m := range res.Protocols[0].Measures {
+			out[m.Name] = m.Count
+		}
+		return out
+	}
+	got := counts("roundtrip", true, XferTiming{UploadMs: 5, DownloadMs: 0, DeleteMs: 0})
+	if got["upload_time"] != 1 || got["download_time"] != 1 || got["delete_time"] != 1 {
+		t.Fatalf("worked roundtrip: %v", got)
+	}
+	if got := counts("upload", false, XferTiming{}); len(got) != 0 {
+		t.Fatalf("failed upload with no time recorded %v", got)
+	}
+	got = counts("roundtrip", false, XferTiming{UploadMs: 7})
+	if got["upload_time"] != 1 || len(got) != 1 {
+		t.Fatalf("failed roundtrip: %v", got)
+	}
 }

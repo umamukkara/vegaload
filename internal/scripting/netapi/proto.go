@@ -561,7 +561,7 @@ func (c *ProtoClient) observeCall(ctx context.Context, name string, d time.Durat
 	}
 	c.calls.RecordCall(ns, fn, d, !reply.OK, reply.BytesSent, reply.BytesReceived)
 	if reply.IsXfer && (ns == "ftp" || ns == "sftp") {
-		recordXferMeasures(c.calls, ns, fn, reply.XferTiming)
+		recordXferMeasures(c.calls, ns, fn, reply.OK, reply.XferTiming)
 	}
 }
 
@@ -588,14 +588,20 @@ func refusedBeforeSend(reply *ProtoReply) bool {
 		strings.Contains(msg, "allowlisted")
 }
 
-// recordXferMeasures records the phases an FTP or SFTP call actually ran.
-// connect_time and login_time are recorded only when the value is above 0.
-// A reused connection reports those as 0, and a 0 would pull the percentiles
-// down. upload_time, download_time and delete_time are recorded when the
-// operation is one that runs that phase. A roundtrip records download_time
-// and delete_time only when that phase reported a time, because a roundtrip
-// that fails early never runs them, and a 0 then means "did not run".
-func recordXferMeasures(rec CallRecorder, protocol, op string, t XferTiming) {
+// recordXferMeasures records the phases an FTP or SFTP call ran.
+// The times are whole milliseconds, so a 0 can mean "did not run" or "ran in
+// under 1 ms". A call that worked ran every phase its mode has, so those are
+// recorded even at 0. A call that failed is recorded only for a phase that
+// reports a time above 0, because a phase it never reached also reports 0.
+// connect_time and login_time are recorded only above 0: a reused connection
+// reports 0, and a 0 would pull the percentiles down. A connect or login
+// under 1 ms is therefore not counted.
+func recordXferMeasures(rec CallRecorder, protocol, op string, ok bool, t XferTiming) {
+	phase := func(name string, ms int64) {
+		if ok || ms > 0 {
+			rec.RecordMeasure(protocol, name, time.Duration(ms)*time.Millisecond)
+		}
+	}
 	if t.ConnectMs > 0 {
 		rec.RecordMeasure(protocol, "connect_time", time.Duration(t.ConnectMs)*time.Millisecond)
 	}
@@ -604,19 +610,15 @@ func recordXferMeasures(rec CallRecorder, protocol, op string, t XferTiming) {
 	}
 	switch op {
 	case "upload":
-		rec.RecordMeasure(protocol, "upload_time", time.Duration(t.UploadMs)*time.Millisecond)
+		phase("upload_time", t.UploadMs)
 	case "download":
-		rec.RecordMeasure(protocol, "download_time", time.Duration(t.DownloadMs)*time.Millisecond)
+		phase("download_time", t.DownloadMs)
 	case "delete":
-		rec.RecordMeasure(protocol, "delete_time", time.Duration(t.DeleteMs)*time.Millisecond)
+		phase("delete_time", t.DeleteMs)
 	case "roundtrip":
-		rec.RecordMeasure(protocol, "upload_time", time.Duration(t.UploadMs)*time.Millisecond)
-		if t.DownloadMs > 0 {
-			rec.RecordMeasure(protocol, "download_time", time.Duration(t.DownloadMs)*time.Millisecond)
-		}
-		if t.DeleteMs > 0 {
-			rec.RecordMeasure(protocol, "delete_time", time.Duration(t.DeleteMs)*time.Millisecond)
-		}
+		phase("upload_time", t.UploadMs)
+		phase("download_time", t.DownloadMs)
+		phase("delete_time", t.DeleteMs)
 	}
 }
 
