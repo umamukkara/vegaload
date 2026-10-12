@@ -452,6 +452,18 @@ func TestSchemeTable(t *testing.T) {
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)
 	}
+	if got := strings.Join(SchemesFor("ftp"), ","); got != "ftp,ftps" {
+		t.Errorf("ftp schemes = %q", got)
+	}
+	if got := strings.Join(SchemesFor("http2"), ","); got != "https" {
+		t.Errorf("http2 schemes = %q", got)
+	}
+	if got := strings.Join(SchemesFor("http1"), ","); got != "http,https" {
+		t.Errorf("http1 schemes = %q", got)
+	}
+	if ProtocolForScheme("postgresql") != "postgres" || ProtocolForScheme("HTTPS") != "http1" || ProtocolForScheme("nope") != "" {
+		t.Errorf("ProtocolForScheme lookup failed")
+	}
 }
 
 // A UDP target has no connection to open, so the connect check is

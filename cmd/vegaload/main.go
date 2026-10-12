@@ -43,6 +43,8 @@ func run(args []string) int {
 		return cmdInit(args[1:])
 	case "doctor":
 		return cmdDoctor(args[1:])
+	case "protocols":
+		return cmdProtocols(args[1:])
 	case "validate":
 		return cmdValidate(args[1:])
 	case "import":
@@ -77,6 +79,7 @@ Commands:
   validate   Run a scenario once, with one user, to check that it works
   import     Make a scenario from a recording (import har <file.har>)
   doctor     Check that VegaLoad is set up and working (CLI, agent hosts, target)
+  protocols  List the supported protocols, with options and examples
   version    Print the vegaload version
   help       Show this help text
 

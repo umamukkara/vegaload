@@ -34,6 +34,7 @@ func NewTools(exePath string) []Tool {
 		compareReportsTool(exePath),
 		generateFromSpecTool(exePath),
 		validateScenarioTool(exePath),
+		listProtocolsTool(exePath),
 	}
 }
 
@@ -131,7 +132,7 @@ func runTestTool(exePath string) Tool {
 			"properties": map[string]any{
 				"scenario_path":   map[string]any{"type": "string", "description": "path to a scenario file (mutually exclusive with target/protocol)"},
 				"target":          map[string]any{"type": "string", "description": "target URL or host:port (protocol-direct mode)"},
-				"protocol":        map[string]any{"type": "string", "description": "http1, http2, grpc, websocket, mqtt, kafka, postgres, mysql, redis, rabbitmq, ftp, sftp, tcp, or udp (protocol-direct mode)"},
+				"protocol":        map[string]any{"type": "string", "description": "http1, http2, grpc, websocket, mqtt, kafka, postgres, mysql, redis, rabbitmq, ftp, sftp, tcp, or udp (protocol-direct mode). Call list_protocols for the options and examples."},
 				"options":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "driver options, each \"key=value\" (protocol-direct mode). Each protocol has its own keys"},
 				"executor":        map[string]any{"type": "string", "description": "fixed-vus (default), ramp, step, or constant-arrival-rate"},
 				"vus":             map[string]any{"type": "integer", "description": "virtual users (fixed-vus)"},
@@ -525,6 +526,44 @@ var CoreToolNames = []string{
 	"compare_reports",
 	"generate_from_spec",
 	"validate_scenario",
+	"list_protocols",
+}
+
+// listProtocolsTool wraps `vegaload protocols -output json`.
+func listProtocolsTool(exePath string) Tool {
+	return Tool{
+		Name:        "list_protocols",
+		Description: "List every supported protocol, with options and examples. Same JSON as `vegaload protocols -output json`. Call this before choosing a protocol.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{"type": "string", "description": "One -protocol value. Omit it to list every protocol."},
+			},
+		},
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in struct {
+				Name string `json:"name"`
+			}
+			if len(raw) > 0 && string(raw) != "null" {
+				if err := json.Unmarshal(raw, &in); err != nil {
+					return nil, fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+			args := []string{"protocols", "-output", "json"}
+			if in.Name != "" {
+				args = append(args, in.Name)
+			}
+			stdout, err := RunCLI(ctx, exePath, args...)
+			if err != nil {
+				return nil, err
+			}
+			var result map[string]any
+			if err := json.Unmarshal(stdout, &result); err != nil {
+				return nil, fmt.Errorf("parsing `vegaload protocols` output: %w", err)
+			}
+			return result, nil
+		},
+	}
 }
 
 // --- validate_scenario : wraps `vegaload validate` (FR-MCP-07) ---
