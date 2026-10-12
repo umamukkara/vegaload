@@ -323,17 +323,41 @@ func TestConcurrentWrites_Roundtrip(t *testing.T) {
 		}
 		_ = d.Close()
 	}
+	// A sink path takes a big upload fast. A roundtrip reads the file back,
+	// so it stays small. Both check the bytes.
 	res, _ := run(t, s, modeUpload, map[string]string{
-		"path": "/up-{id}.bin", "size": "64MiB", "allow_writes": "true", "concurrent_writes": "true",
-	}, "", 3*time.Minute)
+		"path": "/sink/up-{id}.bin", "size": "64MiB", "allow_writes": "true", "concurrent_writes": "true",
+	}, "", time.Minute)
 	if !res.Success {
 		t.Fatal(res.Err)
 	}
 	res, rep := run(t, s, modeRoundtrip, map[string]string{
-		"path": "/rt-{id}.bin", "size": "64MiB", "fill": "zero", "allow_writes": "true", "concurrent_writes": "true",
-	}, "", 3*time.Minute)
-	if !res.Success || rep.Size != 64<<20 || strings.Contains(rep.Text, "left on the server") {
+		"path": "/rt-{id}.bin", "size": "4MiB", "fill": "zero", "allow_writes": "true", "concurrent_writes": "true",
+	}, "", time.Minute)
+	if !res.Success || rep.Size != 4<<20 || strings.Contains(rep.Text, "left on the server") {
 		t.Fatalf("success=%v size=%d text=%q err=%v", res.Success, rep.Size, rep.Text, res.Err)
+	}
+}
+
+// With concurrent_writes the upload must really send writes at once.
+// The fake server waits a fixed time per write, so ordered writes are slow
+// and overlapping writes are fast.
+func TestConcurrentWrites_AreConcurrent(t *testing.T) {
+	s := srv(t)
+	s.SlowData(4 << 20)
+	took := map[string]time.Duration{}
+	for _, v := range []string{"false", "true"} {
+		start := time.Now()
+		res, _ := run(t, s, modeUpload, map[string]string{
+			"path": "/sink/c-{id}.bin", "size": "8MiB", "allow_writes": "true", "concurrent_writes": v,
+		}, "", time.Minute)
+		if !res.Success {
+			t.Fatal(res.Err)
+		}
+		took[v] = time.Since(start)
+	}
+	if took["true"]*2 > took["false"] {
+		t.Fatalf("concurrent_writes=true took %s, false took %s: the writes did not overlap", took["true"], took["false"])
 	}
 }
 
