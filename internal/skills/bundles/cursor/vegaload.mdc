@@ -10,7 +10,7 @@ baselines. For a quick check that an API works under a few users, use the
 `vegaload-smoke` rule first.
 
 `vegaload init` registered VegaLoad's MCP server for this project (see
-`.cursor/mcp.json`). It exposes eight tools, each a thin wrapper around a
+`.cursor/mcp.json`). It exposes nine tools, each a thin wrapper around a
 `vegaload` CLI command you could run yourself in a terminal:
 
 - `create_scenario` — scaffold a scenario file (`vegaload new`). The
@@ -49,6 +49,8 @@ baselines. For a quick check that an API works under a few users, use the
 - `generate_from_spec` — write a runnable scenario (every operation as a named
   step) and a runbook of `vegaload run` commands from a JSON OpenAPI spec (JSON
   only, not YAML). The order is a guess: validate it and edit it.
+- `list_protocols` — list every supported protocol, with options and examples
+  (`vegaload protocols`). Call it before choosing a `protocol` value.
 - `validate_scenario` — run a scenario once, with one user, and report whether
   it works (`vegaload validate`). Makes real calls under the same host rules as
   `run_test`. Returns `valid`, and when not valid, `stage` and `error`. Call it

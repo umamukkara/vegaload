@@ -11,7 +11,7 @@ users, use the `vegaload-smoke` skill first. A clean smoke run is a good
 start before any load run.
 
 VegaLoad is an open-source load testing tool. `vegaload init` registered its MCP
-server for this project, which exposes eight tools — every one of them a thin
+server for this project, which exposes nine tools — every one of them a thin
 wrapper around the same `vegaload` CLI commands you could run yourself from a
 terminal, so nothing here does anything a human running `vegaload` by hand
 couldn't also do.
@@ -73,6 +73,8 @@ couldn't also do.
   id is used by the calls under it), so validate it and edit it to fit the
   real flow. Only JSON specs are supported — ask the user to export YAML specs
   to JSON first.
+- **list_protocols** — list every supported protocol, with options and examples
+  (`vegaload protocols`). Call it before choosing a `-protocol` value.
 - **validate_scenario** — run a scenario once, with one user and one iteration,
   and report whether it works (`vegaload validate`). It makes real calls, under
   the same host rules as **run_test**. Returns `valid`, and when not valid, the

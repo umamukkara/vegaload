@@ -578,3 +578,18 @@ func TestRunTestAndValidateTools_PassInputFlags(t *testing.T) {
 		t.Errorf("validate_scenario args = %v", args2)
 	}
 }
+
+func TestListProtocolsTool_CallsTheCLI(t *testing.T) {
+	bin, argsFile := argRecordingBinary(t, `{"schema_version":1,"protocols":[]}`, 0)
+	out, err := callTool(t, NewTools(bin), "list_protocols", map[string]any{"name": "sftp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := out.(map[string]any); m["schema_version"] != float64(1) {
+		t.Fatalf("result = %v", m)
+	}
+	got := strings.Join(readArgs(t, argsFile), " ")
+	if got != "protocols -output json sftp" {
+		t.Fatalf("args = %q", got)
+	}
+}
