@@ -1142,7 +1142,7 @@ func (c *ProtoClient) ftpConn(call ProtoCall, opts map[string]string) (*ftp.Driv
 // options describe the job. TLS options are not among them.
 var sftpConnOptions = []string{
 	"username", "key_file", "host_key", "connections", "connection",
-	"allow_writes", "allow_admin",
+	"allow_writes", "allow_admin", "concurrent_writes",
 }
 
 // SFTP does one SFTP job. mode is connect, download, upload, list, stat,

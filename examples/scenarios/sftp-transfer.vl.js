@@ -16,6 +16,7 @@ export default function () {
     password: env.SFTP_PASSWORD,
     host_key: env.SFTP_HOST_KEY,
     allow_writes: true,
+    // concurrent_writes: true, // about 3 times faster on OpenSSH; test it on this server first
   };
 
   // {id} is a new name on every call. roundtrip deletes that file.

@@ -305,6 +305,38 @@ func TestListStatDeleteRoundtrip(t *testing.T) {
 	}
 }
 
+func TestConcurrentWrites_Roundtrip(t *testing.T) {
+	s := srv(t)
+	t.Setenv("SFTP_PW", "secret")
+	for _, v := range []string{"true", "false"} {
+		d, err := New(protocol.Target{
+			URL: s.URL(), InsecureSkipVerify: true,
+			Options: map[string]string{
+				"mode": "connect", "password_env": "SFTP_PW", "concurrent_writes": v,
+			},
+		}, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.concurrentWrites != (v == "true") {
+			t.Fatalf("concurrent_writes=%s stored %v", v, d.concurrentWrites)
+		}
+		_ = d.Close()
+	}
+	res, _ := run(t, s, modeUpload, map[string]string{
+		"path": "/up-{id}.bin", "size": "64MiB", "allow_writes": "true", "concurrent_writes": "true",
+	}, "", 3*time.Minute)
+	if !res.Success {
+		t.Fatal(res.Err)
+	}
+	res, rep := run(t, s, modeRoundtrip, map[string]string{
+		"path": "/rt-{id}.bin", "size": "64MiB", "fill": "zero", "allow_writes": "true", "concurrent_writes": "true",
+	}, "", 3*time.Minute)
+	if !res.Success || rep.Size != 64<<20 || strings.Contains(rep.Text, "left on the server") {
+		t.Fatalf("success=%v size=%d text=%q err=%v", res.Success, rep.Size, rep.Text, res.Err)
+	}
+}
+
 func TestRoundtrip_LeavesEmptyDirectory(t *testing.T) {
 	s := srv(t)
 	t.Setenv("SFTP_PW", "secret")

@@ -53,13 +53,19 @@ func TestLive_SFTP(t *testing.T) {
 				t.Fatalf("roundtrip %s left a file: %s", size, rep.Text)
 			}
 		}
+		res, rep := liveRun(t, raw, modeRoundtrip, dir+"/vegaload-test-{id}.bin", base, map[string]string{
+			"size": "50MiB", "fill": "zero", "concurrent_writes": "true",
+		}, 3*time.Minute)
+		if !res.Success || rep.Size != 50<<20 || strings.Contains(rep.Text, "left on the server") {
+			t.Fatalf("concurrent_writes roundtrip: success=%v size=%d text=%q err=%v", res.Success, rep.Size, rep.Text, res.Err)
+		}
 		name := fmt.Sprintf("vegaload-test-%d.bin", time.Now().UnixNano())
 		path := dir + "/" + name
-		res, _ := liveRun(t, raw, modeUpload, path, base, map[string]string{"size": "32", "fill": "text"}, 15*time.Second)
+		res, _ = liveRun(t, raw, modeUpload, path, base, map[string]string{"size": "32", "fill": "text"}, 15*time.Second)
 		if !res.Success {
 			t.Fatal(res.Err)
 		}
-		res, rep := liveRun(t, raw, modeList, dir, base, map[string]string{"expect": name}, 15*time.Second)
+		res, rep = liveRun(t, raw, modeList, dir, base, map[string]string{"expect": name}, 15*time.Second)
 		if !res.Success || rep.Total < 1 {
 			t.Fatalf("list: %v total %d", res.Err, rep.Total)
 		}

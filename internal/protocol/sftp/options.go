@@ -171,6 +171,10 @@ func (d *Driver) readConn(password, passphrase *string) error {
 	if d.allowAdmin && !d.allowWrites {
 		return fmt.Errorf("sftp: allow_admin=true needs allow_writes=true as well")
 	}
+	d.concurrentWrites, err = d.target.OptionBool("concurrent_writes", false)
+	if err != nil {
+		return fmt.Errorf("sftp: %w", err)
+	}
 	return nil
 }
 
@@ -196,7 +200,7 @@ func (d *Driver) readJob() error {
 func connOption(k string) bool {
 	switch k {
 	case "username", "password_env", "key_file", "key_passphrase_env", "host_key",
-		"connections", "connection", "allow_writes", "allow_admin":
+		"connections", "connection", "allow_writes", "allow_admin", "concurrent_writes":
 		return true
 	}
 	return false

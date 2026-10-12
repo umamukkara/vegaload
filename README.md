@@ -750,6 +750,7 @@ The host key is checked by SHA256 fingerprint. `host_key` is one fingerprint, or
 | `connection` | `shared` | `per_call` dials a new connection and drops it. |
 | `allow_writes` | false | Required for `upload`, `roundtrip` and `delete`. |
 | `allow_admin` | false | Also required for `delete`, and for an `upload` whose path has no `{id}`. Needs `allow_writes` as well. |
+| `concurrent_writes` | false | Send several writes at once. On OpenSSH this is about 3 times faster. Turn it on after a test against the target server. Some servers handle out-of-order writes badly. |
 
 `ca_file`, `cert_file`, `tls_server_name` and the other TLS options are unknown options here. SFTP is not FTP with TLS.
 
@@ -760,7 +761,7 @@ The host key is checked by SHA256 fingerprint. `host_key` is one fingerprint, or
 - One SSH connection carries many calls. A timeout closes that connection, so the other calls on it fail too. `connections` greater than 1 limits how many calls share one connection. The call timeout should be longer than the slowest transfer. An SSH connection uses one CPU core for encryption, so more connections can raise throughput.
 - `loginMs` is the whole SSH handshake, the login and the SFTP start. It is not split. A reused connection reports `connectMs` and `loginMs` as 0.
 - A listing does not report bytes received. Names that start with `.` are dropped unless `hidden=true`. The reply is sorted by name. `total` counts after that filter.
-- A failed upload can leave a partial file. `roundtrip` still tries to delete its file, for up to one second. If that delete fails, the call can still pass and the text names the file that is left.
+- A failed upload can leave a partial file. `concurrent_writes` does not change that. `roundtrip` still checks the bytes and tries to delete its file, for up to one second. If that delete fails, the call can still pass and the text names the file that is left.
 - The timeout covers the whole call, including the dial and the transfer. A call that takes too long says `timed out after <duration>`. Throughput in the report is `bytesReceived` or `bytesSent` divided by the time the call took.
 - Servers limit how many logins may start at once (MaxStartups) and how many connections one user may hold. A large `connections` value can be refused.
 - There is no agent, no keyboard-interactive login, no certificates, no `known_hosts` file, no SCP, no port forwarding and no remote command. A very old key exchange such as `diffie-hellman-group1-sha1` will not connect. This build still accepts an `ssh-rsa` host key.

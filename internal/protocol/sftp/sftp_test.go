@@ -118,6 +118,8 @@ func TestBadOptions(t *testing.T) {
 		{"bad host key", base(map[string]string{"mode": "connect", "password_env": "SFTP_PW", "host_key": "not-a-fingerprint-secret"}), "SHA256:", "not-a-fingerprint-secret"},
 		{"host key and insecure", protocol.Target{URL: s.URL(), Options: map[string]string{"mode": "connect", "password_env": "SFTP_PW", "host_key": s.HostKeyFingerprint()}, InsecureSkipVerify: true}, "cannot be used with -insecure", ""},
 		{"passphrase without key", base(map[string]string{"mode": "connect", "password_env": "SFTP_PW", "key_passphrase_env": "SFTP_PP"}), "needs key_file", ""},
+		{"concurrent writes maybe", base(map[string]string{"mode": "connect", "password_env": "SFTP_PW", "concurrent_writes": "maybe"}), "want true or false", ""},
+		{"concurrent writes typo", base(map[string]string{"mode": "connect", "password_env": "SFTP_PW", "concurrent_write": "true"}), "unknown option", ""},
 		{"tls option", base(map[string]string{"mode": "connect", "password_env": "SFTP_PW", "ca_file": "ca.pem"}), "unknown option", ""},
 		{"foreign", base(map[string]string{"mode": "connect", "password_env": "SFTP_PW", "path": "/a"}), "not used in mode connect", ""},
 		{"newline path", base(map[string]string{"mode": "download", "password_env": "SFTP_PW", "path": "a\nb"}), "line break", "a\nb"},
