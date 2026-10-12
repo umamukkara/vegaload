@@ -48,7 +48,7 @@ func TestDrivers_EveryEntryBuilds(t *testing.T) {
 		}
 		seen[d.name] = true
 
-		iter, closeFn, err := protocolIteration(d.name, wireTestTarget(d.name), 0)
+		iter, closeFn, err := protocolIteration(d.name, wireTestTarget(d.name), 0, nil)
 		if err != nil {
 			t.Errorf("protocol %q does not build: %v", d.name, err)
 			continue
@@ -67,7 +67,7 @@ func TestDrivers_EveryEntryBuilds(t *testing.T) {
 }
 
 func TestProtocolIteration_UnknownProtocol(t *testing.T) {
-	_, _, err := protocolIteration("nope", protocol.Target{URL: "x"}, 0)
+	_, _, err := protocolIteration("nope", protocol.Target{URL: "x"}, 0, nil)
 	if err == nil || !strings.Contains(err.Error(), "unknown -protocol") || !strings.Contains(err.Error(), "http1") {
 		t.Fatalf("err = %v, want it to name the choices", err)
 	}
@@ -79,7 +79,7 @@ func TestProtocolIteration_UnknownOptionIsRefused(t *testing.T) {
 	for _, d := range drivers {
 		tg := wireTestTarget(d.name)
 		tg.Options = map[string]string{"definitely-not-a-key": "1"}
-		_, _, err := protocolIteration(d.name, tg, 0)
+		_, _, err := protocolIteration(d.name, tg, 0, nil)
 		if err == nil || !strings.Contains(err.Error(), "unknown option definitely-not-a-key") {
 			t.Errorf("protocol %q: err = %v, want an unknown option error", d.name, err)
 		}
@@ -89,7 +89,7 @@ func TestProtocolIteration_UnknownOptionIsRefused(t *testing.T) {
 func TestProtocolIteration_DriverWithoutOptionsSaysSo(t *testing.T) {
 	tg := wireTestTarget("http1")
 	tg.Options = map[string]string{"read": "64"}
-	_, _, err := protocolIteration("http1", tg, 0)
+	_, _, err := protocolIteration("http1", tg, 0, nil)
 	if err == nil || !strings.Contains(err.Error(), "unknown option read") {
 		t.Fatalf("err = %v, want an unknown option error", err)
 	}
@@ -157,7 +157,7 @@ func wireTestTarget(name string) protocol.Target {
 func TestProtocolIteration_KnownOptionIsAccepted(t *testing.T) {
 	tg := wireTestTarget("tcp")
 	tg.Options = map[string]string{"read": "4", "expect": "ok"}
-	if _, closeFn, err := protocolIteration("tcp", tg, 0); err != nil {
+	if _, closeFn, err := protocolIteration("tcp", tg, 0, nil); err != nil {
 		t.Fatalf("known tcp options refused: %v", err)
 	} else {
 		_ = closeFn()
@@ -165,7 +165,7 @@ func TestProtocolIteration_KnownOptionIsAccepted(t *testing.T) {
 
 	tg = wireTestTarget("udp")
 	tg.Options = map[string]string{"read": "4"}
-	if _, _, err := protocolIteration("udp", tg, 0); err == nil {
+	if _, _, err := protocolIteration("udp", tg, 0, nil); err == nil {
 		t.Error("read is a tcp option and must be refused for udp")
 	}
 }
@@ -397,6 +397,8 @@ func TestCmdRun_FTPProtocol(t *testing.T) {
 	}
 	if res := run("-opt", "mode=download", "-opt", "path=/pub/data.bin", "-opt", "expect_size=9"); res.Total == 0 || res.Failed != 0 {
 		t.Errorf("download: total %d failed %d", res.Total, res.Failed)
+	} else if p, ok := res.Protocol("ftp"); !ok || len(res.Protocols) != 1 || p.Total != res.Total || len(p.Operations) != 1 || p.Operations[0].Name != "download" || p.Operations[0].Total != res.Total {
+		t.Errorf("download protocol = %+v ok %v, run total %d", p, ok, res.Total)
 	}
 	if res := run("-opt", "mode=list", "-opt", "path=/pub", "-opt", "expect=data.bin"); res.Total == 0 || res.Failed != 0 {
 		t.Errorf("list: total %d failed %d", res.Total, res.Failed)
@@ -474,4 +476,96 @@ func TestCmdRun_SFTPProtocol(t *testing.T) {
 	if _, ok := srv.File("/pub/gone.bin"); ok {
 		t.Error("delete left /pub/gone.bin")
 	}
+}
+
+// A scenario that calls HTTP, PostgreSQL and FTP records three protocols,
+// in the order the script first called them.
+func TestCmdRun_ScenarioRecordsProtocols(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(api.Close)
+	pg := postgrestest.Start(t, func(string) []postgrestest.Result {
+		return []postgrestest.Result{{
+			Columns: []postgrestest.Column{postgrestest.Int("n")},
+			Rows:    [][]any{{"1"}},
+		}}
+	})
+	ftpSrv := ftptest.Start(t)
+
+	jsSrc := `export default function () {
+  http.get("` + api.URL + `");
+  const pg = postgres.query("` + pg.URL() + `", {sslmode: "disable", body: "select 1"});
+  if (!pg.ok) throw new Error(pg.error);
+  const rt = ftp.roundtrip("` + ftpSrv.URL() + `", {path: "/rt-{id}", size: "8", allow_writes: true});
+  if (!rt.ok) throw new Error(rt.error);
+}
+`
+	pySrc := `def iteration():
+    http.get("` + api.URL + `")
+    pg = postgres.query("` + pg.URL() + `", sslmode="disable", body="select 1")
+    if not pg.ok:
+        raise Exception(pg.error)
+    rt = ftp.roundtrip("` + ftpSrv.URL() + `", path="/rt-{id}", size="8", allow_writes=True)
+    if not rt.ok:
+        raise Exception(rt.error)
+`
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{"mixed.vl.js", jsSrc},
+		{"mixed.py", pySrc},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			scenario := filepath.Join(dir, tc.name)
+			if err := os.WriteFile(scenario, []byte(tc.src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(dir, "summary.json")
+			code := cmdRun([]string{
+				"-vus", "1", "-duration", "400ms", "-no-report",
+				"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+				scenario,
+			})
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0", code)
+			}
+			data, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var res report.Result
+			if err := json.Unmarshal(data, &res); err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Protocols) != 3 {
+				t.Fatalf("protocols = %+v", recordedNames(res.Protocols))
+			}
+			want := []string{"http", "postgres", "ftp"}
+			for i, name := range want {
+				if res.Protocols[i].Name != name || res.Protocols[i].Total == 0 || res.Protocols[i].Failed != 0 {
+					t.Errorf("protocol %d = %+v, want %s", i, res.Protocols[i], name)
+				}
+			}
+			var uploads int64
+			for _, m := range res.Protocols[2].Measures {
+				if m.Name == "upload_time" {
+					uploads = m.Count
+				}
+			}
+			if uploads == 0 {
+				t.Errorf("ftp measures = %+v", res.Protocols[2].Measures)
+			}
+		})
+	}
+}
+
+func recordedNames(ps []report.ProtocolResult) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.Name
+	}
+	return out
 }

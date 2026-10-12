@@ -70,6 +70,17 @@ func JUnitXML(res *Result) ([]byte, error) {
 			{"p95", res.Latency.P95.String()},
 		},
 	}
+	for _, p := range res.Protocols {
+		prefix := "protocol." + p.Name + "."
+		ms := float64(p.Latency.P95) / float64(time.Millisecond)
+		suite.Properties = append(suite.Properties,
+			junitProperty{prefix + "calls", strconv.FormatInt(p.Total, 10)},
+			junitProperty{prefix + "failed", strconv.FormatInt(p.Failed, 10)},
+			junitProperty{prefix + "p95_ms", strconv.FormatFloat(ms, 'f', -1, 64)},
+			junitProperty{prefix + "bytes_sent", strconv.FormatInt(p.BytesSent, 10)},
+			junitProperty{prefix + "bytes_received", strconv.FormatInt(p.BytesReceived, 10)},
+		)
+	}
 	if !res.StartedAt.IsZero() {
 		suite.Timestamp = res.StartedAt.UTC().Format("2006-01-02T15:04:05")
 	}

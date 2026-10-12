@@ -47,6 +47,7 @@ func renderHTML(res *Result) string {
 	b.WriteString(baselineSection(res))
 	b.WriteString(checksSection(res))
 	b.WriteString(stepsSection(res))
+	b.WriteString(protocolsSection(res))
 
 	fmt.Fprintf(&b, "<section class=\"latency\">\n<h2>Latency</h2>\n<table>\n<tr><th>min</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>max</th><th>mean</th></tr>\n")
 	fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n</table>\n</section>\n",
@@ -172,6 +173,46 @@ func stepsSection(res *Result) string {
 	}
 	b.WriteString("</table>\n</section>\n")
 	return b.String()
+}
+
+// protocolsSection is the per-protocol table. A plain HTTP run does not
+// show it, so that report stays the same as before. Strings are escaped.
+// Operations are indented rows. Measures sit in a second table under the
+// protocol. The markup uses the classes the steps table already uses.
+func protocolsSection(res *Result) string {
+	if !ShowProtocols(res) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<section class=\"steps\">\n<h2>Protocols</h2>\n")
+	b.WriteString("<table>\n<tr><th>result</th><th>protocol</th><th>calls</th><th>failed</th><th>error rate</th><th>p50</th><th>p95</th><th>max</th><th>sent</th><th>received</th></tr>\n")
+	for _, p := range res.Protocols {
+		writeCallRow(&b, html.EscapeString(p.Name), p.Total, p.Failed, p.ErrorRate, p.Latency, p.BytesSent, p.BytesReceived)
+		for _, op := range p.Operations {
+			writeCallRow(&b, "&nbsp;&nbsp;"+html.EscapeString(op.Name), op.Total, op.Failed, op.ErrorRate, op.Latency, op.BytesSent, op.BytesReceived)
+		}
+		if len(p.Measures) > 0 {
+			b.WriteString("<tr><td colspan=\"10\"><table>\n<tr><th>phase</th><th>count</th><th>p50</th><th>p95</th><th>max</th></tr>\n")
+			for _, m := range p.Measures {
+				fmt.Fprintf(&b, "<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+					html.EscapeString(m.Name), m.Count, m.Latency.P50.Round(1e3), m.Latency.P95.Round(1e3), m.Latency.Max.Round(1e3))
+			}
+			b.WriteString("</table></td></tr>\n")
+		}
+	}
+	b.WriteString("</table>\n</section>\n")
+	return b.String()
+}
+
+func writeCallRow(b *strings.Builder, name string, total, failed int64, rate float64, lat Latency, sent, received int64) {
+	word, cls := "PASS", "pass"
+	if failed > 0 {
+		word, cls = "FAIL", "fail"
+	}
+	fmt.Fprintf(b, "<tr><td><span class=\"badge %s\">%s</span></td><td>%s</td><td>%d</td><td>%d</td><td>%.2f%%</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+		cls, word, name, total, failed, rate*100,
+		lat.P50.Round(1e3), lat.P95.Round(1e3), lat.Max.Round(1e3),
+		FormatByteCount(sent), FormatByteCount(received))
 }
 
 const chartW, chartH = 640.0, 160.0

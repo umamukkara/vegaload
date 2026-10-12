@@ -147,6 +147,8 @@ type VU struct {
 	checks netapi.CheckRecorder
 	// steps receives every step() outcome (FR-CLI-18). It may be nil.
 	steps netapi.StepRecorder
+	// calls receives every protocol call this VU makes. It may be nil.
+	calls netapi.CallRecorder
 
 	// inputs is what the `env` and `data` globals expose (FR-CLI-17). It
 	// may be nil, which exposes nothing.
@@ -162,6 +164,14 @@ func (v *VU) SetCheckRecorder(rec netapi.CheckRecorder) { v.checks = rec }
 // SetStepRecorder sets where this VU reports the timing and outcome of
 // every step() its script runs. Call it before the first Iteration.
 func (v *VU) SetStepRecorder(rec netapi.StepRecorder) { v.steps = rec }
+
+// SetCallRecorder counts the HTTP, WebSocket, and protocol calls this VU
+// makes. Call it before the first Iteration. Nil means not counted.
+func (v *VU) SetCallRecorder(rec netapi.CallRecorder) {
+	v.calls = rec
+	v.http.SetCallRecorder(rec)
+	v.proto.SetCallRecorder(rec)
+}
 
 // Option changes how NewVU builds a VU. An option is needed, rather than a
 // setter called afterwards, when the script's top-level code has to see it:
@@ -547,6 +557,7 @@ func (v *VU) newWSGlobal(vm *goja.Runtime) *goja.Object {
 		conn, err := netapi.Dial(v.ctx, v.safetyCheck, url, v.timeout, netapi.Options{
 			Headers:            opts.Headers,
 			InsecureSkipVerify: opts.Insecure,
+			Recorder:           v.calls,
 		})
 		if err != nil {
 			throw(vm, err)

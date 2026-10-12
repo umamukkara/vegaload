@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"time"
 )
@@ -51,6 +52,13 @@ type Result struct {
 	// failed step, and it also fails its iteration.
 	Steps []StepResult `json:"steps,omitempty"`
 
+	// Protocols is the latency, error rate, and byte totals of each
+	// protocol the run called, in the order each name was first seen.
+	// It is omitted when the run recorded no call, so a report written
+	// before this field existed, and a run that makes no recorded call,
+	// look exactly as before.
+	Protocols []ProtocolResult `json:"protocols,omitempty"`
+
 	// Checks is the pass and fail count of each named check the scenario
 	// made with check() (FR-CLI-12), in the order each name was first
 	// seen. It is omitted when the scenario made no checks. A failed
@@ -79,6 +87,89 @@ type StepResult struct {
 	ErrorRate float64 `json:"error_rate"`
 	Latency   Latency `json:"latency"`
 }
+
+// ProtocolResult is one protocol's totals across the whole run. Latency
+// is computed from every call, not from the operation percentiles.
+// BytesPerSec is (sent + received) divided by the run's elapsed time.
+type ProtocolResult struct {
+	Name          string            `json:"name"`
+	Total         int64             `json:"total"`
+	Failed        int64             `json:"failed"`
+	ErrorRate     float64           `json:"error_rate"`
+	Latency       Latency           `json:"latency"`
+	BytesSent     int64             `json:"bytes_sent"`
+	BytesReceived int64             `json:"bytes_received"`
+	BytesPerSec   float64           `json:"bytes_per_second"`
+	Operations    []OperationResult `json:"operations"`
+	Measures      []MeasureResult   `json:"measures,omitempty"`
+}
+
+// OperationResult is one operation inside a protocol, such as ftp roundtrip.
+type OperationResult struct {
+	Name          string  `json:"name"`
+	Total         int64   `json:"total"`
+	Failed        int64   `json:"failed"`
+	ErrorRate     float64 `json:"error_rate"`
+	Latency       Latency `json:"latency"`
+	BytesSent     int64   `json:"bytes_sent"`
+	BytesReceived int64   `json:"bytes_received"`
+}
+
+// MeasureResult is a phase time inside a protocol, such as ftp upload_time.
+// A measure is not a call: it does not change the protocol's totals.
+type MeasureResult struct {
+	Name    string  `json:"name"`
+	Count   int64   `json:"count"`
+	Latency Latency `json:"latency"`
+}
+
+// Protocol returns the protocol with the given name, if the run recorded one.
+func (r *Result) Protocol(name string) (ProtocolResult, bool) {
+	for _, p := range r.Protocols {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return ProtocolResult{}, false
+}
+
+// ShowProtocols reports whether the text, Markdown, and HTML views should
+// print the protocol breakdown. JSON always keeps the data. A run that
+// only called http, http1, or http2 keeps the layout it had before this
+// breakdown existed.
+func ShowProtocols(res *Result) bool {
+	if res == nil || len(res.Protocols) == 0 {
+		return false
+	}
+	if len(res.Protocols) > 1 {
+		return true
+	}
+	switch res.Protocols[0].Name {
+	case "http", "http1", "http2":
+		return false
+	default:
+		return true
+	}
+}
+
+// FormatByteCount renders a byte count as B, KiB, MiB, GiB, TiB, or PiB.
+func FormatByteCount(n int64) string {
+	if n < 0 {
+		n = 0
+	}
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for n/div >= unit && exp < len(byteUnits)-1 {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %s", float64(n)/float64(div), byteUnits[exp])
+}
+
+var byteUnits = []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
 
 // Step returns the step with the given name, if the run had one.
 func (r *Result) Step(name string) (StepResult, bool) {
