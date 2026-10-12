@@ -723,7 +723,7 @@ These four options are the same for Redis, RabbitMQ, FTP, MySQL and PostgreSQL. 
 
 `cert_file` and `key_file` go together. One without the other is an error. With both, the client certificate is sent when the server asks for it.
 
-`ca_file` cannot be combined with `-insecure`, `tls=skip-verify`, `tls_verify=false`, or PostgreSQL `sslmode=require` or `sslmode=prefer`. Those modes do not check the certificate. `cert_file` and `key_file` are allowed with them.
+`ca_file` cannot be combined with `-insecure`, `tls=skip-verify`, or `tls_verify=false`. Those modes do not check the certificate. `cert_file` and `key_file` are allowed with them. PostgreSQL `sslmode=prefer` and `sslmode=require` also skip the check, so `ca_file` with either of them is an error: it needs `sslmode=verify-full`.
 
 If TLS is off, any of the four is an error. The files are read when the client is built, not on every call.
 

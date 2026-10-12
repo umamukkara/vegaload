@@ -340,8 +340,12 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	// It is refused. verify-full checks the certificate. The CA is applied
 	// here, not as sslrootcert in the URL, because that would turn require
 	// into verify-ca.
+	files := tlsconf.FromOptions(target.Options)
+	if files.CAFile != "" && (sslmode == "prefer" || sslmode == "require") {
+		return nil, errors.New("postgres: ca_file needs sslmode=verify-full")
+	}
 	insecure := target.InsecureSkipVerify || sslmode == "prefer" || sslmode == "require"
-	if err := applyPostgresTLS(cfg, tlsconf.FromOptions(target.Options), insecure, sslmode != "disable"); err != nil {
+	if err := applyPostgresTLS(cfg, files, insecure, sslmode != "disable"); err != nil {
 		return nil, fmt.Errorf("postgres: %w", err)
 	}
 	// pgx can read a password from the environment (PGPASSWORD) or from
