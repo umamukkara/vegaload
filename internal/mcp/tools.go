@@ -640,8 +640,10 @@ func validateScenarioTool(exePath string) Tool {
 }
 
 // FR-CLI-17: the data files and environment variables a scenario reads.
+// -protocol mode also accepts data files, for postgres, mysql, redis, ftp,
+// sftp, kafka and rabbitmq. env stays for scenario files.
 var (
-	dataFilesSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "CSV (header row) or JSON (array of objects) files whose rows the scenario reads as data.NAME.next() or data.NAME.random(). NAME is the file name without its extension, or write name=path"}
+	dataFilesSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "CSV (header row) or JSON (array of objects) files. A scenario reads rows as data.NAME.next() or data.NAME.random(). With target and protocol, postgres, mysql, redis, ftp, sftp, kafka and rabbitmq read {data.NAME.COLUMN} on each call. NAME is the file name without its extension, or write name=path. env stays for scenario files"}
 	envSchema       = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "names of environment variables the scenario may read as env.NAME. Scripts cannot see any other variable"}
 	secretEnvSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "like env, but the value is a secret and is removed from results, reports and logs. Use this for tokens and passwords"}
 )
