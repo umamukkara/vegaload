@@ -513,41 +513,18 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 }
 
 // protocolOp is the operation name for one -protocol call. It is the mode
-// option only when that mode is in the fixed list for the driver. Anything
-// else uses the driver's own name, so a raw option string is never stored.
+// option only when that mode is in the driver's own list. Anything else
+// uses the driver's own name, so a raw option string is never stored.
 func protocolOp(protocolName string, opts map[string]string) string {
 	mode := ""
 	if opts != nil {
 		mode = opts["mode"]
 	}
-	if mode != "" && knownDriverMode(protocolName, mode) {
+	spec, ok := findDriver(protocolName)
+	if mode != "" && ok && spec.hasMode(mode) {
 		return mode
 	}
 	return protocolName
-}
-
-func knownDriverMode(protocolName, mode string) bool {
-	switch protocolName {
-	case "ftp", "sftp":
-		return oneOf(mode, "connect", "download", "upload", "list", "stat", "delete", "roundtrip")
-	case "mqtt":
-		return oneOf(mode, "publish", "subscribe", "roundtrip")
-	case "kafka":
-		return oneOf(mode, "produce", "consume", "roundtrip", "admin")
-	case "rabbitmq":
-		return oneOf(mode, "publish", "consume", "roundtrip", "admin")
-	default:
-		return false
-	}
-}
-
-func oneOf(s string, allowed ...string) bool {
-	for _, a := range allowed {
-		if s == a {
-			return true
-		}
-	}
-	return false
 }
 
 // timedDriver is a driver that can report the phase times of the call it

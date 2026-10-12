@@ -473,11 +473,12 @@ func (v *VU) newHTTPGlobal(vm *goja.Runtime) *goja.Object {
 		}
 	}
 
-	_ = h.Set("get", doHTTP("GET"))
-	_ = h.Set("post", doHTTP("POST"))
-	_ = h.Set("put", doHTTP("PUT"))
-	_ = h.Set("patch", doHTTP("PATCH"))
-	_ = h.Set("delete", doHTTP("DELETE"))
+	for _, name := range ScriptHTTPMethods() {
+		if name == "request" {
+			continue
+		}
+		_ = h.Set(name, doHTTP(strings.ToUpper(name)))
+	}
 	_ = h.Set("request", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			throw(vm, errors.New("js: http.request(method, url[, options]) requires method and url arguments"))
@@ -489,6 +490,18 @@ func (v *VU) newHTTPGlobal(vm *goja.Runtime) *goja.Object {
 	})
 
 	return h
+}
+
+// ScriptHTTPMethods are the functions on the http global, in both
+// JavaScript and Python. request takes a method name; the others do not.
+func ScriptHTTPMethods() []string {
+	return []string{"get", "post", "put", "patch", "delete", "request"}
+}
+
+// ScriptWSMethods are the WebSocket calls a script can make. connect is on
+// the ws global. send, receive and close are methods of the connection.
+func ScriptWSMethods() []string {
+	return []string{"connect", "send", "receive", "close"}
 }
 
 func (v *VU) doHTTPRequest(vm *goja.Runtime, method, url string, opts requestOptions) goja.Value {

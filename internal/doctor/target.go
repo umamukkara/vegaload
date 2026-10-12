@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/vegaload/vegaload/internal/safety"
@@ -53,6 +54,29 @@ var schemes = map[string]scheme{
 	"ftps":       {port: "990", protocol: "ftp"},
 	"tcp":        {protocol: "tcp"},
 	"udp":        {protocol: "udp", udp: true},
+}
+
+// SchemesFor lists the URL schemes that use a -protocol name, in order.
+// https is also listed for http2: the map names one protocol per scheme,
+// and an https target is probed as http1.
+func SchemesFor(protocol string) []string {
+	var out []string
+	for name, sc := range schemes {
+		if sc.protocol == protocol {
+			out = append(out, name)
+		}
+	}
+	if protocol == "http2" {
+		out = append(out, "https")
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ProtocolForScheme is the -protocol name for a URL scheme, or "" when the
+// scheme is not one this binary speaks.
+func ProtocolForScheme(scheme string) string {
+	return schemes[strings.ToLower(scheme)].protocol
 }
 
 // parseTarget accepts the same forms as `vegaload run -target`: a full
