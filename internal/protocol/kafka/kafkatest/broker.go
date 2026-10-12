@@ -130,6 +130,87 @@ func (b *Broker) ProducedCount() int {
 	return b.produced
 }
 
+// Values are the record values stored for topic, in arrival order.
+func (b *Broker) Values(topic string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t := b.topics[topic]
+	if t == nil {
+		return nil
+	}
+	var out []string
+	for _, part := range t.parts {
+		for _, bt := range part.batches {
+			out = append(out, recordValues(bt.raw)...)
+		}
+	}
+	return out
+}
+
+func recordValues(batch []byte) []string {
+	if len(batch) < 61 || batch[16] != 2 {
+		return nil
+	}
+	recs := batch[61:]
+	var out []string
+	for len(recs) > 0 {
+		n, sz, ok := readZigzag(recs)
+		if !ok || n < 0 || sz+int(n) > len(recs) {
+			break
+		}
+		rec := recs[sz : sz+int(n)]
+		recs = recs[sz+int(n):]
+		if v, ok := recordValue(rec); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func recordValue(rec []byte) (string, bool) {
+	if len(rec) < 1 {
+		return "", false
+	}
+	i := 1
+	advance := func() (int64, bool) {
+		n, sz, ok := readZigzag(rec[i:])
+		if !ok {
+			return 0, false
+		}
+		i += sz
+		return n, true
+	}
+	if _, ok := advance(); !ok { // timestamp delta
+		return "", false
+	}
+	if _, ok := advance(); !ok { // offset delta
+		return "", false
+	}
+	keyLen, ok := advance()
+	if !ok || (keyLen > 0 && int(keyLen) > len(rec)-i) {
+		return "", false
+	}
+	if keyLen > 0 {
+		i += int(keyLen)
+	}
+	valLen, ok := advance()
+	if !ok || valLen < 0 || int(valLen) > len(rec)-i {
+		return "", false
+	}
+	return string(rec[i : i+int(valLen)]), true
+}
+
+func readZigzag(b []byte) (int64, int, bool) {
+	var u uint64
+	for i := 0; i < len(b) && i < 10; i++ {
+		u |= uint64(b[i]&0x7f) << (7 * uint(i))
+		if b[i]&0x80 == 0 {
+			return int64(u>>1) ^ -int64(u&1), i + 1, true
+		}
+	}
+	return 0, 0, false
+}
+
 func (b *Broker) ConnCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()

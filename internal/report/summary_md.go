@@ -28,6 +28,12 @@ func MarkdownSummary(res *Result) string {
 		fmt.Fprintf(&b, "\n**Aborted:** the run was stopped at %s because %s was broken (observed %s).\n",
 			a.At.Round(time.Millisecond), mdCell(a.Threshold), mdCell(a.Observed))
 	}
+	if len(res.DataFiles) > 0 {
+		b.WriteString("\n### Data files\n\n")
+		for _, f := range res.DataFiles {
+			fmt.Fprintf(&b, "- %s (%d rows)\n", mdCell(f.Name), f.Rows)
+		}
+	}
 	if len(res.Thresholds) > 0 {
 		verdict := "all passed"
 		if res.ThresholdsPassed == nil || !*res.ThresholdsPassed {

@@ -46,6 +46,7 @@ import (
 	"github.com/vegaload/vegaload/internal/audit"
 	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/engine"
+	"github.com/vegaload/vegaload/internal/inputs"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 	"github.com/vegaload/vegaload/internal/report"
@@ -178,6 +179,13 @@ type runConfig struct {
 	// FR-CLI-17: data files and environment variables scripts can read.
 	// Inputs is nil when none were given.
 	Inputs netapi.Inputs
+
+	// DataSets, DataPick and DataPlan are -data for -target and -protocol.
+	// DataPlan is nil when the run has no data file, and one call then does
+	// no extra work. A scenario keeps using Inputs instead.
+	DataSets map[string]*inputs.Set
+	DataPick string
+	DataPlan *dataPlan
 }
 
 // parseRunArgs parses run's flags into a runConfig. It returns a usage
@@ -360,6 +368,13 @@ func parseRunArgs(args []string) (*runConfig, error) {
 			return nil, fmt.Errorf("%s", unknownProtocolMessage(cfg.Protocol))
 		}
 	}
+	if len(cfg.DataSets) > 0 {
+		plan, err := prepareProtocolData(cfg)
+		if err != nil {
+			return nil, err
+		}
+		cfg.DataPlan = plan
+	}
 
 	return cfg, nil
 }
@@ -444,7 +459,7 @@ func buildIteration(cfg *runConfig) (engine.IterationFunc, func() error, error) 
 	if cfg.ScenarioPath != "" {
 		return scriptedIteration(cfg, concurrencyHint(cfg))
 	}
-	return protocolIteration(cfg.Protocol, cfg.Target, cfg.Timeout, cfg.callRecorder)
+	return protocolIteration(cfg.Protocol, cfg.Target, cfg.Timeout, cfg.callRecorder, cfg.DataPlan)
 }
 
 // buildSafetyCheck returns the netapi.SafetyCheck every scripted VU's
@@ -481,7 +496,7 @@ func buildSafetyCheck(cfg *runConfig) netapi.SafetyCheck {
 // minimal Summary recorder (see internal/engine) distinguishes today —
 // the richer per-call detail in protocol.Result (status code, byte
 // counts) wires into a real report in Phase 1, not here.
-func protocolIteration(name string, target protocol.Target, timeout time.Duration, calls netapi.CallRecorder) (engine.IterationFunc, func() error, error) {
+func protocolIteration(name string, target protocol.Target, timeout time.Duration, calls netapi.CallRecorder, plan *dataPlan) (engine.IterationFunc, func() error, error) {
 	spec, ok := findDriver(name)
 	if !ok {
 		return nil, nil, fmt.Errorf("%s", unknownProtocolMessage(name))
@@ -491,15 +506,47 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 	if err := target.RejectUnknownOptions(spec.options...); err != nil {
 		return nil, nil, fmt.Errorf("-opt for -protocol %s: %w", name, err)
 	}
-	driver, err := spec.build(target, timeout)
+	buildTarget := target
+	if plan != nil {
+		// The first row is filled only so New accepts the config. It is not
+		// run, and the row counter stays where it is, so the first real call
+		// still starts at that row.
+		var err error
+		buildTarget, err = plan.filledTarget(target, plan.sample())
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	driver, err := spec.build(buildTarget, timeout)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	op := protocolOp(driver.Name(), target.Options)
+	if plan == nil {
+		iter := func(ctx context.Context) error {
+			start := time.Now()
+			res, timing, timed, err := doProtocol(driver, ctx)
+			if recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err) && timed {
+				netapi.RecordXferMeasures(calls, driver.Name(), op, res.Success, netapi.XferTimingFrom(timing))
+			}
+			if err != nil {
+				return err
+			}
+			if !res.Success {
+				if res.Err != nil {
+					return res.Err
+				}
+				return fmt.Errorf("%s: request failed (status %d)", driver.Name(), res.StatusCode)
+			}
+			return nil
+		}
+		return iter, driver.Close, nil
+	}
+
 	iter := func(ctx context.Context) error {
 		start := time.Now()
-		res, timing, timed, err := doProtocol(driver, ctx)
+		res, timing, timed, err := dataCall(ctx, spec, driver, plan, timeout)
 		if recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err) && timed {
 			netapi.RecordXferMeasures(calls, driver.Name(), op, res.Success, netapi.XferTimingFrom(timing))
 		}
@@ -515,6 +562,20 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 		return nil
 	}
 	return iter, driver.Close, nil
+}
+
+// dataCall draws one row, fills the placeholders, and runs that one call.
+// The driver Call returns shares the connection, so it is not closed here.
+func dataCall(ctx context.Context, spec driverSpec, base protocol.Protocol, plan *dataPlan, timeout time.Duration) (protocol.Result, xfercommon.Timing, bool, error) {
+	opts, body, err := plan.fill(plan.draw())
+	if err != nil {
+		return protocol.Result{}, xfercommon.Timing{}, false, err
+	}
+	next, err := spec.perCall(base, opts, body, timeout)
+	if err != nil {
+		return protocol.Result{}, xfercommon.Timing{}, false, err
+	}
+	return doProtocol(next, ctx)
 }
 
 // protocolOp is the operation name for one -protocol call. It is the mode
@@ -692,7 +753,17 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	applyThresholds(cfg, result)
 	applyAbort(result, aborted)
 	applyBaseline(cfg, result)
+	applyDataFiles(cfg, result)
 	return result, nil
+}
+
+// applyDataFiles records the data file name and the row count. A run
+// without -data is left untouched, so its JSON stays the same.
+func applyDataFiles(cfg *runConfig, result *report.Result) {
+	if cfg.DataPlan == nil || len(cfg.DataPlan.files) == 0 {
+		return
+	}
+	result.DataFiles = cfg.DataPlan.files
 }
 
 // applyThresholds judges cfg's thresholds against a finished run and
@@ -985,6 +1056,11 @@ func recordAudit(command string, cfg *runConfig, result *report.Result, runErr e
 	for _, t := range cfg.Thresholds {
 		entry.Thresholds = append(entry.Thresholds, t.Expression())
 	}
+	if cfg.DataPlan != nil {
+		for _, f := range cfg.DataPlan.files {
+			entry.DataFiles = append(entry.DataFiles, audit.DataFile{Name: f.Name, Rows: f.Rows})
+		}
+	}
 	if err := audit.Append(cfg.AuditLogPath, entry); err != nil {
 		fmt.Fprintf(os.Stderr, "vegaload %s: warning: could not write audit log: %v\n", command, err)
 	}
@@ -1001,6 +1077,7 @@ func printResult(w io.Writer, r *report.Result) {
 	}
 	printChecks(w, r)
 	printSteps(w, r)
+	printDataFiles(w, r)
 	printProtocols(w, r)
 	printThresholds(w, r)
 	printBaseline(w, r)
@@ -1027,6 +1104,17 @@ func printBaseline(w io.Writer, r *report.Result) {
 	}
 	for _, n := range b.Notes {
 		fmt.Fprintf(w, "  - %s\n", n)
+	}
+}
+
+// printDataFiles writes the data files a protocol run read, if it had any.
+func printDataFiles(w io.Writer, r *report.Result) {
+	if len(r.DataFiles) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\ndata files")
+	for _, f := range r.DataFiles {
+		fmt.Fprintf(w, "  %s  %d rows\n", f.Name, f.Rows)
 	}
 }
 

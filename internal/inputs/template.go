@@ -140,7 +140,7 @@ func (t Template) Fill(rows map[string]map[string]any) (string, error) {
 		}
 		val, ok := row[slot.Column]
 		if !ok {
-			return "", fmt.Errorf("data file %s: column %s is missing", slot.Set, slot.Column)
+			return "", fmt.Errorf("data set %s: column %s does not exist", slot.Set, slot.Column)
 		}
 		text, err := formatCell(slot, val)
 		if err != nil {
@@ -157,20 +157,20 @@ func formatCell(slot Slot, val any) (string, error) {
 	case "int":
 		n, err := asInt(val)
 		if err != nil {
-			return "", fmt.Errorf("data file %s: column %s is not an integer", slot.Set, slot.Column)
+			return "", fmt.Errorf("data set %s: column %s is not an integer", slot.Set, slot.Column)
 		}
 		return strconv.FormatInt(n, 10), nil
 	case "float":
 		n, err := asFloat(val)
 		if err != nil {
-			return "", fmt.Errorf("data file %s: column %s is not a number", slot.Set, slot.Column)
+			return "", fmt.Errorf("data set %s: column %s is not a number", slot.Set, slot.Column)
 		}
 		return strconv.FormatFloat(n, 'g', -1, 64), nil
 	}
 	if slot.asJSON {
 		raw, err := json.Marshal(val)
 		if err != nil {
-			return "", fmt.Errorf("data file %s: column %s cannot be written as JSON", slot.Set, slot.Column)
+			return "", fmt.Errorf("data set %s: column %s cannot be written as JSON", slot.Set, slot.Column)
 		}
 		return string(raw), nil
 	}

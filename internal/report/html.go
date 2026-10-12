@@ -43,6 +43,7 @@ func renderHTML(res *Result) string {
 		fmt.Fprintf(&b, "<p class=\"aborted\"><span class=\"badge fail\">ABORTED</span> The run was stopped at %s because <b>%s</b> was broken (observed %s).</p>\n",
 			a.At.Round(1e6), html.EscapeString(a.Threshold), html.EscapeString(a.Observed))
 	}
+	b.WriteString(dataFilesSection(res))
 	b.WriteString(thresholdsSection(res))
 	b.WriteString(baselineSection(res))
 	b.WriteString(checksSection(res))
@@ -62,6 +63,19 @@ func renderHTML(res *Result) string {
 	}
 
 	b.WriteString("</main>\n</body></html>\n")
+	return b.String()
+}
+
+func dataFilesSection(res *Result) string {
+	if len(res.DataFiles) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<section class=\"data-files\">\n<h2>Data files</h2>\n<ul>\n")
+	for _, f := range res.DataFiles {
+		fmt.Fprintf(&b, "<li>%s (%d rows)</li>\n", html.EscapeString(f.Name), f.Rows)
+	}
+	b.WriteString("</ul>\n</section>\n")
 	return b.String()
 }
 
