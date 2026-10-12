@@ -65,6 +65,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/url"
@@ -72,6 +73,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -127,6 +130,11 @@ type Driver struct {
 	password string
 	host     string
 	port     string
+	useTLS   bool
+	// worked is set when this client has had any reply from the server. It is
+	// shared with the drivers that Call returns. After that, a dropped
+	// connection is not a TLS mismatch, so no hint is added.
+	worked *atomic.Bool
 
 	cmds    []command
 	minRows int
@@ -169,6 +177,8 @@ func (d *Driver) Call(opts map[string]string, body []byte, timeout time.Duration
 		host:        d.host,
 		port:        d.port,
 		client:      d.client,
+		useTLS:      d.useTLS,
+		worked:      d.worked,
 		owns:        false,
 	}
 	nd.target.Body = body
@@ -189,6 +199,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 		script:  connOnly,
 		owns:    true,
 		maxRows: defaultMaxRows,
+		worked:  new(atomic.Bool),
 	}
 
 	u, err := url.Parse(target.URL)
@@ -292,6 +303,7 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	}
 	d.host = u.Hostname()
 	d.port = port
+	d.useTLS = tlsMode != tlsOff
 
 	// MaxRetries -1 is one attempt. The library turns 0 into three retries,
 	// so 0 would hide a failure. ReadTimeout and WriteTimeout -1 mean no
@@ -484,6 +496,9 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, Reply) {
 	defer cancel()
 
 	values, lastCount, got, err := d.exec(ctx)
+	if _, isReply := serverMessage(err); err == nil || isReply {
+		d.markWorked()
+	}
 	rep := Reply{Values: values, RowCount: lastCount}
 	if len(values) > 0 {
 		rep.Value = values[len(values)-1]
@@ -624,7 +639,59 @@ func (d *Driver) explain(parent, ctx context.Context, err error) error {
 	if strings.HasPrefix(err.Error(), "redis:") {
 		return errors.New(d.redact(err.Error()))
 	}
-	return fmt.Errorf("redis: %s", d.redact(err.Error()))
+	msg := "redis: " + err.Error()
+	if hint := tlsMismatchHint(d.useTLS, d.hasWorked(), err); hint != "" {
+		msg += " " + hint
+	}
+	return errors.New(d.redact(msg))
+}
+
+// tlsMismatchHint is a sentence added when the failure looks like the wrong
+// TLS mode. It is a hint. A timeout, a refused dial, and any other error
+// get no sentence. Once the server has answered, there is no hint.
+func tlsMismatchHint(tlsOn, worked bool, err error) string {
+	if worked || err == nil || isNetTimeout(err) || isDial(err) {
+		return ""
+	}
+	if tlsOn && strings.Contains(err.Error(), "first record does not look like a TLS handshake") {
+		return "The server may not use TLS. Try redis://"
+	}
+	closed := errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || isWinConnClosed(err)
+	if !closed {
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "read" {
+			closed = true
+		}
+	}
+	if !closed {
+		return ""
+	}
+	if tlsOn {
+		return "The server may not use TLS. Try redis://"
+	}
+	return "The server may need TLS. Try rediss://"
+}
+
+// isWinConnClosed reports a closed connection on Windows. There the error
+// is a bare Winsock code (WSAECONNABORTED 10053, WSAECONNRESET 10054) that
+// does not match syscall.ECONNRESET, and it may not be a net.OpError.
+func isWinConnClosed(err error) bool {
+	var en syscall.Errno
+	if errors.As(err, &en) && (uintptr(en) == 10053 || uintptr(en) == 10054) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection was aborted") || strings.Contains(s, "forcibly closed")
+}
+
+func (d *Driver) markWorked() {
+	if d.worked != nil {
+		d.worked.Store(true)
+	}
+}
+
+func (d *Driver) hasWorked() bool {
+	return d.worked != nil && d.worked.Load()
 }
 
 func callTimedOut(ctx context.Context, err error) bool {

@@ -80,6 +80,7 @@ type Server struct {
 
 	noHello    atomic.Bool
 	closeAfter atomic.Int32
+	drop       atomic.Bool
 
 	mu       sync.Mutex
 	commands [][]string
@@ -168,6 +169,9 @@ func selfSigned() (tls.Certificate, error) {
 // falls back to AUTH and SELECT.
 func (s *Server) DisableHello() { s.noHello.Store(true) }
 
+// CloseOnConnect closes each accepted connection without reading or writing.
+func (s *Server) CloseOnConnect() { s.drop.Store(true) }
+
 // CloseAfterUserCommands closes the connection after n user commands have
 // been read, without writing a reply. Setup commands do not count. n is
 // counted per connection.
@@ -220,6 +224,10 @@ func (s *Server) accept() {
 		c, err := s.ln.Accept()
 		if err != nil {
 			return
+		}
+		if s.drop.Load() {
+			c.Close()
+			continue
 		}
 		s.mu.Lock()
 		s.conns++

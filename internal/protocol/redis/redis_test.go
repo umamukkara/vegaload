@@ -3,11 +3,14 @@ package redis
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -641,9 +644,193 @@ func TestRun_ConcurrentPoolOne(t *testing.T) {
 	runMany("GET a\nGET b")
 }
 
+func TestTLSMismatchHint(t *testing.T) {
+	need := "The server may need TLS. Try rediss://"
+	plain := "The server may not use TLS. Try redis://"
+	cases := []struct {
+		name   string
+		tls    bool
+		worked bool
+		err    error
+		want   string
+	}{
+		{"eof", false, false, io.EOF, need},
+		{"eof on tls", true, false, io.EOF, plain},
+		{"eof after a reply", false, true, io.EOF, ""},
+		{"eof on tls after a reply", true, true, io.EOF, ""},
+		{"reset", false, false, fmt.Errorf("read tcp: %w", syscall.ECONNRESET), need},
+		{"read op", false, false, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("forcibly closed")}, need},
+		{"windows abort", false, false, fmt.Errorf("redis: %w", syscall.Errno(10053)), need},
+		{"windows reset", false, false, syscall.Errno(10054), need},
+		{"timeout", false, false, &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}, ""},
+		{"dial", false, false, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, ""},
+		{"handshake", true, false, errors.New("tls: first record does not look like a TLS handshake"), plain},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := tlsMismatchHint(c.tls, c.worked, c.err)
+			if got != c.want {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRun_TLSModeHint(t *testing.T) {
+	const secret = "pw-should-not-leak"
+	need := "The server may need TLS. Try rediss://"
+	plain := "The server may not use TLS. Try redis://"
+
+	closed := redistest.Start(t, nil)
+	closed.CloseOnConnect()
+	t.Setenv("REDIS_PW", secret)
+	d := mustDriver(t, closed.URL(), "PING", map[string]string{"password_env": "REDIS_PW"}, time.Second)
+	res, err := d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), need) {
+		t.Fatalf("plain client, closed server: %v", res.Err)
+	}
+	if strings.Contains(res.Err.Error(), secret) {
+		t.Fatalf("password leaked: %v", res.Err)
+	}
+
+	spoke := redistest.Start(t, nil)
+	d = mustDriver(t, "rediss://"+spoke.Addr(), "PING", map[string]string{"tls": "skip-verify"}, time.Second)
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Success || res.Err == nil || !strings.Contains(res.Err.Error(), plain) {
+		t.Fatalf("tls client, plain server: %v", res.Err)
+	}
+
+	d = mustDriver(t, "redis://127.0.0.1:1", "PING", nil, time.Second)
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == nil || strings.Contains(res.Err.Error(), need) || strings.Contains(res.Err.Error(), plain) {
+		t.Fatalf("refused: %v", res.Err)
+	}
+
+	slow := redistest.Start(t, func([]string) redistest.Value {
+		time.Sleep(5 * time.Second)
+		return redistest.SimpleString("OK")
+	})
+	d = mustDriver(t, slow.URL(), "GET k", nil, 300*time.Millisecond)
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "timed out after") || strings.Contains(res.Err.Error(), need) || strings.Contains(res.Err.Error(), plain) {
+		t.Fatalf("timeout: %v", res.Err)
+	}
+
+	authed := redistest.StartWithPassword(t, nil, "right-password")
+	t.Setenv("REDIS_BAD", secret)
+	d = mustDriver(t, authed.URL(), "PING", map[string]string{"password_env": "REDIS_BAD"}, time.Second)
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == nil || strings.Contains(res.Err.Error(), need) || strings.Contains(res.Err.Error(), plain) || strings.Contains(res.Err.Error(), secret) {
+		t.Fatalf("auth: %v", res.Err)
+	}
+
+	bad := redistest.Start(t, func([]string) redistest.Value {
+		return redistest.ErrorString("ERR no such key")
+	})
+	d = mustDriver(t, bad.URL(), "GET k", nil, time.Second)
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "no such key") || strings.Contains(res.Err.Error(), need) || strings.Contains(res.Err.Error(), plain) {
+		t.Fatalf("server error: %v", res.Err)
+	}
+
+	ok := redistest.Start(t, nil)
+	d = mustDriver(t, ok.URL(), "PING", nil, time.Second)
+	res, err = d.Do(context.Background())
+	if err != nil || !res.Success || res.Err != nil {
+		t.Fatalf("plain: err=%v res=%v", err, res.Err)
+	}
+
+	tlsSrv := redistest.StartTLS(t, nil)
+	d = mustDriver(t, tlsSrv.URL(), "PING", map[string]string{"tls": "skip-verify"}, time.Second)
+	res, err = d.Do(context.Background())
+	if err != nil || !res.Success || res.Err != nil {
+		t.Fatalf("tls: err=%v res=%v", err, res.Err)
+	}
+}
+
 func TestName(t *testing.T) {
 	d := mustDriver(t, "redis://127.0.0.1:1", "PING", nil, 0)
 	if d.Name() != "redis" {
 		t.Fatal(d.Name())
+	}
+}
+
+// A server that answered once and then drops the connection is not a TLS
+// mismatch, so no hint is added.
+func TestRun_NoHintAfterTheServerAnswered(t *testing.T) {
+	srv := redistest.Start(t, nil)
+	srv.CloseAfterUserCommands(2)
+	d := mustDriver(t, srv.URL(), "PING", map[string]string{"pool": "1"}, time.Second)
+	res, err := d.Do(context.Background())
+	if err != nil || !res.Success {
+		t.Fatalf("first call: err=%v res=%v", err, res.Err)
+	}
+	res, err = d.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == nil {
+		t.Fatal("second call: want an error from the dropped connection")
+	}
+	if strings.Contains(res.Err.Error(), "TLS") {
+		t.Fatalf("hint after the server answered: %v", res.Err)
+	}
+}
+
+// A driver made by Call keeps the TLS flag and the "server answered" flag of
+// its parent, so its hint points the right way.
+func TestCall_KeepsTheTLSHintState(t *testing.T) {
+	plain := redistest.Start(t, nil)
+	parent, err := NewConn(protocol.Target{URL: "rediss://" + plain.Addr(), Options: map[string]string{"tls": "skip-verify"}}, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	child, err := parent.Call(map[string]string{}, []byte("PING"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _ := child.Run(context.Background())
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "The server may not use TLS. Try redis://") {
+		t.Fatalf("tls client, plain server, through Call: %v", res.Err)
+	}
+
+	srv := redistest.Start(t, nil)
+	srv.CloseAfterUserCommands(2)
+	parent2, err := NewConn(protocol.Target{URL: srv.URL(), Options: map[string]string{"pool": "1"}}, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent2.Close()
+	for i := 1; i <= 3; i++ {
+		c, err := parent2.Call(map[string]string{}, []byte("PING"), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, _ := c.Run(context.Background())
+		if i == 1 && r.Err != nil {
+			t.Fatalf("call 1: %v", r.Err)
+		}
+		if r.Err != nil && strings.Contains(r.Err.Error(), "TLS") {
+			t.Fatalf("call %d: hint after the server answered: %v", i, r.Err)
+		}
 	}
 }

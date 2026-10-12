@@ -427,7 +427,9 @@ are in [TLS with your own CA](#tls-with-your-own-ca).
 - `tls=false` is the default for `redis://`. `rediss://` means TLS.
   `true` checks the certificate and the host name. With `-insecure`, `true`
   does not check the certificate. `skip-verify` uses TLS and does not check
-  the certificate. `tls=false` with `rediss://` is an error.
+  the certificate. `tls=false` with `rediss://` is an error. A connection
+  reset on `redis://` may mean the port wants `rediss://`, and a failed TLS
+  handshake on `rediss://` may mean the port is plain.
 - `protocol=2` (the default) speaks RESP2. `protocol=3` speaks RESP3.
 - A command is written the way redis-cli writes it. Spaces and tabs split
   arguments. `"double quotes"` and `'single quotes'` keep spaces. Inside
@@ -561,6 +563,7 @@ are in [TLS with your own CA](#tls-with-your-own-ca).
   The user can also be the user in the URL. Give it in one place.
   RabbitMQ waits about 3 seconds before it refuses a login, so a call
   timeout shorter than that reports `timed out` instead of `refused the login`.
+- RabbitMQ 4.3 and newer refuse a queue that is not durable and not exclusive, unless the server sets `deprecated_features.permit.transient_nonexcl_queues = true`. This affects `queue_declare` and `queue_lifecycle` with `durable=false`. If you see a refusal when a call declares a queue, set that option on the server, or use a durable queue. Older versions are not affected.
 - `vhost` defaults to `/`. It can also be the path of the URL. Give it in
   one place.
 - `tls=false` is the default for `amqp://`. `amqps://` means TLS. `true`
