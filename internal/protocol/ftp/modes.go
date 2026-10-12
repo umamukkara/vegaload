@@ -3,7 +3,6 @@ package ftp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"strings"
@@ -15,49 +14,7 @@ import (
 )
 
 func (d *Driver) refuse() error {
-	switch d.mode {
-	case modeUpload:
-		if !d.allowWrites {
-			return fmt.Errorf("ftp: upload writes a file on the server: %s", d.flagHint(false))
-		}
-		if !strings.Contains(d.path, "{id}") && !d.allowAdmin {
-			if d.script {
-				return fmt.Errorf("ftp: upload to a fixed path replaces that file: use {id} in the path, or pass allow_admin: true in the connection options")
-			}
-			return fmt.Errorf("ftp: upload to a fixed path replaces that file: use {id} in the path, or set allow_admin=true as well as allow_writes=true")
-		}
-	case modeRoundtrip:
-		if !strings.Contains(d.path, "{id}") {
-			return fmt.Errorf("ftp: roundtrip needs {id} in the path, so it never overwrites or deletes a file that was already there")
-		}
-		if !d.allowWrites {
-			return fmt.Errorf("ftp: upload writes a file on the server: %s", d.flagHint(false))
-		}
-	case modeDelete:
-		if !d.allowWrites || !d.allowAdmin {
-			if d.allowWrites && d.script {
-				return fmt.Errorf("ftp: delete needs allow_admin: pass allow_admin: true in the connection options")
-			}
-			if d.script {
-				return fmt.Errorf("ftp: delete needs allow_admin=true as well as allow_writes=true: pass allow_writes: true in the connection options")
-			}
-			return fmt.Errorf("ftp: delete needs allow_admin=true as well as allow_writes=true")
-		}
-	}
-	return nil
-}
-
-func (d *Driver) flagHint(admin bool) string {
-	if d.script {
-		if admin {
-			return "pass allow_admin: true in the connection options"
-		}
-		return "pass allow_writes: true in the connection options"
-	}
-	if admin {
-		return "use -opt allow_admin=true to allow it"
-	}
-	return "use -opt allow_writes=true to allow it"
+	return xfercommon.Refuse("ftp", d.mode, d.path, d.allowWrites, d.allowAdmin, d.script)
 }
 
 func (d *Driver) download(s *session, path string) (int64, Reply, error) {
@@ -67,7 +24,7 @@ func (d *Driver) download(s *session, path string) (int64, Reply, error) {
 	}
 	defer func() { _ = resp.Close() }()
 	var rep Reply
-	n, sum, found, err := readStream(resp, d.expect, d.expectSHA != "")
+	n, sum, found, err := xfercommon.ReadStream(resp, d.expect, d.expectSHA != "")
 	rep.Size = n
 	if err != nil {
 		return n, rep, err
@@ -174,7 +131,7 @@ func (d *Driver) roundtrip(ctx context.Context, s *session, path string, body []
 		rep = d.cleanup(s, path, rep)
 		return sent, 0, rep, err
 	}
-	got, sum, _, rerr := readStream(resp, "", true)
+	got, sum, _, rerr := xfercommon.ReadStream(resp, "", true)
 	cerr := resp.Close()
 	rep.Timing.DownloadMs = time.Since(downStart).Milliseconds()
 	if rerr != nil {
@@ -185,7 +142,7 @@ func (d *Driver) roundtrip(ctx context.Context, s *session, path string, body []
 		rep = d.cleanup(s, path, rep)
 		return sent, got, rep, cerr
 	}
-	want := hashPayload(d, body)
+	want := xfercommon.HashPayload(d.fill, d.size, d.sizeSet, body)
 	if got != sent || !strings.EqualFold(sum, want) {
 		rep = d.cleanup(s, path, rep)
 		return sent, got, rep, fmt.Errorf("ftp: the downloaded file is not the file that was uploaded (%d bytes sent, %d received)", sent, got)
@@ -200,20 +157,6 @@ func (d *Driver) roundtrip(ctx context.Context, s *session, path string, body []
 	return sent, got, rep, nil
 }
 
-func hashPayload(d *Driver, body []byte) string {
-	h := sha256.New()
-	if d.sizeSet {
-		r, err := xfercommon.FillReader(d.fill, d.size)
-		if err != nil {
-			return ""
-		}
-		_, _ = io.Copy(h, r)
-	} else {
-		_, _ = h.Write(body)
-	}
-	return xfercommon.HexDigest(h.Sum(nil))
-}
-
 func (d *Driver) cleanup(s *session, path string, rep Reply) Reply {
 	start := time.Now()
 	cctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -224,7 +167,7 @@ func (d *Driver) cleanup(s *session, path string, rep Reply) Reply {
 	err := s.srv.Delete(path)
 	rep.Timing.DeleteMs = time.Since(start).Milliseconds()
 	if err != nil {
-		rep.Text = fmt.Sprintf("the file %s is left on the server", path)
+		rep.Text = xfercommon.TextLeft(path)
 	}
 	return rep
 }
@@ -238,47 +181,4 @@ func entryType(t ftp.EntryType) string {
 	default:
 		return "file"
 	}
-}
-
-func readStream(r io.Reader, expect string, hash bool) (int64, string, bool, error) {
-	buf := make([]byte, 64*1024)
-	h := sha256.New()
-	var n int64
-	var win []byte
-	found := expect == ""
-	const capBytes = 1 << 20
-	for {
-		nr, err := r.Read(buf)
-		if nr > 0 {
-			chunk := buf[:nr]
-			if hash {
-				_, _ = h.Write(chunk)
-			}
-			if !found && n < capBytes {
-				take := chunk
-				if n+int64(len(take)) > capBytes {
-					take = take[:capBytes-n]
-				}
-				win = append(win, take...)
-				if strings.Contains(string(win), expect) {
-					found = true
-					win = nil
-				} else if len(win) > len(expect)+len(take) {
-					win = append([]byte(nil), win[len(win)-len(expect):]...)
-				}
-			}
-			n += int64(nr)
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return n, "", found, err
-		}
-	}
-	sum := ""
-	if hash {
-		sum = xfercommon.HexDigest(h.Sum(nil))
-	}
-	return n, sum, found, nil
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/postgres/postgrestest"
 	"github.com/vegaload/vegaload/internal/protocol/rabbitmq/rabbitmqtest"
 	"github.com/vegaload/vegaload/internal/protocol/redis/redistest"
+	"github.com/vegaload/vegaload/internal/protocol/sftp/sftptest"
 	"github.com/vegaload/vegaload/internal/report"
 )
 
@@ -137,6 +138,13 @@ func wireTestTarget(name string) protocol.Target {
 		return protocol.Target{URL: "amqp://localhost:1", Body: []byte("hello")}
 	case "ftp":
 		return protocol.Target{URL: "ftp://localhost:1", Options: map[string]string{"mode": "connect"}}
+	case "sftp":
+		// New reads the password here. This helper has no testing.T.
+		_ = os.Setenv("VEGALOAD_WIRE_SFTP_PW", "wire")
+		return protocol.Target{
+			URL:     "sftp://load@localhost:1",
+			Options: map[string]string{"mode": "connect", "password_env": "VEGALOAD_WIRE_SFTP_PW"},
+		}
 	case "tcp":
 		return protocol.Target{URL: "tcp://localhost:1"}
 	case "udp":
@@ -388,6 +396,63 @@ func TestCmdRun_FTPProtocol(t *testing.T) {
 		t.Errorf("connect: total %d failed %d", res.Total, res.Failed)
 	}
 	if res := run("-opt", "mode=download", "-opt", "path=/pub/data.bin", "-opt", "expect_size=9"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("download: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=list", "-opt", "path=/pub", "-opt", "expect=data.bin"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("list: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=stat", "-opt", "path=/pub/data.bin"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("stat: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=upload", "-opt", "path=/up-{id}.bin", "-opt", "size=1KiB", "-opt", "allow_writes=true"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("upload: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=roundtrip", "-opt", "path=/rt-{id}.bin", "-opt", "size=1KiB", "-opt", "allow_writes=true"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("roundtrip: total %d failed %d", res.Total, res.Failed)
+	}
+	res := run("-opt", "mode=delete", "-opt", "path=/pub/gone.bin", "-opt", "allow_writes=true", "-opt", "allow_admin=true")
+	if res.Total == 0 {
+		t.Errorf("delete: total %d", res.Total)
+	}
+	if _, ok := srv.File("/pub/gone.bin"); ok {
+		t.Error("delete left /pub/gone.bin")
+	}
+}
+
+// An SFTP load test runs end to end through `vegaload run -protocol sftp`
+// for each mode: connect, download, list, stat, upload, roundtrip and delete.
+func TestCmdRun_SFTPProtocol(t *testing.T) {
+	srv := sftptest.Start(t)
+	srv.Apply(sftptest.Config{Files: map[string][]byte{
+		"/pub/data.bin": []byte("hello sftp"),
+		"/pub/gone.bin": []byte("bye"),
+	}})
+	t.Setenv("SFTP_PW", "secret")
+	run := func(extra ...string) report.Result {
+		dir := t.TempDir()
+		out := filepath.Join(dir, "summary.json")
+		args := []string{
+			"-vus", "2", "-duration", "300ms", "-no-report", "-insecure",
+			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
+			"-target", srv.URL(), "-protocol", "sftp",
+			"-opt", "password_env=SFTP_PW",
+		}
+		args = append(args, extra...)
+		cmdRun(args)
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res report.Result
+		if err := json.Unmarshal(data, &res); err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := run("-opt", "mode=connect"); res.Total == 0 || res.Failed != 0 {
+		t.Errorf("connect: total %d failed %d", res.Total, res.Failed)
+	}
+	if res := run("-opt", "mode=download", "-opt", "path=/pub/data.bin", "-opt", "expect_size=10"); res.Total == 0 || res.Failed != 0 {
 		t.Errorf("download: total %d failed %d", res.Total, res.Failed)
 	}
 	if res := run("-opt", "mode=list", "-opt", "path=/pub", "-opt", "expect=data.bin"); res.Total == 0 || res.Failed != 0 {

@@ -40,6 +40,7 @@ func TestTargetHost(t *testing.T) {
 		"amqp://mq.internal:5672":         "mq.internal",
 		"amqps://u@mq.internal/orders":    "mq.internal",
 		"ftp://files.internal":            "files.internal",
+		"sftp://files.internal":           "files.internal",
 		"ftps://u@files.internal":         "files.internal",
 		"mqtts://broker.internal":         "broker.internal",
 		"kafka://k1.internal:9092":        "k1.internal",
@@ -96,6 +97,7 @@ func TestAllowlistAppliesToEveryScheme(t *testing.T) {
 		"amqps://mq.example.com",
 		"ftp://files.example.com",
 		"ftps://files.example.com",
+		"sftp://files.example.com",
 	} {
 		host, err := TargetHost(raw)
 		if err != nil {

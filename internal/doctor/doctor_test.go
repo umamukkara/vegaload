@@ -444,7 +444,11 @@ func TestSchemeTable(t *testing.T) {
 			t.Errorf("%s = %+v, %v; want port %s and protocol ftp", tc.in, got, err, tc.port)
 		}
 	}
-	got, err := parseTarget("grpcs://h")
+	got, err := parseTarget("sftp://h")
+	if err != nil || got.Port != "22" || got.protocol() != "sftp" {
+		t.Errorf("sftp://h = %+v, %v; want port 22 and protocol sftp", got, err)
+	}
+	got, err = parseTarget("grpcs://h")
 	if err != nil || got.Port != "443" || got.protocol() != "grpc" {
 		t.Errorf("grpcs://h = %+v, %v", got, err)
 	}

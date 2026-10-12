@@ -16,6 +16,7 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/postgres"
 	"github.com/vegaload/vegaload/internal/protocol/rabbitmq"
 	"github.com/vegaload/vegaload/internal/protocol/redis"
+	"github.com/vegaload/vegaload/internal/protocol/sftp"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
 	"github.com/vegaload/vegaload/internal/protocol/websocket"
 	"github.com/vegaload/vegaload/internal/safety"
@@ -39,6 +40,7 @@ func TestBadURLErrorsDoNotRepeatThePassword(t *testing.T) {
 		"grpc":     func() error { _, err := grpc.New(mk("grpc"), time.Second); return err },
 		"rabbitmq": func() error { _, err := rabbitmq.New(mk("amqp"), time.Second); return err },
 		"ftp":      func() error { _, err := ftp.New(mk("ftp"), time.Second); return err },
+		"sftp":     func() error { _, err := sftp.New(mk("sftp"), time.Second); return err },
 		"safety":   func() error { _, err := safety.TargetHost(mk("redis").URL); return err },
 		"socket":   func() error { _, err := socket.NewTCP(mk("tcp"), time.Second); return err },
 		"http1": func() error {

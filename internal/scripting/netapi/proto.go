@@ -2,6 +2,8 @@ package netapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +24,9 @@ import (
 	"github.com/vegaload/vegaload/internal/protocol/postgres"
 	"github.com/vegaload/vegaload/internal/protocol/rabbitmq"
 	"github.com/vegaload/vegaload/internal/protocol/redis"
+	"github.com/vegaload/vegaload/internal/protocol/sftp"
 	"github.com/vegaload/vegaload/internal/protocol/socket"
+	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
@@ -42,9 +46,11 @@ type ProtoCall struct {
 	Insecure bool
 	// Timeout bounds the whole call. Zero means the client's default.
 	Timeout time.Duration
-	// Password is the MQTT, Kafka, PostgreSQL, MySQL, Redis or RabbitMQ password. nil means none. A script passes it
+	// Password is the MQTT, Kafka, PostgreSQL, MySQL, Redis, RabbitMQ, FTP or SFTP password. nil means none. A script passes it
 	// here, from `env`, so it never has to be put in Options.
 	Password *string
+	// KeyPassphrase is the passphrase of an SFTP private key, from key_passphrase. nil means none.
+	KeyPassphrase *string
 	// Headers are the gRPC metadata of a grpc.call.
 	Headers map[string]string
 }
@@ -64,6 +70,7 @@ func ProtoFunctions() map[string][]string {
 		"redis":    {"command"},
 		"rabbitmq": {"publish", "consume", "roundtrip", "admin"},
 		"ftp":      {"connect", "download", "upload", "list", "stat", "delete", "roundtrip"},
+		"sftp":     {"connect", "download", "upload", "list", "stat", "delete", "roundtrip"},
 	}
 }
 
@@ -91,6 +98,8 @@ func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*P
 		return c.RabbitMQ(ctx, fn, call)
 	case "ftp":
 		return c.FTP(ctx, fn, call)
+	case "sftp":
+		return c.SFTP(ctx, fn, call)
 	}
 	return nil, fmt.Errorf("unknown call %q", name)
 }
@@ -190,6 +199,15 @@ func ProtoCallFromArgs(name, rawURL string, args map[string]any) (ProtoCall, err
 				return pc, err
 			}
 			pc.Password = &s
+		case "key_passphrase":
+			if !strings.HasPrefix(name, "sftp.") {
+				return pc, errors.New("unknown option key_passphrase")
+			}
+			s, err := optionText(key, val)
+			if err != nil {
+				return pc, err
+			}
+			pc.KeyPassphrase = &s
 		default:
 			s, err := optionText(key, val)
 			if err != nil {
@@ -347,9 +365,9 @@ func (r *ProtoReply) Fields() map[string]any {
 		f["messages"] = rm
 		f["text"] = r.RabbitText
 	}
-	if r.IsFTP {
-		ents := make([]any, 0, len(r.FTPEntries))
-		for _, e := range r.FTPEntries {
+	if r.IsXfer {
+		ents := make([]any, 0, len(r.XferEntries))
+		for _, e := range r.XferEntries {
 			when := ""
 			if !e.Time.IsZero() {
 				when = e.Time.UTC().Format(time.RFC3339)
@@ -359,17 +377,17 @@ func (r *ProtoReply) Fields() map[string]any {
 			})
 		}
 		f["entries"] = ents
-		f["size"] = r.FTPSize
-		f["total"] = r.FTPTotal
+		f["size"] = r.XferSize
+		f["total"] = r.XferTotal
 		f["timing"] = map[string]any{
-			"connectMs":  r.FTPTiming.ConnectMs,
-			"loginMs":    r.FTPTiming.LoginMs,
-			"transferMs": r.FTPTiming.TransferMs,
-			"uploadMs":   r.FTPTiming.UploadMs,
-			"downloadMs": r.FTPTiming.DownloadMs,
-			"deleteMs":   r.FTPTiming.DeleteMs,
+			"connectMs":  r.XferTiming.ConnectMs,
+			"loginMs":    r.XferTiming.LoginMs,
+			"transferMs": r.XferTiming.TransferMs,
+			"uploadMs":   r.XferTiming.UploadMs,
+			"downloadMs": r.XferTiming.DownloadMs,
+			"deleteMs":   r.XferTiming.DeleteMs,
 		}
-		f["text"] = r.FTPText
+		f["text"] = r.XferText
 	}
 	return f
 }
@@ -440,26 +458,26 @@ type ProtoReply struct {
 	IsRabbit       bool
 	RabbitMessages []RabbitMessage
 	RabbitText     string
-	// IsFTP is true for an FTP reply. FTPEntries are the names a list or
-	// stat returned. FTPText is the short answer. Times are UTC.
-	IsFTP      bool
-	FTPEntries []FTPEntry
-	FTPSize    int64
-	FTPTotal   int
-	FTPTiming  FTPTiming
-	FTPText    string
+	// IsXfer is true for an FTP or SFTP reply. XferEntries are the names a
+	// list or stat returned. XferText is the short answer. Times are UTC.
+	IsXfer      bool
+	XferEntries []XferEntry
+	XferSize    int64
+	XferTotal   int
+	XferTiming  XferTiming
+	XferText    string
 }
 
-// FTPEntry is one name from an FTP listing.
-type FTPEntry struct {
+// XferEntry is one name from an FTP or SFTP listing.
+type XferEntry struct {
 	Name string
 	Type string
 	Size int64
 	Time time.Time
 }
 
-// FTPTiming is how long the parts of an FTP call took, in milliseconds.
-type FTPTiming struct {
+// XferTiming is how long the parts of an FTP or SFTP call took, in milliseconds.
+type XferTiming struct {
 	ConnectMs  int64
 	LoginMs    int64
 	TransferMs int64
@@ -495,6 +513,7 @@ type ProtoClient struct {
 	redisConns map[string]*redis.Driver
 	rmqConns   map[string]*rabbitmq.Driver
 	ftpConns   map[string]*ftp.Driver
+	sftpConns  map[string]*sftp.Driver
 }
 
 // NewProtoClient returns a ProtoClient. check, when not nil, is run on the
@@ -955,6 +974,10 @@ func (c *ProtoClient) Close() {
 		_ = d.Close()
 		delete(c.ftpConns, k)
 	}
+	for k, d := range c.sftpConns {
+		_ = d.Close()
+		delete(c.sftpConns, k)
+	}
 }
 
 // rabbitConnOptions are the options that make up a RabbitMQ connection.
@@ -1072,18 +1095,7 @@ func (c *ProtoClient) FTP(ctx context.Context, mode string, call ProtoCall) (*Pr
 	}
 	res, rep := d.Run(ctx)
 	r := fromResult(res)
-	r.IsFTP = true
-	r.FTPSize = rep.Size
-	r.FTPTotal = rep.Total
-	r.FTPText = rep.Text
-	r.FTPTiming = FTPTiming{
-		ConnectMs: rep.Timing.ConnectMs, LoginMs: rep.Timing.LoginMs,
-		TransferMs: rep.Timing.TransferMs, UploadMs: rep.Timing.UploadMs,
-		DownloadMs: rep.Timing.DownloadMs, DeleteMs: rep.Timing.DeleteMs,
-	}
-	for _, e := range rep.Entries {
-		r.FTPEntries = append(r.FTPEntries, FTPEntry{Name: e.Name, Type: e.Type, Size: e.Size, Time: e.Time})
-	}
+	fillXfer(r, rep)
 	return r, nil
 }
 
@@ -1123,6 +1135,107 @@ func (c *ProtoClient) ftpConn(call ProtoCall, opts map[string]string) (*ftp.Driv
 	}
 	c.ftpConns[key] = d
 	return d, nil
+}
+
+// sftpConnOptions are the options that make up one set of SFTP connections.
+// They are the same for every call of one client. The rest of a call's
+// options describe the job. TLS options are not among them.
+var sftpConnOptions = []string{
+	"username", "key_file", "host_key", "connections", "connection",
+	"allow_writes", "allow_admin",
+}
+
+// SFTP does one SFTP job. mode is connect, download, upload, list, stat,
+// delete or roundtrip. The connections are kept for the next call with
+// the same connection options.
+func (c *ProtoClient) SFTP(ctx context.Context, mode string, call ProtoCall) (*ProtoReply, error) {
+	if err := c.checkTarget(call.URL, "sftp"); err != nil {
+		return nil, err
+	}
+	opts := cloneOptions(call.Options)
+	if _, ok := opts["mode"]; ok {
+		return nil, errors.New("sftp: option mode is not allowed here, the function you called sets it")
+	}
+	opts["mode"] = mode
+	if _, ok := opts["password_env"]; ok {
+		return nil, errors.New("sftp: password_env is for the command line, pass password: env.NAME instead")
+	}
+	if _, ok := opts["key_passphrase_env"]; ok {
+		return nil, errors.New("sftp: key_passphrase_env is for the command line, pass key_passphrase: env.NAME instead")
+	}
+	conn, err := c.sftpConn(call, opts)
+	if err != nil {
+		return nil, err
+	}
+	d, err := conn.Call(opts, call.Body, c.timeoutFor(call))
+	if err != nil {
+		return nil, err
+	}
+	res, rep := d.Run(ctx)
+	r := fromResult(res)
+	fillXfer(r, rep)
+	return r, nil
+}
+
+func (c *ProtoClient) sftpConn(call ProtoCall, opts map[string]string) (*sftp.Driver, error) {
+	connOpts := map[string]string{}
+	for _, k := range sftpConnOptions {
+		if v, ok := opts[k]; ok {
+			connOpts[k] = v
+		}
+	}
+	keys := make([]string, 0, len(connOpts))
+	for k := range connOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var kb strings.Builder
+	fmt.Fprintf(&kb, "%s|insecure=%t|", call.URL, call.Insecure)
+	if call.Password != nil {
+		fmt.Fprintf(&kb, "pw=%s|", secretHash(*call.Password))
+	}
+	if call.KeyPassphrase != nil {
+		fmt.Fprintf(&kb, "pp=%s|", secretHash(*call.KeyPassphrase))
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&kb, "%s=%q|", k, connOpts[k])
+	}
+	key := kb.String()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.sftpConns[key]; ok {
+		return d, nil
+	}
+	d, err := sftp.NewConn(protocol.Target{URL: call.URL, Options: connOpts, InsecureSkipVerify: call.Insecure}, c.timeoutFor(call), call.Password, call.KeyPassphrase)
+	if err != nil {
+		return nil, err
+	}
+	if c.sftpConns == nil {
+		c.sftpConns = map[string]*sftp.Driver{}
+	}
+	c.sftpConns[key] = d
+	return d, nil
+}
+
+func fillXfer(r *ProtoReply, rep xfercommon.Reply) {
+	r.IsXfer = true
+	r.XferSize = rep.Size
+	r.XferTotal = rep.Total
+	r.XferText = rep.Text
+	r.XferTiming = XferTiming{
+		ConnectMs: rep.Timing.ConnectMs, LoginMs: rep.Timing.LoginMs,
+		TransferMs: rep.Timing.TransferMs, UploadMs: rep.Timing.UploadMs,
+		DownloadMs: rep.Timing.DownloadMs, DeleteMs: rep.Timing.DeleteMs,
+	}
+	for _, e := range rep.Entries {
+		r.XferEntries = append(r.XferEntries, XferEntry{Name: e.Name, Type: e.Type, Size: e.Size, Time: e.Time})
+	}
+}
+
+func secretHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 func (c *ProtoClient) socket(ctx context.Context, network string, call ProtoCall) (*ProtoReply, error) {
