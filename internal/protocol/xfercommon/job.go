@@ -258,6 +258,11 @@ func (ids *IDs) Next() string {
 	return ids.salt + "-" + strconv.FormatUint(ids.seq.Add(1), 10)
 }
 
+// Pending is the id the next Next call will return.
+func (ids *IDs) Pending() string {
+	return ids.salt + "-" + strconv.FormatUint(ids.seq.Load()+1, 10)
+}
+
 // ReadStream reads r to the end. It never keeps the whole stream.
 // When expect is set, it looks for that text in the first 1 MiB.
 // When hash is set, it returns the SHA-256 hex of the whole stream.

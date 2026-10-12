@@ -1,6 +1,7 @@
 package sftp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"runtime"
@@ -301,6 +302,34 @@ func TestListStatDeleteRoundtrip(t *testing.T) {
 	res, _ = run(t, s, modeRoundtrip, map[string]string{"path": "/fixed.bin", "size": "8", "allow_writes": "true"}, "", 0)
 	if res.Success || !strings.Contains(res.Err.Error(), "{id}") {
 		t.Fatal(res.Err)
+	}
+}
+
+func TestRoundtrip_LeavesEmptyDirectory(t *testing.T) {
+	s := srv(t)
+	t.Setenv("SFTP_PW", "secret")
+	d, err := New(protocol.Target{
+		URL: s.URL(), InsecureSkipVerify: true,
+		Options: map[string]string{
+			"mode": "roundtrip", "path": "/{id}", "size": "8",
+			"allow_writes": "true", "password_env": "SFTP_PW",
+		},
+	}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	dir := "/" + d.shared.ids.Pending()
+	if err := s.Mkdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	res, rep := d.Run(context.Background())
+	if res.Success || !strings.Contains(rep.Text, "left on the server") {
+		t.Fatalf("success=%v text=%q err=%v", res.Success, rep.Text, res.Err)
+	}
+	res, rep = run(t, s, modeStat, map[string]string{"path": dir}, "", 0)
+	if !res.Success || !strings.Contains(rep.Text, "type dir") {
+		t.Fatal("empty directory was removed", res.Err, rep.Text)
 	}
 }
 

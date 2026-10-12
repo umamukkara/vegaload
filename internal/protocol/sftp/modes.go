@@ -234,17 +234,31 @@ func (d *Driver) cleanup(l *live, path string, rep xfercommon.Reply) xfercommon.
 	if l.raw != nil {
 		_ = l.raw.SetDeadline(time.Now().Add(time.Second))
 	}
-	err := l.cli.Remove(path)
-	if l.raw != nil && !l.dead.Load() {
-		_ = l.raw.SetDeadline(time.Time{})
-	}
-	rep.Timing.DeleteMs = time.Since(start).Milliseconds()
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	fi, err := l.cli.Lstat(path)
+	switch {
+	case err != nil && errors.Is(err, os.ErrNotExist):
+		// The upload never created a file.
+	case err != nil:
 		rep.Text = xfercommon.TextLeft(path)
 		if isLost(err) {
 			l.kill()
 		}
+	case fi.IsDir():
+		// Remove also removes an empty directory. Leave the directory in place.
+		rep.Text = xfercommon.TextLeft(path)
+	default:
+		err = l.cli.Remove(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			rep.Text = xfercommon.TextLeft(path)
+			if isLost(err) {
+				l.kill()
+			}
+		}
 	}
+	if l.raw != nil && !l.dead.Load() {
+		_ = l.raw.SetDeadline(time.Time{})
+	}
+	rep.Timing.DeleteMs = time.Since(start).Milliseconds()
 	return rep
 }
 
