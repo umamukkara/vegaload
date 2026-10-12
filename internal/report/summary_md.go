@@ -57,7 +57,7 @@ func MarkdownSummary(res *Result) string {
 		for _, p := range res.Protocols {
 			writeMDCall(&b, p.Name, p.Total, p.Failed, p.ErrorRate, p.Latency, p.BytesSent, p.BytesReceived)
 			for _, op := range p.Operations {
-				writeMDCall(&b, "  "+op.Name, op.Total, op.Failed, op.ErrorRate, op.Latency, op.BytesSent, op.BytesReceived)
+				writeMDCall(&b, "↳ "+op.Name, op.Total, op.Failed, op.ErrorRate, op.Latency, op.BytesSent, op.BytesReceived)
 			}
 		}
 		for _, p := range res.Protocols {

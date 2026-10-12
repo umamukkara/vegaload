@@ -31,7 +31,11 @@ couldn't also do.
   gate on them with the `check_rate` metric. They can also wrap stages in
   `step(name, fn)` (Python: `with step(name):`) so results show latency and
   error rate per stage, and a threshold can target one, e.g.
-  `p95{step="login"} < 300ms`.
+  `p95{step="login"} < 300ms`. A threshold can also target one protocol or
+  one operation: `p95{protocol="ftp"} < 500ms`,
+  `error_rate{protocol="ftp",op="roundtrip"} < 1%`. The result includes
+  `protocols` when the run recorded calls. A script HTTP 4xx or 5xx counts
+  as a success in that row; use `check()` on the status to judge it.
 - **run_test** — run a load test, either a scenario file or a protocol-direct
   target (`target` + `protocol`, e.g. `http1`). Pick an `executor`: `fixed-vus`
   (steady concurrency), `ramp` (stages that climb then fall), `step` (stages
@@ -49,7 +53,8 @@ couldn't also do.
   more, and always confirm with the user before pointing load at anything
   that isn't localhost or a target they explicitly named.
 - **get_results** — read back a report JSON file you already have a path for
-  (from `run_test`'s `report_path`, or a file the user points you at).
+  (from `run_test`'s `report_path`, or a file the user points you at). The
+  report includes `protocols` when the run recorded calls.
 - **suggest_thresholds** — given a baseline run's report, get a suggested p95
   latency ceiling and error-rate ceiling for gating future runs.
 - **diagnose_failure** — given a report, get rule-based findings (failure
@@ -59,7 +64,8 @@ couldn't also do.
 - **compare_reports** — diff a candidate JSON report against a baseline JSON
   report (`vegaload compare`). Returns metric deltas, each named check's pass
   rate in both runs, and whether error rate, p95 latency or a check's pass
-  rate regressed. Use after a second run to check for regressions.
+  rate regressed. It also lists each protocol's p95 and error rate. Those
+  lines do not change the verdict. Use after a second run to check for regressions.
 - **generate_from_spec** — given a JSON OpenAPI document, write a runnable
   scenario (JavaScript, or Python with `python: true`) that calls every
   operation as a named step, and a runbook with one `vegaload run` command per

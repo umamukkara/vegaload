@@ -122,7 +122,7 @@ func runTestTool(exePath string) Tool {
 			"no_report is set, the path to a self-contained HTML report. A non-localhost target that isn't in " +
 			"allow_targets is refused unless yes is set — the same FR-CLI-06 safety gate `vegaload run` enforces " +
 			"from a terminal, since this tool has no interactive terminal of its own to prompt on. Optional thresholds " +
-			"(each like \"p95 < 300ms\" or \"error_rate < 1%\") make the run pass or fail: the result then carries " +
+			"(each like \"p95 < 300ms\", \"p95{protocol=\\\"ftp\\\"} < 500ms\" or \"error_rate < 1%\") make the run pass or fail: the result then carries " +
 			"thresholds and thresholds_passed. A breached threshold is a normal result with thresholds_passed false, " +
 			"not a tool error — the same run exits 3 from a terminal. With baseline_path the run is also compared with an earlier " +
 			"report, and the result carries baseline with passed true or false; a worse run is a normal result too.",
@@ -143,7 +143,7 @@ func runTestTool(exePath string) Tool {
 				"yes":             map[string]any{"type": "boolean", "description": "skip the confirmation gate for a non-allowlisted target"},
 				"report_path":     map[string]any{"type": "string", "description": "where to write the self-contained HTML report (default: a generated name)"},
 				"no_report":       map[string]any{"type": "boolean", "description": "skip writing the HTML report"},
-				"thresholds":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed). To target one named step() of a scenario, add a selector, e.g. \"p95{step=\\\"login\\\"} < 300ms\""},
+				"thresholds":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "pass/fail thresholds, each \"[name:] metric operator value\", e.g. \"p95 < 300ms\" or \"error_rate < 1%\". Metrics: p50, p90, p95, p99, mean, min, max, error_rate, rps, failed, total, check_rate (share of check() calls that passed). To target one named step() of a scenario, add a selector, e.g. \"p95{step=\\\"login\\\"} < 300ms\". To target one protocol, or one operation, use \"p95{protocol=\\\"ftp\\\"} < 500ms\" or \"error_rate{protocol=\\\"ftp\\\",op=\\\"roundtrip\\\"} < 1%\". check_rate cannot target a step or a protocol"},
 				"abort_on_breach": map[string]any{"type": "boolean", "description": "needs thresholds. Stop the run early, as soon as a threshold is broken beyond recovery (such as \"failed < 5\", or a p95 or error_rate that stays broken after a warm-up). The result then has aborted with the threshold and the time, and thresholds_passed false. Thresholds that need the whole run (rps, total >=) wait for the end"},
 				"abort_grace":     map[string]any{"type": "string", "description": "with abort_on_breach: a duration like \"5s\". The warm-up in which p95, error_rate and other statistics are not judged (default 5s, or a quarter of the run if shorter)"},
 				"baseline_path":   map[string]any{"type": "string", "description": "path to a JSON report of an earlier run (from `-out`) to compare this run with. If p95 or the error rate is worse by more than max_regression, the result has baseline.passed false"},
@@ -271,7 +271,7 @@ type getResultsArgs struct {
 func getResultsTool() Tool {
 	return Tool{
 		Name:        "get_results",
-		Description: "Read a previously-written VegaLoad JSON report (from run_test's report_path, or `vegaload run -out`) and return its full report.Result.",
+		Description: "Read a previously-written VegaLoad JSON report (from run_test's report_path, or `vegaload run -out`) and return its full report.Result, including protocols when the run recorded calls.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{"report_path": map[string]any{"type": "string", "description": "path to a vegaload JSON report"}},
@@ -402,7 +402,7 @@ func compareReportsTool(exePath string) Tool {
 		Name: "compare_reports",
 		Description: "Diff a candidate JSON report against a baseline JSON report (both from " +
 			"`vegaload run -out` / run_test). Returns metric deltas, each named check's pass rate in both " +
-			"runs, and whether error rate, p95 latency or a check's pass rate regressed. Equivalent to `vegaload compare <baseline.json> <candidate.json>`.",
+			"runs, and whether error rate, p95 latency or a check's pass rate regressed. It also lists each protocol's p95 and error rate. Those lines do not change the verdict. Equivalent to `vegaload compare <baseline.json> <candidate.json>`.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

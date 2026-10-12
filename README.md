@@ -1257,10 +1257,13 @@ Each threshold is an optional `name:`, a metric, an operator (`<`, `<=`,
 `min`, `max` (durations such as `300ms`), `error_rate` (a fraction like
 `0.01` or a percentage like `1%`), `rps`, `failed`, `total` and `check_rate` (the share of `check()` calls
 that passed; see below). A threshold can
-target one named step: `p95{step="login"} < 300ms` (see Steps below;
-`check_rate` cannot). Every
+target one named step (`p95{step="login"} < 300ms`), one protocol
+(`p95{protocol="ftp"} < 500ms`), or one operation
+(`error_rate{protocol="ftp",op="roundtrip"} < 1%`). `check_rate` cannot
+target a step or a protocol. See Steps and Per-protocol results below. Every
 threshold is judged once, on the finished run. A run that completed no
-requests fails all of them.
+requests fails a whole-run threshold. A step or protocol that never ran fails
+its own.
 
 The text summary, the JSON output, the HTML report and the audit log all
 show each threshold's verdict. The exit code tells a script what happened:
@@ -1338,6 +1341,67 @@ threshold. Step names with a quote mark in them cannot be targeted. A run
 keeps at most 100 distinct step names; any more are counted together as
 `(other steps)`. See `examples/scenarios/crud-flow.vl.js`.
 
+#### Per-protocol results
+
+A scenario can mix HTTP, gRPC, WebSocket, SQL, MQTT, FTP and more. The report
+also shows one row per protocol, and under it one row per operation. The
+whole-run numbers stay as they are.
+
+| Protocol | Calls | Failed | Error rate | p50 | p95 | Max | Sent | Received |
+|----------|------:|-------:|-----------:|----:|----:|----:|-----:|---------:|
+| http | 4,200 | 3 | 0.07% | 12ms | 40ms | 210ms | 1.2 MiB | 9.8 MiB |
+| postgres | 4,200 | 0 | 0% | 3ms | 9ms | 31ms | 0.4 MiB | 12 MiB |
+| ftp | 600 | 12 | 2% | 85ms | 190ms | 1.1s | 1.2 GiB | 1.2 GiB |
+
+Under ftp, the operations are `roundtrip`, `upload`, and so on.
+
+The JSON report includes `protocols` when at least one call was recorded. The
+text summary, the HTML report and the GitHub step summary show the table when
+the run used more than one protocol, or one protocol that is not `http`,
+`http1` or `http2`. A plain HTTP run looks as it did before.
+
+The names are the protocol and the operation. A script's HTTP calls are
+`http`, and the operation is the method (`GET`, `POST`, and so on; any other
+verb is `OTHER`). A `-protocol` run uses the driver's name, such as `http1`,
+`http2`, `grpc` or `websocket`. The operation is the mode, such as
+`roundtrip`. More measures will come later.
+
+FTP and SFTP also record phase times: `connect_time`, `login_time`,
+`upload_time`, `download_time` and `delete_time`. A connect or login under
+1 ms is not counted. The times are whole milliseconds, and 0 means a reused
+connection.
+
+A script HTTP call counts as failed only on a transport error: the connection
+failed, it timed out, or the body could not be read. A 4xx or 5xx response
+counts as a success in the protocol row. Use `check()` on `r.status` to judge
+the status.
+
+Gate on a protocol, or on one of its operations. The names are matched
+exactly (`ftp`, not `FTP`). `check_rate` cannot target a protocol. A protocol
+or operation that recorded no calls fails its threshold.
+
+```
+./vegaload run -threshold 'p95{protocol="ftp"} < 500ms' \
+  -threshold 'error_rate{protocol="ftp",op="roundtrip"} < 1%' \
+  -target ftp://127.0.0.1:2121/ -protocol ftp -opt mode=roundtrip ...
+```
+
+A thresholds file names them next to `step`:
+
+```json
+[
+  {"name": "ftp-fast", "metric": "p95", "protocol": "ftp", "operator": "<", "value": "500ms"},
+  {"metric": "error_rate", "protocol": "ftp", "op": "roundtrip", "operator": "<", "value": "1%"}
+]
+```
+
+`vegaload compare` prints each protocol's p95 and error rate, and lists a
+protocol that is only in one of the two reports. Those lines do not change
+the exit code. The gate stays the whole run's p95 and error rate.
+
+JUnit XML adds properties `protocol.<name>.calls`, `.failed`, `.p95_ms`,
+`.bytes_sent` and `.bytes_received`. It does not add a test case per protocol.
+
 #### JUnit XML for CI
 
 `-junit results.xml` also writes the verdicts as JUnit XML, so a CI system
@@ -1349,7 +1413,8 @@ failed test case, because the report says what happened and the exit code
 is the gate. A run with none of these writes an empty suite.
 
 Thresholds can also come from a file, with `-thresholds gate.json`. The file
-is a JSON list of `{"name", "metric", "operator", "value"}`, or the output of
+is a JSON list of `{"name", "metric", "operator", "value"}`, with optional
+`step`, `protocol` and `op`, or the output of
 `vegaload diagnose -output json`, so a baseline run can set the bar for the
 next ones:
 
