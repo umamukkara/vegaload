@@ -115,6 +115,8 @@ type runConfig struct {
 	checkRecorder netapi.CheckRecorder
 	// stepRecorder is where scripted VUs report step() timings (FR-CLI-18).
 	stepRecorder netapi.StepRecorder
+	// callRecorder is where scripted VUs and -protocol mode report each call.
+	callRecorder netapi.CallRecorder
 
 	Executor string // fixed-vus, ramp, step, constant-arrival-rate
 	VUs      int
@@ -436,7 +438,7 @@ func buildIteration(cfg *runConfig) (engine.IterationFunc, func() error, error) 
 	if cfg.ScenarioPath != "" {
 		return scriptedIteration(cfg, concurrencyHint(cfg))
 	}
-	return protocolIteration(cfg.Protocol, cfg.Target, cfg.Timeout)
+	return protocolIteration(cfg.Protocol, cfg.Target, cfg.Timeout, cfg.callRecorder)
 }
 
 // buildSafetyCheck returns the netapi.SafetyCheck every scripted VU's
@@ -473,7 +475,7 @@ func buildSafetyCheck(cfg *runConfig) netapi.SafetyCheck {
 // minimal Summary recorder (see internal/engine) distinguishes today —
 // the richer per-call detail in protocol.Result (status code, byte
 // counts) wires into a real report in Phase 1, not here.
-func protocolIteration(name string, target protocol.Target, timeout time.Duration) (engine.IterationFunc, func() error, error) {
+func protocolIteration(name string, target protocol.Target, timeout time.Duration, calls netapi.CallRecorder) (engine.IterationFunc, func() error, error) {
 	spec, ok := findDriver(name)
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown -protocol %q (want %s)", name, protocolList())
@@ -488,8 +490,11 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 		return nil, nil, err
 	}
 
+	op := protocolOp(driver.Name(), target.Options)
 	iter := func(ctx context.Context) error {
+		start := time.Now()
 		res, err := driver.Do(ctx)
+		recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err)
 		if err != nil {
 			return err
 		}
@@ -502,6 +507,81 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 		return nil
 	}
 	return iter, driver.Close, nil
+}
+
+// protocolOp is the operation name for one -protocol call. It is the mode
+// option only when that mode is in the fixed list for the driver. Anything
+// else uses the driver's own name, so a raw option string is never stored.
+func protocolOp(protocolName string, opts map[string]string) string {
+	mode := ""
+	if opts != nil {
+		mode = opts["mode"]
+	}
+	if mode != "" && knownDriverMode(protocolName, mode) {
+		return mode
+	}
+	return protocolName
+}
+
+func knownDriverMode(protocolName, mode string) bool {
+	switch protocolName {
+	case "ftp", "sftp":
+		return oneOf(mode, "connect", "download", "upload", "list", "stat", "delete", "roundtrip")
+	case "mqtt":
+		return oneOf(mode, "publish", "subscribe", "roundtrip")
+	case "kafka":
+		return oneOf(mode, "produce", "consume", "roundtrip", "admin")
+	case "rabbitmq":
+		return oneOf(mode, "publish", "consume", "roundtrip", "admin")
+	default:
+		return false
+	}
+}
+
+func oneOf(s string, allowed ...string) bool {
+	for _, a := range allowed {
+		if s == a {
+			return true
+		}
+	}
+	return false
+}
+
+func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName, op string, d time.Duration, res protocol.Result, err error) {
+	if rec == nil {
+		return
+	}
+	if err != nil {
+		if netapi.RunEnded(ctx) {
+			return
+		}
+		rec.RecordCall(protocolName, op, d, true, res.BytesSent, res.BytesReceived)
+		return
+	}
+	if !res.Success && netapi.RunEnded(ctx) {
+		return
+	}
+	if driverRefused(res) {
+		return
+	}
+	rec.RecordCall(protocolName, op, d, !res.Success, res.BytesSent, res.BytesReceived)
+}
+
+// driverRefused is a call the safety rules or a missing write flag stopped
+// before any bytes moved. It is a script or option error, not a latency.
+func driverRefused(res protocol.Result) bool {
+	if res.Success || res.Err == nil {
+		return false
+	}
+	if res.BytesSent != 0 || res.BytesReceived != 0 {
+		return false
+	}
+	msg := res.Err.Error()
+	return strings.Contains(msg, "allow_writes") ||
+		strings.Contains(msg, "allow_admin") ||
+		strings.Contains(msg, "needs {id}") ||
+		strings.Contains(msg, "not localhost") ||
+		strings.Contains(msg, "allowlisted")
 }
 
 // scriptedIteration loads cfg.ScenarioPath (as JavaScript/TypeScript or
@@ -529,6 +609,7 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 			}
 			vu.SetCheckRecorder(cfg.checkRecorder)
 			vu.SetStepRecorder(cfg.stepRecorder)
+			vu.SetCallRecorder(cfg.callRecorder)
 			return vu, nil
 		})
 		// Validate the script once, up front, the same way
@@ -552,6 +633,7 @@ func scriptedIteration(cfg *runConfig, concurrency int) (engine.IterationFunc, f
 		}
 		vu.SetCheckRecorder(cfg.checkRecorder)
 		vu.SetStepRecorder(cfg.stepRecorder)
+		vu.SetCallRecorder(cfg.callRecorder)
 		return vu, nil
 	})
 	if _, err := pool.borrowAndRelease(); err != nil {
@@ -580,6 +662,7 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	// (FR-CLI-12).
 	cfg.checkRecorder = collector
 	cfg.stepRecorder = collector
+	cfg.callRecorder = collector
 
 	iter, closeFn, err := buildIteration(cfg)
 	if err != nil {
@@ -930,6 +1013,7 @@ func printResult(w io.Writer, r *report.Result) {
 	}
 	printChecks(w, r)
 	printSteps(w, r)
+	printProtocols(w, r)
 	printThresholds(w, r)
 	printBaseline(w, r)
 }
@@ -992,6 +1076,36 @@ func printSteps(w io.Writer, r *report.Result) {
 			status, st.Name, st.Total, st.Failed, st.ErrorRate*100,
 			st.Latency.P50.Round(time.Microsecond), st.Latency.P95.Round(time.Microsecond), st.Latency.Max.Round(time.Microsecond))
 	}
+}
+
+// printProtocols writes the per-protocol block. A plain HTTP run does not
+// show it, so that summary stays the same as before.
+func printProtocols(w io.Writer, r *report.Result) {
+	if !report.ShowProtocols(r) {
+		return
+	}
+	fmt.Fprintln(w, "\nprotocols")
+	for _, p := range r.Protocols {
+		printCallLine(w, "", p.Name, p.Total, p.Failed, p.ErrorRate, p.Latency, p.BytesSent, p.BytesReceived)
+		for _, op := range p.Operations {
+			printCallLine(w, "  ", op.Name, op.Total, op.Failed, op.ErrorRate, op.Latency, op.BytesSent, op.BytesReceived)
+		}
+		for _, m := range p.Measures {
+			fmt.Fprintf(w, "    %s  %d  p50 %s  p95 %s  max %s\n",
+				m.Name, m.Count, m.Latency.P50.Round(time.Microsecond), m.Latency.P95.Round(time.Microsecond), m.Latency.Max.Round(time.Microsecond))
+		}
+	}
+}
+
+func printCallLine(w io.Writer, indent, name string, total, failed int64, rate float64, lat report.Latency, sent, received int64) {
+	status := "PASS"
+	if failed > 0 {
+		status = "FAIL"
+	}
+	fmt.Fprintf(w, "  %s%s  %s  %d calls, %d failed (%.2f%%)  p50 %s  p95 %s  max %s  sent %s  received %s\n",
+		indent, status, name, total, failed, rate*100,
+		lat.P50.Round(time.Microsecond), lat.P95.Round(time.Microsecond), lat.Max.Round(time.Microsecond),
+		report.FormatByteCount(sent), report.FormatByteCount(received))
 }
 
 // printThresholds writes the thresholds block of the text summary, if

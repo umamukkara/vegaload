@@ -67,6 +67,15 @@ type StepRecorder interface {
 	RecordStep(name string, d time.Duration, failed bool)
 }
 
+// CallRecorder receives every call a script makes to a protocol, and every
+// call a protocol driver makes in -protocol mode. The report Collector
+// implements it. A nil recorder is allowed everywhere it is accepted, and
+// means the call still runs but is not counted.
+type CallRecorder interface {
+	RecordCall(protocol, op string, d time.Duration, failed bool, sent, received int64)
+	RecordMeasure(protocol, name string, d time.Duration)
+}
+
 // Inputs is what a scenario script can read from outside itself
 // (FR-CLI-17): environment variables the run was told to expose, and data
 // files that feed rows to virtual users. The cmd layer builds it from the
@@ -110,6 +119,9 @@ type SafetyCheck func(host string) error
 type Options struct {
 	Headers            map[string]string
 	InsecureSkipVerify bool
+	// Recorder counts a WebSocket connect. Scripts do not set it. HTTP
+	// uses the recorder on HTTPClient instead.
+	Recorder CallRecorder
 }
 
 // ScriptHeaders is the header map a scenario sees. Keys keep Go's
@@ -148,6 +160,14 @@ type HTTPClient struct {
 	client  *http.Client
 	check   SafetyCheck
 	timeout time.Duration
+	calls   CallRecorder
+}
+
+// SetCallRecorder counts this client's HTTP calls. Nil means not counted.
+func (c *HTTPClient) SetCallRecorder(r CallRecorder) {
+	if c != nil {
+		c.calls = r
+	}
 }
 
 // NewHTTPClient returns an HTTPClient that runs check (if non-nil)
@@ -195,13 +215,16 @@ func (c *HTTPClient) Do(ctx context.Context, method, rawURL string, body []byte,
 		}
 	}
 
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
+		c.recordHTTP(ctx, method, time.Since(start), true, int64(len(body)), 0)
 		return nil, fmt.Errorf("netapi: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
+	c.recordHTTP(ctx, method, time.Since(start), err != nil, int64(len(body)), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("netapi: reading response body: %w", err)
 	}
@@ -211,6 +234,28 @@ func (c *HTTPClient) Do(ctx context.Context, method, rawURL string, body []byte,
 		Headers:    resp.Header,
 		Body:       data,
 	}, nil
+}
+
+func (c *HTTPClient) recordHTTP(ctx context.Context, method string, d time.Duration, failed bool, sent, received int64) {
+	if c == nil || c.calls == nil {
+		return
+	}
+	if failed && RunEnded(ctx) {
+		return
+	}
+	c.calls.RecordCall("http", httpOp(method), d, failed, sent, received)
+}
+
+// httpOp keeps the operation set fixed. A verb outside the usual list is
+// OTHER, so a script cannot store an arbitrary string as an operation name.
+func httpOp(method string) string {
+	switch strings.ToUpper(method) {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return strings.ToUpper(method)
+	default:
+		return "OTHER"
+	}
 }
 
 // Close releases the client's idle connections. Safe to call even if no
@@ -228,7 +273,8 @@ func (c *HTTPClient) Close() {
 // until a flow completes or aborts) needs exactly this: a connection a
 // script can read from repeatedly.
 type WSConn struct {
-	conn *websocket.Conn
+	conn  *websocket.Conn
+	calls CallRecorder
 }
 
 // Dial opens a WebSocket connection to rawURL (ws:// or wss://), after
@@ -249,14 +295,16 @@ func Dial(ctx context.Context, check SafetyCheck, rawURL string, timeout time.Du
 		HandshakeTimeout: timeout,
 		TLSClientConfig:  &tls.Config{InsecureSkipVerify: opts.InsecureSkipVerify}, //nolint:gosec // opt-in, see Options
 	}
+	start := time.Now()
 	conn, resp, err := dialer.DialContext(ctx, rawURL, header)
+	recordWS(opts.Recorder, ctx, "connect", time.Since(start), err, 0, 0)
 	if err != nil {
 		if resp != nil {
 			resp.Body.Close()
 		}
 		return nil, fmt.Errorf("netapi: dialing %s: %w", urlerr.Mask(rawURL), urlerr.Inner(err))
 	}
-	return &WSConn{conn: conn}, nil
+	return &WSConn{conn: conn, calls: opts.Recorder}, nil
 }
 
 // Send writes one message. text selects a text frame (as opposed to
@@ -271,10 +319,23 @@ func (c *WSConn) Send(ctx context.Context, data []byte, text bool) error {
 	if text {
 		msgType = websocket.TextMessage
 	}
-	if err := c.conn.WriteMessage(msgType, data); err != nil {
+	start := time.Now()
+	err := c.conn.WriteMessage(msgType, data)
+	recordWS(c.calls, ctx, "send", time.Since(start), err, int64(len(data)), 0)
+	if err != nil {
 		return fmt.Errorf("netapi: sending websocket message: %w", err)
 	}
 	return nil
+}
+
+func recordWS(rec CallRecorder, ctx context.Context, op string, d time.Duration, err error, sent, received int64) {
+	if rec == nil {
+		return
+	}
+	if err != nil && RunEnded(ctx) {
+		return
+	}
+	rec.RecordCall("websocket", op, d, err != nil, sent, received)
 }
 
 // Receive waits for the next message and returns its payload. closed is

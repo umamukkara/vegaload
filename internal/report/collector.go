@@ -3,7 +3,8 @@
 // HTML report, a JSON summary, and (eventually) the MCP get_results
 // tool all read from. It implements engine.Recorder, exactly the seam
 // internal/engine's own doc comment on Recorder sets aside for it, and
-// knows nothing about protocols, scripting, or the CLI.
+// knows nothing about protocol drivers, scripting, or the CLI. A
+// protocol call arrives as a name, the same way a step does.
 package report
 
 import (
@@ -58,6 +59,13 @@ type Collector struct {
 	stepMu    sync.Mutex
 	stepOrder []string
 	steps     map[string][]uint64
+
+	// calls holds every recorded protocol call, guarded by callMu. Each
+	// call is packed the same way as a step. Byte counts are summed, not
+	// stored per call. Measures are phase times and are not calls.
+	callMu    sync.Mutex
+	callOrder []string
+	calls     map[string]*callProto
 }
 
 // NewCollector returns a Collector ready to record a run that is
@@ -248,6 +256,7 @@ func (c *Collector) Finish(executor string, elapsed time.Duration) *Result {
 		Total:     int64(len(samples)),
 		Checks:    c.snapshotChecks(),
 		Steps:     c.snapshotSteps(),
+		Protocols: c.snapshotProtocols(elapsed),
 	}
 	if len(samples) == 0 {
 		return res

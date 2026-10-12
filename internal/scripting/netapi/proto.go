@@ -57,7 +57,10 @@ type ProtoCall struct {
 
 // ProtoFunctions lists the calls a script can make, by namespace: tcp.send,
 // mqtt.publish and so on. Each scripting language builds its globals from
-// this list, so they cannot differ.
+// this list, so they cannot differ. Kept out of line so the map is not
+// copied into every caller.
+//
+//go:noinline
 func ProtoFunctions() map[string][]string {
 	return map[string][]string{
 		"tcp":      {"send"},
@@ -75,7 +78,16 @@ func ProtoFunctions() map[string][]string {
 }
 
 // Call makes the call that name says, such as "tcp.send" or "kafka.admin".
+// A finished call is recorded once here. The typed methods do not record,
+// so a test that calls them directly is not counted.
 func (c *ProtoClient) Call(ctx context.Context, name string, call ProtoCall) (*ProtoReply, error) {
+	start := time.Now()
+	reply, err := c.dispatch(ctx, name, call)
+	c.observeCall(ctx, name, time.Since(start), reply, err)
+	return reply, err
+}
+
+func (c *ProtoClient) dispatch(ctx context.Context, name string, call ProtoCall) (*ProtoReply, error) {
 	ns, fn, _ := strings.Cut(name, ".")
 	switch ns {
 	case "tcp":
@@ -506,6 +518,7 @@ type ProtoClient struct {
 	// first call that needs it and kept until Close, as a real producer
 	// keeps its client. The other protocols hold nothing.
 	mu         sync.Mutex
+	calls      CallRecorder
 	kafkaConns map[string]*kafka.Driver
 	grpcConns  map[string]*grpc.Conn
 	pgConns    map[string]*postgres.Driver
@@ -523,6 +536,90 @@ func NewProtoClient(check SafetyCheck, timeout time.Duration) *ProtoClient {
 		timeout = defaultProtoTimeout
 	}
 	return &ProtoClient{check: check, timeout: timeout}
+}
+
+// SetCallRecorder counts calls made through Call. Nil means not counted.
+func (c *ProtoClient) SetCallRecorder(r CallRecorder) {
+	if c != nil {
+		c.calls = r
+	}
+}
+
+func (c *ProtoClient) observeCall(ctx context.Context, name string, d time.Duration, reply *ProtoReply, err error) {
+	if c == nil || c.calls == nil || err != nil || reply == nil {
+		return
+	}
+	if !reply.OK && RunEnded(ctx) {
+		return
+	}
+	if refusedBeforeSend(reply) {
+		return
+	}
+	ns, fn, ok := strings.Cut(name, ".")
+	if !ok || !knownProtoFn(ns, fn) {
+		return
+	}
+	c.calls.RecordCall(ns, fn, d, !reply.OK, reply.BytesSent, reply.BytesReceived)
+	if reply.IsXfer && (ns == "ftp" || ns == "sftp") {
+		recordXferMeasures(c.calls, ns, fn, reply.OK, reply.XferTiming)
+	}
+}
+
+func knownProtoFn(ns, fn string) bool {
+	for _, name := range ProtoFunctions()[ns] {
+		if name == fn {
+			return true
+		}
+	}
+	return false
+}
+
+// refusedBeforeSend is a call the safety rules or a missing write flag
+// stopped before any bytes moved. That is a script error, not a latency.
+func refusedBeforeSend(reply *ProtoReply) bool {
+	if reply.OK || reply.BytesSent != 0 || reply.BytesReceived != 0 {
+		return false
+	}
+	msg := reply.Error
+	return strings.Contains(msg, "allow_writes") ||
+		strings.Contains(msg, "allow_admin") ||
+		strings.Contains(msg, "needs {id}") ||
+		strings.Contains(msg, "not localhost") ||
+		strings.Contains(msg, "allowlisted")
+}
+
+// recordXferMeasures records the phases an FTP or SFTP call ran.
+// The times are whole milliseconds, so a 0 can mean "did not run" or "ran in
+// under 1 ms". A call that worked ran every phase its mode has, so those are
+// recorded even at 0. A call that failed is recorded only for a phase that
+// reports a time above 0, because a phase it never reached also reports 0.
+// connect_time and login_time are recorded only above 0: a reused connection
+// reports 0, and a 0 would pull the percentiles down. A connect or login
+// under 1 ms is therefore not counted.
+func recordXferMeasures(rec CallRecorder, protocol, op string, ok bool, t XferTiming) {
+	phase := func(name string, ms int64) {
+		if ok || ms > 0 {
+			rec.RecordMeasure(protocol, name, time.Duration(ms)*time.Millisecond)
+		}
+	}
+	if t.ConnectMs > 0 {
+		rec.RecordMeasure(protocol, "connect_time", time.Duration(t.ConnectMs)*time.Millisecond)
+	}
+	if t.LoginMs > 0 {
+		rec.RecordMeasure(protocol, "login_time", time.Duration(t.LoginMs)*time.Millisecond)
+	}
+	switch op {
+	case "upload":
+		phase("upload_time", t.UploadMs)
+	case "download":
+		phase("download_time", t.DownloadMs)
+	case "delete":
+		phase("delete_time", t.DeleteMs)
+	case "roundtrip":
+		phase("upload_time", t.UploadMs)
+		phase("download_time", t.DownloadMs)
+		phase("delete_time", t.DeleteMs)
+	}
 }
 
 // TCP sends over one TCP connection and reads the reply the options ask for.

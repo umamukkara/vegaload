@@ -91,6 +91,43 @@ func TestNFR03_ReportFor1MRequestsWithin5Seconds(t *testing.T) {
 	}
 }
 
+// TestCallSamples_1MIterations5Calls checks the memory of the packed call
+// record. 1,000,000 iterations of 5 calls is 5,000,000 uint64 samples,
+// 40 MB of length. Slice capacity adds some overhead; the test logs the
+// heap so a review can see the number.
+func TestCallSamples_1MIterations5Calls(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the call-sample memory check in -short mode")
+	}
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	c := NewCollector()
+	ops := []string{"connect", "download", "upload", "list", "stat"}
+	for i := 0; i < nfr03Requests; i++ {
+		for _, op := range ops {
+			c.RecordCall("ftp", op, time.Millisecond, false, 1, 1)
+		}
+	}
+	packed := c.callSampleBytes()
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	heap := after.HeapInuse - before.HeapInuse
+	t.Logf("5,000,000 calls: packed samples %d MB, heap in use grew %d MB", packed>>20, heap>>20)
+
+	const want = nfr03Requests * 5 * 8
+	if packed != want {
+		t.Fatalf("packed sample bytes = %d, want %d", packed, want)
+	}
+	res := c.Finish("fixed-vus", time.Second)
+	p, ok := res.Protocol("ftp")
+	if !ok || p.Total != nfr03Requests*5 || len(p.Operations) != 5 {
+		t.Fatalf("protocol = %+v ok %v", p.Name, ok)
+	}
+}
+
 // BenchmarkFinish1M gives the same work as a number to compare between
 // changes: go test -bench Finish1M -run '^$' ./internal/report
 func BenchmarkFinish1M(b *testing.B) {

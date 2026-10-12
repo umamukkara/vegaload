@@ -75,3 +75,27 @@ func TestCmdRun_NamedSteps_EndToEnd(t *testing.T) {
 		t.Errorf("text summary lacks steps:\n%s", s)
 	}
 }
+
+func TestPrintProtocols_ShowRule(t *testing.T) {
+	var plain bytes.Buffer
+	printResult(&plain, &report.Result{
+		Executor:  "fixed-vus",
+		Protocols: []report.ProtocolResult{{Name: "http1", Total: 4, Operations: []report.OperationResult{{Name: "http1", Total: 4}}}},
+	})
+	if strings.Contains(plain.String(), "protocols") {
+		t.Fatalf("plain HTTP summary:\n%s", plain.String())
+	}
+
+	var mixed bytes.Buffer
+	printResult(&mixed, &report.Result{
+		Executor: "fixed-vus",
+		Protocols: []report.ProtocolResult{{
+			Name: "ftp", Total: 2, BytesSent: 1024 * 1024 * 6 / 5, BytesReceived: 1024,
+			Operations: []report.OperationResult{{Name: "download", Total: 2, BytesReceived: 1024}},
+		}},
+	})
+	text := mixed.String()
+	if !strings.Contains(text, "\nprotocols\n") || !strings.Contains(text, "ftp") || !strings.Contains(text, "1.2 MiB") || !strings.Contains(text, "download") {
+		t.Fatalf("protocol summary:\n%s", text)
+	}
+}

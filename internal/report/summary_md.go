@@ -52,6 +52,25 @@ func MarkdownSummary(res *Result) string {
 				st.ErrorRate*100, st.Latency.P50.Round(time.Microsecond), st.Latency.P95.Round(time.Microsecond), st.Latency.Max.Round(time.Microsecond))
 		}
 	}
+	if ShowProtocols(res) {
+		b.WriteString("\n### Protocols\n\n| Result | Protocol | Calls | Failed | Error rate | p50 | p95 | Max | Sent | Received |\n|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+		for _, p := range res.Protocols {
+			writeMDCall(&b, p.Name, p.Total, p.Failed, p.ErrorRate, p.Latency, p.BytesSent, p.BytesReceived)
+			for _, op := range p.Operations {
+				writeMDCall(&b, "  "+op.Name, op.Total, op.Failed, op.ErrorRate, op.Latency, op.BytesSent, op.BytesReceived)
+			}
+		}
+		for _, p := range res.Protocols {
+			if len(p.Measures) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "\n**%s phases**\n\n| Phase | Count | p50 | p95 | Max |\n|---|---:|---:|---:|---:|\n", mdCell(p.Name))
+			for _, m := range p.Measures {
+				fmt.Fprintf(&b, "| %s | %d | %s | %s | %s |\n", mdCell(m.Name), m.Count,
+					m.Latency.P50.Round(time.Microsecond), m.Latency.P95.Round(time.Microsecond), m.Latency.Max.Round(time.Microsecond))
+			}
+		}
+	}
 	if bl := res.Baseline; bl != nil {
 		verdict := "within the baseline"
 		if !bl.Passed {
@@ -82,6 +101,13 @@ func AppendStepSummary(path string, res *Result) error {
 		return err
 	}
 	return f.Close()
+}
+
+func writeMDCall(b *strings.Builder, name string, total, failed int64, rate float64, lat Latency, sent, received int64) {
+	fmt.Fprintf(b, "| %s | %s | %d | %d | %.2f%% | %s | %s | %s | %s | %s |\n",
+		passWord(failed == 0), mdCell(name), total, failed, rate*100,
+		lat.P50.Round(time.Microsecond), lat.P95.Round(time.Microsecond), lat.Max.Round(time.Microsecond),
+		FormatByteCount(sent), FormatByteCount(received))
 }
 
 func passWord(ok bool) string {

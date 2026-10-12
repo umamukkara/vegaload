@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -68,5 +69,28 @@ func TestCmdCompare_ChecksFixtures(t *testing.T) {
 	}
 	if code := cmdCompare([]string{"-check-rate-delta", "0.2", base, bad}); code != 0 {
 		t.Errorf("with 20 points of slack exited %d, want 0", code)
+	}
+}
+
+func TestCmdCompare_ReportWithoutProtocols(t *testing.T) {
+	dir := t.TempDir()
+	old := []byte(`{"executor":"fixed-vus","total":10,"failed":0,"error_rate":0,"elapsed_ns":10000000000,"latency":{"p95_ns":50000000,"p50_ns":20000000}}`)
+	base := filepath.Join(dir, "old-base.json")
+	cand := filepath.Join(dir, "old-cand.json")
+	if err := os.WriteFile(base, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cand, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadReportJSON(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Protocols != nil || loaded.Total != 10 {
+		t.Fatalf("old report = total %d protocols %+v", loaded.Total, loaded.Protocols)
+	}
+	if code := cmdCompare([]string{base, cand}); code != 0 {
+		t.Errorf("compare of reports with no protocols exited %d, want 0", code)
 	}
 }
