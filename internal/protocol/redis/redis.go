@@ -656,7 +656,7 @@ func tlsMismatchHint(tlsOn, worked bool, err error) string {
 	if tlsOn && strings.Contains(err.Error(), "first record does not look like a TLS handshake") {
 		return "The server may not use TLS. Try redis://"
 	}
-	closed := errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET)
+	closed := errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || isWinConnClosed(err)
 	if !closed {
 		var op *net.OpError
 		if errors.As(err, &op) && op.Op == "read" {
@@ -670,6 +670,18 @@ func tlsMismatchHint(tlsOn, worked bool, err error) string {
 		return "The server may not use TLS. Try redis://"
 	}
 	return "The server may need TLS. Try rediss://"
+}
+
+// isWinConnClosed reports a closed connection on Windows. There the error
+// is a bare Winsock code (WSAECONNABORTED 10053, WSAECONNRESET 10054) that
+// does not match syscall.ECONNRESET, and it may not be a net.OpError.
+func isWinConnClosed(err error) bool {
+	var en syscall.Errno
+	if errors.As(err, &en) && (uintptr(en) == 10053 || uintptr(en) == 10054) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection was aborted") || strings.Contains(s, "forcibly closed")
 }
 
 func (d *Driver) markWorked() {

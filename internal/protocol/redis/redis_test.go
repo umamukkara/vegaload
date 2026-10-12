@@ -660,6 +660,8 @@ func TestTLSMismatchHint(t *testing.T) {
 		{"eof on tls after a reply", true, true, io.EOF, ""},
 		{"reset", false, false, fmt.Errorf("read tcp: %w", syscall.ECONNRESET), need},
 		{"read op", false, false, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("forcibly closed")}, need},
+		{"windows abort", false, false, fmt.Errorf("redis: %w", syscall.Errno(10053)), need},
+		{"windows reset", false, false, syscall.Errno(10054), need},
 		{"timeout", false, false, &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}, ""},
 		{"dial", false, false, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, ""},
 		{"handshake", true, false, errors.New("tls: first record does not look like a TLS handshake"), plain},
