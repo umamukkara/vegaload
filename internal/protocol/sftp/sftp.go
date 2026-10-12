@@ -164,8 +164,16 @@ func (d *Driver) Name() string { return "sftp" }
 
 // Do runs one iteration.
 func (d *Driver) Do(ctx context.Context) (protocol.Result, error) {
-	res, _ := d.Run(ctx)
-	return res, nil
+	res, _, err := d.DoTimed(ctx)
+	return res, err
+}
+
+// DoTimed is Do, and it also returns the phase times of this call.
+// One driver is shared by every VU, so the times stay on the return
+// value and are never stored on the driver.
+func (d *Driver) DoTimed(ctx context.Context) (protocol.Result, xfercommon.Timing, error) {
+	res, rep := d.Run(ctx)
+	return res, rep.Timing, nil
 }
 
 // Run runs one call and returns the reply a script reads.

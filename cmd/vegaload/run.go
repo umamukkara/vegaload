@@ -47,6 +47,7 @@ import (
 	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/engine"
 	"github.com/vegaload/vegaload/internal/protocol"
+	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 	"github.com/vegaload/vegaload/internal/report"
 	"github.com/vegaload/vegaload/internal/safety"
 	"github.com/vegaload/vegaload/internal/scripting/js"
@@ -493,8 +494,10 @@ func protocolIteration(name string, target protocol.Target, timeout time.Duratio
 	op := protocolOp(driver.Name(), target.Options)
 	iter := func(ctx context.Context) error {
 		start := time.Now()
-		res, err := driver.Do(ctx)
-		recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err)
+		res, timing, timed, err := doProtocol(driver, ctx)
+		if recordDriverCall(calls, ctx, driver.Name(), op, time.Since(start), res, err) && timed {
+			netapi.RecordXferMeasures(calls, driver.Name(), op, res.Success, netapi.XferTimingFrom(timing))
+		}
 		if err != nil {
 			return err
 		}
@@ -547,21 +550,38 @@ func oneOf(s string, allowed ...string) bool {
 	return false
 }
 
-func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName, op string, d time.Duration, res protocol.Result, err error) {
+// timedDriver is a driver that can report the phase times of the call it
+// just made. FTP and SFTP do. The times are not a field of protocol.Result,
+// because every other driver would then carry a type it does not use.
+type timedDriver interface {
+	DoTimed(ctx context.Context) (protocol.Result, xfercommon.Timing, error)
+}
+
+func doProtocol(driver protocol.Protocol, ctx context.Context) (protocol.Result, xfercommon.Timing, bool, error) {
+	if td, ok := driver.(timedDriver); ok {
+		res, timing, err := td.DoTimed(ctx)
+		return res, timing, true, err
+	}
+	res, err := driver.Do(ctx)
+	return res, xfercommon.Timing{}, false, err
+}
+
+func recordDriverCall(rec netapi.CallRecorder, ctx context.Context, protocolName, op string, d time.Duration, res protocol.Result, err error) bool {
 	if rec == nil || driverRefused(res) {
-		return
+		return false
 	}
 	if err != nil {
 		if netapi.RunEnded(ctx) {
-			return
+			return false
 		}
 		rec.RecordCall(protocolName, op, d, true, res.BytesSent, res.BytesReceived)
-		return
+		return true
 	}
 	if !res.Success && netapi.RunEnded(ctx) {
-		return
+		return false
 	}
 	rec.RecordCall(protocolName, op, d, !res.Success, res.BytesSent, res.BytesReceived)
+	return true
 }
 
 // driverRefused is a call the safety rules or a missing write flag stopped

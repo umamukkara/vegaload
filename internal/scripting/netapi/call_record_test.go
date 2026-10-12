@@ -131,8 +131,8 @@ func TestHTTP_RecordsAndSkipsRefused(t *testing.T) {
 
 func TestXferMeasures_NewConnectionAndSkippedPhase(t *testing.T) {
 	rec := report.NewCollector()
-	recordXferMeasures(rec, "ftp", "upload", true, XferTiming{UploadMs: 0, ConnectMs: 0, LoginMs: 0})
-	recordXferMeasures(rec, "ftp", "list", true, XferTiming{ConnectMs: 4, LoginMs: 2})
+	RecordXferMeasures(rec, "ftp", "upload", true, XferTiming{UploadMs: 0, ConnectMs: 0, LoginMs: 0})
+	RecordXferMeasures(rec, "ftp", "list", true, XferTiming{ConnectMs: 4, LoginMs: 2})
 	got := rec.Finish("fixed-vus", time.Second)
 	// The list call above did not record a call, only measures. upload_time
 	// is present at 0 because upload ran that phase. connect_time is not,
@@ -245,7 +245,7 @@ func errText(r *ProtoReply) string {
 func TestXferMeasures_ZeroMeansRanOnlyWhenTheCallWorked(t *testing.T) {
 	counts := func(op string, ok bool, tm XferTiming) map[string]int64 {
 		rec := report.NewCollector()
-		recordXferMeasures(rec, "ftp", op, ok, tm)
+		RecordXferMeasures(rec, "ftp", op, ok, tm)
 		out := map[string]int64{}
 		res := rec.Finish("fixed-vus", time.Second)
 		if len(res.Protocols) == 0 {

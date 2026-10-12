@@ -568,7 +568,7 @@ func (c *ProtoClient) observeCall(ctx context.Context, name string, d time.Durat
 	}
 	c.calls.RecordCall(ns, fn, d, !reply.OK, reply.BytesSent, reply.BytesReceived)
 	if reply.IsXfer && (ns == "ftp" || ns == "sftp") {
-		recordXferMeasures(c.calls, ns, fn, reply.OK, reply.XferTiming)
+		RecordXferMeasures(c.calls, ns, fn, reply.OK, reply.XferTiming)
 	}
 }
 
@@ -598,7 +598,15 @@ func refusedBeforeSend(reply *ProtoReply) bool {
 	return reply.Refused
 }
 
-// recordXferMeasures records the phases an FTP or SFTP call ran.
+// XferTimingFrom copies phase times from a file-transfer driver.
+func XferTimingFrom(t xfercommon.Timing) XferTiming {
+	return XferTiming{
+		ConnectMs: t.ConnectMs, LoginMs: t.LoginMs, TransferMs: t.TransferMs,
+		UploadMs: t.UploadMs, DownloadMs: t.DownloadMs, DeleteMs: t.DeleteMs,
+	}
+}
+
+// RecordXferMeasures records the phases an FTP or SFTP call ran.
 // The times are whole milliseconds, so a 0 can mean "did not run" or "ran in
 // under 1 ms". A call that worked ran every phase its mode has, so those are
 // recorded even at 0. A call that failed is recorded only for a phase that
@@ -606,7 +614,7 @@ func refusedBeforeSend(reply *ProtoReply) bool {
 // connect_time and login_time are recorded only above 0: a reused connection
 // reports 0, and a 0 would pull the percentiles down. A connect or login
 // under 1 ms is therefore not counted.
-func recordXferMeasures(rec CallRecorder, protocol, op string, ok bool, t XferTiming) {
+func RecordXferMeasures(rec CallRecorder, protocol, op string, ok bool, t XferTiming) {
 	phase := func(name string, ms int64) {
 		if ok || ms > 0 {
 			rec.RecordMeasure(protocol, name, time.Duration(ms)*time.Millisecond)
