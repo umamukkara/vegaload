@@ -15,6 +15,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ import (
 )
 
 // Options are the -opt keys this driver accepts.
-var Options = tlsconf.Keys
+var Options = slices.Clone(tlsconf.Keys)
 
 // rawCodec marshals and unmarshals gRPC messages as plain []byte, with no
 // protobuf encoding step — what the driver sends is exactly the bytes in
@@ -136,9 +137,10 @@ func parseAddr(target string, insecureSkipVerify bool, files tlsconf.Files) (add
 		}
 		return u.Host, insecure.NewCredentials(), nil
 	case "grpcs":
+		// ServerName stays empty so each address is checked as itself.
+		// tls_server_name sets it when the name to check is different.
 		cfg := &tls.Config{
 			MinVersion:         tls.VersionTLS12,
-			ServerName:         u.Hostname(),
 			InsecureSkipVerify: insecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 		}
 		if err := files.Apply(cfg, insecureSkipVerify, true); err != nil {

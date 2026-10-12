@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,7 +27,7 @@ import (
 )
 
 // Options are the -opt keys this driver accepts.
-var Options = tlsconf.Keys
+var Options = slices.Clone(tlsconf.Keys)
 
 // Driver is a WebSocket protocol.Protocol.
 type Driver struct {
@@ -53,9 +54,10 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	tlsOn := u.Scheme == "wss"
 	var cfg *tls.Config
 	if tlsOn {
+		// ServerName stays empty so the dial uses the URL host.
+		// tls_server_name sets it when the host to check is different.
 		cfg = &tls.Config{
 			MinVersion:         tls.VersionTLS12,
-			ServerName:         u.Hostname(),
 			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 		}
 	}

@@ -3,7 +3,9 @@ package kafka
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -122,4 +124,36 @@ func kafkaDo(t *testing.T, url string, opts map[string]string) protocol.Result {
 		t.Fatal(err)
 	}
 	return res
+}
+
+func TestTLSFiles_BrokerNameDiffersFromSeed(t *testing.T) {
+	m := tlstest.New(t)
+	seedCert := m.IssueServer(t, []string{"localhost"}, nil)
+	brokerCert := m.IssueServer(t, nil, []net.IP{net.ParseIP("127.0.0.1")})
+
+	brokerLn := tlstest.Listen(t, &tls.Config{Certificates: []tls.Certificate{brokerCert}, MinVersion: tls.VersionTLS12})
+	broker := kafkatest.New(t, brokerLn)
+	broker.AddTopic("tls", 1)
+	_, brokerPort, err := net.SplitHostPort(brokerLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(brokerPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedLn := tlstest.Listen(t, &tls.Config{Certificates: []tls.Certificate{seedCert}, MinVersion: tls.VersionTLS12})
+	seed := kafkatest.New(t, seedLn)
+	seed.AddTopic("tls", 1)
+	seed.Advertise("127.0.0.1", port)
+	_, seedPort, err := net.SplitHostPort(seedLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := kafkaDo(t, "kafkas://localhost:"+seedPort, map[string]string{"ca_file": m.CACertPath})
+	if !res.Success {
+		t.Fatal(res.Err)
+	}
 }

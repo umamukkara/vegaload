@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/vegaload/vegaload/internal/protocol"
@@ -19,7 +20,7 @@ import (
 )
 
 // Options are the -opt keys this driver accepts.
-var Options = tlsconf.Keys
+var Options = slices.Clone(tlsconf.Keys)
 
 // Driver is an HTTP/1.1 protocol.Protocol. It reuses one *http.Client
 // (and the connection pool behind it) across every call to Do, so
@@ -52,9 +53,10 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	tlsOn := u.Scheme == "https"
 	var cfg *tls.Config
 	if tlsOn {
+		// ServerName stays empty so each request, including a redirect to
+		// another host, is checked against that host. tls_server_name sets it.
 		cfg = &tls.Config{
 			MinVersion:         tls.VersionTLS12,
-			ServerName:         u.Hostname(),
 			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 		}
 	}

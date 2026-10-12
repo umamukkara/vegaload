@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -29,7 +30,7 @@ import (
 )
 
 // Options are the -opt keys this driver accepts.
-var Options = tlsconf.Keys
+var Options = slices.Clone(tlsconf.Keys)
 
 // Driver is an HTTP/2 protocol.Protocol.
 type Driver struct {
@@ -51,9 +52,10 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	tlsOn := u.Scheme != "http"
 	var cfg *tls.Config
 	if tlsOn {
+		// ServerName stays empty so each request, including a redirect to
+		// another host, is checked against that host. tls_server_name sets it.
 		cfg = &tls.Config{
 			MinVersion:         tls.VersionTLS12,
-			ServerName:         u.Hostname(),
 			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 		}
 	}

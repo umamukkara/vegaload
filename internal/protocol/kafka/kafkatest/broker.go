@@ -35,6 +35,12 @@ type Broker struct {
 	nconn  int
 	// produced counts the records the broker stored.
 	produced int
+
+	// advHost and advPort, when set, are the address metadata announces.
+	// The listener can then use a different name from the broker clients
+	// dial next.
+	advHost string
+	advPort int32
 }
 
 type fakeTopic struct{ parts []*fakePartition }
@@ -272,7 +278,21 @@ func fakeAPIKeys() []kmsg.ApiVersionsResponseApiKey {
 	return out
 }
 
+// Advertise makes metadata announce host and port instead of this
+// listener's own address. Call it before a client connects.
+func (b *Broker) Advertise(host string, port int) {
+	b.mu.Lock()
+	b.advHost = host
+	b.advPort = int32(port)
+	b.mu.Unlock()
+}
+
 func (b *Broker) hostPort() (string, int32) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.advHost != "" {
+		return b.advHost, b.advPort
+	}
 	h, p, _ := net.SplitHostPort(b.ln.Addr().String())
 	n, _ := strconv.Atoi(p)
 	return h, int32(n)

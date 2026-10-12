@@ -3,6 +3,7 @@ package http1
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -101,6 +102,35 @@ func serveHTTP(t *testing.T, cfg *tls.Config, h http.Handler) string {
 	go srv.Serve(ln) //nolint:errcheck // the test closes it
 	t.Cleanup(func() { _ = srv.Close() })
 	return "https://" + ln.Addr().String()
+}
+
+func TestTLSFiles_RedirectUsesTheNextHostName(t *testing.T) {
+	m := tlstest.New(t)
+	nextCert := m.IssueServer(t, nil, []net.IP{net.ParseIP("127.0.0.1")})
+	firstCert := m.IssueServer(t, []string{"localhost"}, nil)
+
+	nextLn := tlstest.Listen(t, &tls.Config{Certificates: []tls.Certificate{nextCert}, MinVersion: tls.VersionTLS12})
+	nextSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	go nextSrv.Serve(nextLn) //nolint:errcheck // the test closes it
+	t.Cleanup(func() { _ = nextSrv.Close() })
+
+	firstLn := tlstest.Listen(t, &tls.Config{Certificates: []tls.Certificate{firstCert}, MinVersion: tls.VersionTLS12})
+	_, port, err := net.SplitHostPort(firstLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://"+nextLn.Addr().String()+"/", http.StatusFound)
+	})}
+	go firstSrv.Serve(firstLn) //nolint:errcheck // the test closes it
+	t.Cleanup(func() { _ = firstSrv.Close() })
+
+	res := httpDo(t, "https://localhost:"+port+"/", map[string]string{"ca_file": m.CACertPath})
+	if !res.Success {
+		t.Fatal(res.Err)
+	}
 }
 
 func httpDo(t *testing.T, url string, opts map[string]string) protocol.Result {

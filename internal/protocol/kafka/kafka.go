@@ -239,10 +239,11 @@ func build(target protocol.Target, timeout time.Duration, password *string, conn
 	}
 	files := tlsconf.FromOptions(target.Options)
 	if useTLS {
+		// ServerName stays empty so each broker is checked under its own
+		// name. tls_server_name sets one name for every broker.
 		cfg := &tls.Config{
 			InsecureSkipVerify: target.InsecureSkipVerify, //nolint:gosec // opt-in, see protocol.Target
 			MinVersion:         tls.VersionTLS12,
-			ServerName:         u.Hostname(),
 		}
 		if err := files.Apply(cfg, target.InsecureSkipVerify, true); err != nil {
 			return nil, fmt.Errorf("kafka: %w", err)

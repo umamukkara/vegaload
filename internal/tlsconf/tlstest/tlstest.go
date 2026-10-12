@@ -50,6 +50,9 @@ type Material struct {
 	ClientKeyPath  string
 	Server         tls.Certificate
 	Client         tls.Certificate
+
+	ca    *x509.Certificate
+	caKey *ecdsa.PrivateKey
 }
 
 // New writes a CA, a server certificate for Name, and a client certificate.
@@ -74,6 +77,8 @@ func New(tb testing.TB) *Material {
 		ClientKeyPath:  filepath.Join(dir, "client.key"),
 		Server:         srv,
 		Client:         cli,
+		ca:             caCert,
+		caKey:          caKey,
 	}
 	writeFile(tb, m.CACertPath, caPEM, 0o644)
 	writeFile(tb, m.ServerCertPath, srvPEM, 0o644)
@@ -152,6 +157,49 @@ func (r retryListener) Accept() (net.Conn, error) {
 			return c, err
 		}
 	}
+}
+
+// IssueServer signs a server certificate with this CA. dns names and ips
+// are the names the certificate is valid for. A certificate with only an
+// IP address has no DNS name.
+func (m *Material) IssueServer(tb testing.TB, dns []string, ips []net.IP) tls.Certificate {
+	tb.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	name := "vegaload-test"
+	if len(dns) > 0 {
+		name = dns[0]
+	} else if len(ips) > 0 {
+		name = ips[0].String()
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: serial(tb),
+		Subject:      pkix.Name{CommonName: name},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Hour),
+		DNSNames:     dns,
+		IPAddresses:  ips,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, m.ca, &key.PublicKey, m.caKey)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	pair, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+	)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return pair
 }
 
 // ServerConfig is the config for a fake server. requireClient asks for a
