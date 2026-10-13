@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,9 @@ func TestPublish_AllQoSLevels(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("broker saw %d messages, want 3", len(got))
 	}
+	// A QoS 0 publish has no acknowledgement, so Do can return before the
+	// broker has stored it. The order of arrival is not fixed: sort by topic.
+	sort.Slice(got, func(i, j int) bool { return got[i].topic < got[j].topic })
 	for i, p := range got {
 		wantTopic := "load/t" + string(rune('0'+i))
 		if p.topic != wantTopic || string(p.payload) != "hello" || int(p.qos) != i {
