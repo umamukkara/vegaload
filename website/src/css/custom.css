@@ -1,0 +1,142 @@
+:root {
+  --void: #070707;
+  --carbon: #0d0e12;
+  --obsidian: #141418;
+  --navy: #07182b;
+  --white: #ffffff;
+  --fog: #d9dae5;
+  --ash: #c8cad0;
+  --graphite: #aeaeb7;
+  --mute: #8e9099;
+  --blue: #00ade4;
+  --mint: #70dcd3;
+  --amber: #f2b25c;
+  --hairline: rgba(217, 218, 229, 0.18);
+  --hairline-soft: rgba(217, 218, 229, 0.1);
+  --ink: #121820;
+  /* #0089B8 on white is 3.98:1. Links and buttons use #0078A8 (4.94:1). */
+  --accent-light: #0089b8;
+  --link-light: #0078a8;
+
+  --ifm-font-family-base: 'Geist', 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --ifm-heading-font-family: 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif;
+  --ifm-font-family-monospace: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ifm-code-font-size: 95%;
+}
+
+[data-theme='light'] {
+  --ifm-background-color: var(--white);
+  --ifm-font-color-base: var(--ink);
+  --ifm-heading-color: var(--ink);
+  --ifm-color-emphasis-700: #3a4452;
+  --ifm-color-content-secondary: #3a4452;
+  --ifm-color-primary: var(--link-light);
+  --ifm-color-primary-dark: #006c97;
+  --ifm-color-primary-darker: #00658e;
+  --ifm-color-primary-darkest: #005375;
+  --ifm-color-primary-light: #0084b9;
+  --ifm-color-primary-lighter: #0088be;
+  --ifm-color-primary-lightest: #0094cf;
+  --ifm-navbar-background-color: var(--white);
+  --ifm-footer-background-color: #f4f6f8;
+  --ifm-footer-color: #3a4452;
+  --ifm-footer-link-color: var(--link-light);
+  --ifm-toc-border-color: rgba(18, 24, 32, 0.12);
+  --ifm-hr-border-color: rgba(18, 24, 32, 0.12);
+  --ifm-color-success: #0f766e;
+  --ifm-color-warning: #92400e;
+  --ifm-alert-foreground-color: var(--ink);
+}
+
+[data-theme='dark'] {
+  --ifm-background-color: var(--void);
+  --ifm-navbar-background-color: var(--carbon);
+  --ifm-footer-background-color: var(--carbon);
+  --ifm-card-background-color: var(--obsidian);
+  --ifm-font-color-base: var(--fog);
+  --ifm-heading-color: var(--white);
+  --ifm-color-emphasis-700: var(--ash);
+  --ifm-color-content-secondary: var(--ash);
+  --ifm-color-primary: var(--blue);
+  --ifm-color-primary-dark: #009acc;
+  --ifm-color-primary-darker: #0091c1;
+  --ifm-color-primary-darkest: #00779f;
+  --ifm-color-primary-light: #1ab5e7;
+  --ifm-color-primary-lighter: #26b9e8;
+  --ifm-color-primary-lightest: #4dc6ed;
+  --ifm-color-success: var(--mint);
+  --ifm-color-warning: var(--amber);
+  --ifm-navbar-link-color: var(--fog);
+  --ifm-menu-color: var(--ash);
+  --ifm-footer-color: var(--graphite);
+  --ifm-footer-link-color: var(--ash);
+  --ifm-toc-border-color: var(--hairline);
+  --ifm-hr-border-color: var(--hairline-soft);
+  --ifm-color-emphasis-300: var(--hairline);
+  --ifm-code-background: var(--obsidian);
+  --ifm-alert-foreground-color: var(--fog);
+}
+
+.navbar {
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.navbar__title {
+  font-family: var(--ifm-heading-font-family);
+}
+
+[data-theme='dark'] .button--primary {
+  color: var(--void);
+}
+
+[data-theme='light'] .button--primary {
+  color: var(--white);
+}
+
+.alert {
+  color: var(--ifm-font-color-base);
+  border-width: 1px;
+}
+
+[data-theme='dark'] .alert--secondary,
+[data-theme='dark'] .alert--info {
+  background-color: var(--navy);
+  border-color: var(--blue);
+}
+
+[data-theme='dark'] .alert--success {
+  background-color: #102422;
+  border-color: var(--mint);
+}
+
+[data-theme='dark'] .alert--warning {
+  background-color: #2a2114;
+  border-color: var(--amber);
+}
+
+[data-theme='light'] .alert--secondary,
+[data-theme='light'] .alert--info {
+  background-color: #e7f6fc;
+  border-color: var(--link-light);
+}
+
+[data-theme='light'] .alert--success {
+  background-color: #e8faf8;
+  border-color: #0f766e;
+}
+
+[data-theme='light'] .alert--warning {
+  background-color: #fdf6ea;
+  border-color: #92400e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
