@@ -107,6 +107,7 @@ const config = {
             ],
           },
           {to: '/get-started/install', label: 'Get started', position: 'left'},
+          {to: '/guides', label: 'Guides', position: 'left'},
           {to: '/ai-agents/how-it-works', label: 'AI agents', position: 'left'},
           {to: '/cookbook', label: 'Cookbook', position: 'left'},
           {
