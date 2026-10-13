@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
@@ -69,6 +70,7 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 		dialer: &websocket.Dialer{
 			HandshakeTimeout: timeout,
 			TLSClientConfig:  cfg,
+			NetDialContext:   dialer.NetDial(),
 		},
 	}, nil
 }

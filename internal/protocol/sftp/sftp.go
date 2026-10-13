@@ -22,6 +22,7 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 )
@@ -382,7 +383,9 @@ func (d *Driver) open(ctx context.Context, held *atomic.Pointer[live]) (*live, e
 	}
 	addr := d.addr()
 	t0 := time.Now()
-	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	nd := &net.Dialer{}
+	dialer.Apply(nd)
+	raw, err := nd.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("sftp: could not connect to %s: %s", addr, err.Error())
 	}

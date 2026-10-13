@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/net/http2"
 
+	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
@@ -73,6 +74,7 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 		transport.AllowHTTP = true
 		transport.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 			var d net.Dialer
+			dialer.Apply(&d)
 			return d.DialContext(ctx, network, addr)
 		}
 	}

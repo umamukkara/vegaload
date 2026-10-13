@@ -56,6 +56,7 @@ import (
 
 	paho "github.com/eclipse/paho.mqtt.golang"
 
+	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
@@ -418,16 +419,17 @@ func (d *Driver) Run(parent context.Context) (protocol.Result, []Message) {
 // which Paho's default dialer would let run to the end of its own timeout.
 func open(ctx context.Context) func(*url.URL, paho.ClientOptions) (net.Conn, error) {
 	return func(u *url.URL, o paho.ClientOptions) (net.Conn, error) {
-		var dialer net.Dialer
+		var nd net.Dialer
+		dialer.Apply(&nd)
 		var (
 			conn net.Conn
 			err  error
 		)
 		switch u.Scheme {
 		case "tcp":
-			conn, err = dialer.DialContext(ctx, "tcp", u.Host)
+			conn, err = nd.DialContext(ctx, "tcp", u.Host)
 		case "ssl":
-			td := tls.Dialer{NetDialer: &dialer, Config: o.TLSConfig}
+			td := tls.Dialer{NetDialer: &nd, Config: o.TLSConfig}
 			conn, err = td.DialContext(ctx, "tcp", u.Host)
 		default:
 			return nil, fmt.Errorf("mqtt: unsupported broker scheme %q", u.Scheme)

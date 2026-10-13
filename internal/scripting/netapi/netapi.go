@@ -32,6 +32,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/urlerr"
 )
 
@@ -210,8 +211,11 @@ func (c *HTTPClient) Do(ctx context.Context, method, rawURL string, body []byte,
 	client := c.client
 	if opts.InsecureSkipVerify {
 		client = &http.Client{
-			Timeout:   c.timeout,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // opt-in, see Options
+			Timeout: c.timeout,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // opt-in, see Options
+				DialContext:     dialer.ContextDialer(),
+			},
 		}
 	}
 
@@ -291,12 +295,13 @@ func Dial(ctx context.Context, check SafetyCheck, rawURL string, timeout time.Du
 	for k, v := range opts.Headers {
 		header.Set(k, v)
 	}
-	dialer := &websocket.Dialer{
+	wsDialer := &websocket.Dialer{
 		HandshakeTimeout: timeout,
 		TLSClientConfig:  &tls.Config{InsecureSkipVerify: opts.InsecureSkipVerify}, //nolint:gosec // opt-in, see Options
+		NetDialContext:   dialer.NetDial(),
 	}
 	start := time.Now()
-	conn, resp, err := dialer.DialContext(ctx, rawURL, header)
+	conn, resp, err := wsDialer.DialContext(ctx, rawURL, header)
 	recordWS(opts.Recorder, ctx, "connect", time.Since(start), err, 0, 0)
 	if err != nil {
 		if resp != nil {

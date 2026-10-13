@@ -45,6 +45,18 @@ jobs:
           go-version: "1.24"
       - run: go build ./...
       - run: go vet ./...
+      # Windows offers about 16,000 ephemeral ports and holds each closed
+      # connection's port for minutes (TIME_WAIT). This suite crosses that
+      # line, and every later dial then fails at once. Widening the range
+      # takes effect immediately and does not need a reboot. start + num
+      # must stay within 1..65535.
+      - name: Widen the ephemeral port range
+        shell: pwsh
+        run: |
+          netsh int ipv4 set dynamicport tcp start=1025 num=64510
+          netsh int ipv4 set dynamicport udp start=1025 num=64510
+          netsh int ipv6 set dynamicport tcp start=1025 num=64510
+          netsh int ipv6 set dynamicport udp start=1025 num=64510
       - run: go test ./...
       - name: The binary runs
         shell: bash
