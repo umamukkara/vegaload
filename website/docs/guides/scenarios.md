@@ -1,10 +1,10 @@
 ---
-title: "2. Or write a scenario file"
+title: "Write a scenario file"
 description: "`vegaload new my-scenario` scaffolds `my-scenario.vl.js` (JavaScript by default; `-python` for a `.py` scenario shelling out to a local `python3`)."
 sidebar_position: 12
 ---
 
-# 2. Or write a scenario file
+# Write a scenario file
 
 ```
 vegaload new my-scenario
@@ -40,7 +40,7 @@ vegaload run -vus 5 -duration 5s examples/scenarios/smoke.vl.js
 ```
 
 To load test an actual HTTP target without writing a script at all, use
-protocol-direct mode (step 1) instead — or generate a runbook of
+[protocol-direct mode](/get-started/first-test) instead — or generate a runbook of
 protocol-direct commands from an OpenAPI spec:
 
 ```
@@ -78,7 +78,7 @@ export default function () {
 ```
 
 - `tcp.send(url, options)` and `udp.send(url, options)`: the options are the
-  same as the `-opt` keys in the TCP and UDP sections above (`until`, `read`,
+  same as the `-opt` keys in the [TCP and UDP guide](/guides/tcp-udp) (`until`, `read`,
   `expect`, `tls`, `reply`, and so on), plus `body`. The reply is `r.body`.
   A script's text is sent as written: backslash escapes are off unless you
   pass `escape: true`.
