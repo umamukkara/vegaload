@@ -81,6 +81,10 @@ When in doubt about where new code belongs, put it in the smallest module that n
 - Do not add Harness RT–specific logic to the core engine, the protocol drivers, or the output layer.
 - Do not add telemetry or any network call that was not explicitly requested. See NFR-05 in the PRD: nothing leaves the local machine unless the user runs `--move-to-harness` or configures a bring-your-own-LLM connector themselves.
 
+## Docs
+
+User-facing changes need the docs page changed in the same PR once the page exists. Do not describe a feature that is not released. Use short sentences. Every command in a page must run on the released binary.
+
 ## Where the real requirements live
 
 The PRD is the source of truth for what to build and why. This file is the source of truth for how to build it. If the two ever conflict, the PRD wins, and this file should be updated to match.
