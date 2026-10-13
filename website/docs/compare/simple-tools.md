@@ -16,8 +16,8 @@ Sometimes you only want to hit one URL, at a steady rate, from one command. Smal
 
 | | What it is | Notes from its README |
 | --- | --- | --- |
-| [vegeta](https://github.com/tsenart/vegeta) | An HTTP load testing tool and Go library, MIT license | Built to send a constant request rate. Designed to avoid coordinated omission. Reports as text, JSON, histogram, or an HTML plot |
-| [oha](https://github.com/hatoo/oha) | An HTTP load generator written in Rust, MIT license, inspired by `hey` | HTTP/1.x and HTTP/2 (HTTP/3 is experimental). A live terminal view. Output as text, JSON or CSV |
+| [vegeta](https://github.com/tsenart/vegeta) | An HTTP load testing tool and Go library, MIT license | Built to send a constant request rate. Designed to avoid coordinated omission. Reports as text, JSON, histogram or hdrplot. A separate `plot` command makes an HTML chart |
+| [oha](https://github.com/hatoo/oha) | An HTTP load generator written in Rust, MIT license, inspired by `hey` | HTTP/1.x and HTTP/2 (HTTP/3 is experimental and needs a build feature). A live terminal view. Output as text, JSON or CSV |
 
 We did not read the READMEs of `hey` or `wrk` for this page, so we do not describe them.
 
@@ -26,7 +26,7 @@ We did not read the READMEs of `hey` or `wrk` for this page, so we do not descri
 | | Simple HTTP tools | VegaLoad |
 | --- | --- | --- |
 | Protocols | HTTP | 14, including gRPC, WebSocket, MQTT, Kafka, PostgreSQL, MySQL, Redis, RabbitMQ, FTP, SFTP, TCP and UDP |
-| Constant request rate | A core feature | `-executor constant-arrival-rate -rate N` |
+| Constant request rate | A core feature of vegeta | `-executor constant-arrival-rate -rate N` |
 | Pass or fail limit | We did not check | `-threshold`, checks and `-baseline`. A breach exits 3 |
 | Report | Text, JSON, CSV or a plot | Self-contained HTML, JSON and JUnit XML |
 | Several steps, with values carried from one call to the next | Not covered here | Yes, in a scenario file in JavaScript, TypeScript or Python |
