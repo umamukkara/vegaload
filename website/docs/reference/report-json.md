@@ -1,0 +1,126 @@
+---
+title: JSON report
+description: Every field in the JSON summary that vegaload run -out writes.
+sidebar_position: 4
+---
+
+# JSON report
+
+`vegaload run -out report.json` writes a JSON summary of the run. `vegaload compare`, `-baseline` and `vegaload diagnose` read this file.
+
+All times are whole numbers of nanoseconds. Names end in `_ns`. A rate such as `error_rate` is a fraction: `0.02` is 2%.
+
+Some sections appear only when they apply. This page was checked against real 0.9.0 files.
+
+## Top level
+
+| Field | Meaning |
+| --- | --- |
+| `executor` | The load shape, such as `fixed-vus`. |
+| `started_at` | When the run started, as a UTC timestamp. |
+| `elapsed_ns` | How long the run took. |
+| `total` | Number of iterations or calls counted. |
+| `failed` | How many of them failed. |
+| `error_rate` | `failed` divided by `total`. |
+| `latency` | The latency summary. See below. |
+| `time_series` | The run, cut into slices over time. |
+| `thresholds` | Each threshold and its result. Present when you set thresholds. |
+| `thresholds_passed` | `true` if every threshold passed. |
+| `baseline` | The result of the baseline gate. Present with `-baseline`. |
+| `steps` | Results for each named `step()`. Present when the scenario uses steps. |
+| `protocols` | Results for each protocol the run used. |
+| `checks` | Pass and fail counts for each check. Present when the scenario uses checks. |
+
+## `latency`
+
+The same fields appear in `steps` and `protocols`.
+
+| Field | Meaning |
+| --- | --- |
+| `min_ns`, `mean_ns`, `max_ns` | Fastest, average and slowest call. |
+| `p50_ns`, `p90_ns`, `p95_ns`, `p99_ns` | Percentiles. `p95_ns` means 95% of calls were this fast or faster. |
+
+## `time_series[]`
+
+| Field | Meaning |
+| --- | --- |
+| `offset_ns` | Where this slice starts, counted from the start of the run. |
+| `requests` | Calls in this slice. |
+| `failed` | Failed calls in this slice. |
+| `rps` | Calls per second in this slice. |
+| `error_rate` | Failure fraction in this slice. |
+
+## `thresholds[]`
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The threshold as you wrote it. |
+| `metric` | The metric, such as `p95`. |
+| `operator` | The comparison, such as `<`. |
+| `value` | The limit, as text, such as `500ms`. |
+| `observed` | What the run measured, as text. |
+| `passed` | `true` or `false`. |
+| `step` | The step the threshold is limited to. Present only for a step threshold. |
+| `protocol` | The protocol the threshold is limited to. Present only for a protocol threshold. |
+
+## `baseline`
+
+| Field | Meaning |
+| --- | --- |
+| `path` | The baseline file you gave. |
+| `max_regression_percent` | The slack you allowed. |
+| `passed` | `true` if no metric regressed beyond the slack. |
+| `metrics[]` | One entry for `error_rate` and one for `latency.p95`. Each has `name`, `baseline`, `candidate`, `unit` and `regressed`. |
+| `notes[]` | A plain sentence about the result. |
+
+## `steps[]`
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The step name. |
+| `total` | How many times the step ran. |
+| `failed` | How many runs failed. |
+| `error_rate` | The failure fraction. |
+| `latency` | The latency summary. |
+
+## `protocols[]`
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The protocol, such as `http`. |
+| `total`, `failed`, `error_rate` | Counts and failure fraction for this protocol. |
+| `latency` | The latency summary. |
+| `bytes_sent`, `bytes_received` | Bytes moved. |
+| `bytes_per_second` | Throughput. |
+| `operations[]` | One entry per kind of call, such as `GET`. Each has `name`, `total`, `failed`, `error_rate`, `latency`, `bytes_sent` and `bytes_received`. |
+
+## `checks[]`
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The check name. |
+| `passes` | How many times it passed. |
+| `fails` | How many times it failed. |
+
+## Example
+
+A short run with one step and one check, trimmed:
+
+```json
+{
+  "executor": "fixed-vus",
+  "total": 224,
+  "failed": 0,
+  "error_rate": 0,
+  "latency": { "p50_ns": 26642194, "p95_ns": 40212388 },
+  "thresholds": [
+    { "name": "p95 < 500ms", "metric": "p95", "operator": "<",
+      "value": "500ms", "observed": "40.22ms", "passed": true }
+  ],
+  "thresholds_passed": true,
+  "steps": [{ "name": "list", "total": 224, "failed": 0 }],
+  "checks": [{ "name": "status is 200", "passes": 224, "fails": 0 }]
+}
+```
+
+To compare two reports, see [Compare two runs](../guides/compare-runs.md). To explain one, see [Explain a run](../guides/explain-a-run.md).
