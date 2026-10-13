@@ -51,6 +51,9 @@ const sidebars = {
       link: {type: 'doc', id: 'guides/index'},
       items: [
         'guides/index',
+        'guides/http',
+        'guides/websocket',
+        'guides/grpc',
         'guides/tcp-udp',
         'guides/mqtt',
         'guides/kafka',
