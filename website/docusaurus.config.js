@@ -95,9 +95,11 @@ const config = {
           srcDark: 'img/logo-dark.svg',
         },
         items: [
+          {to: '/why-vegaload', label: 'Why VegaLoad', position: 'left'},
           {to: '/features', label: 'Features', position: 'left'},
           {to: '/compare', label: 'Compare', position: 'left'},
           {to: '/get-started/install', label: 'Get started', position: 'left'},
+          {to: '/ai-agents/how-it-works', label: 'AI agents', position: 'left'},
           {
             href: 'https://github.com/vegaload/vegaload',
             label: 'GitHub',
