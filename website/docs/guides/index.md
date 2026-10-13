@@ -22,10 +22,10 @@ A released binary does not include the examples folder.
 <!-- vegaload:protocols -->
 | Protocol | Since | URL schemes | Example |
 | --- | --- | --- | --- |
-| [http1](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/crud-flow.vl.js) | 0.1.0 | http, https | [crud-flow.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/crud-flow.vl.js) |
-| [http2](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/crud-flow.vl.js) | 0.1.0 | https | [crud-flow.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/crud-flow.vl.js) |
-| grpc | 0.1.0 | grpc, grpcs | (none yet) |
-| [websocket](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/http-ws-chain.vl.js) | 0.1.0 | ws, wss | [http-ws-chain.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/http-ws-chain.vl.js) |
+| [http1](/guides/http) | 0.1.0 | http, https | [crud-flow.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/crud-flow.vl.js) |
+| [http2](/guides/http) | 0.1.0 | https | [crud-flow.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/crud-flow.vl.js) |
+| [grpc](/guides/grpc) | 0.1.0 | grpc, grpcs | (none yet) |
+| [websocket](/guides/websocket) | 0.1.0 | ws, wss | [http-ws-chain.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/http-ws-chain.vl.js) |
 | [mqtt](/guides/mqtt) | 0.6.0 | mqtt, mqtts | [mqtt-tcp.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/mqtt-tcp.vl.js) |
 | [kafka](/guides/kafka) | 0.6.0 | kafka, kafkas | [kafka-orders.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/kafka-orders.vl.js) |
 | [postgres](/guides/postgres) | 0.7.0 | postgres, postgresql | [postgres-orders.vl.js](https://github.com/vegaload/vegaload/blob/main/examples/scenarios/postgres-orders.vl.js) |
