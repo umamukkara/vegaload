@@ -334,7 +334,7 @@ func TestCmdRun_RabbitMQProtocol(t *testing.T) {
 		dir := t.TempDir()
 		out := filepath.Join(dir, "summary.json")
 		args := []string{
-			"-vus", "2", "-duration", "300ms", "-no-report",
+			"-executor", "constant-arrival-rate", "-rate", "150", "-max-vus", "4", "-duration", "300ms", "-no-report",
 			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
 			"-target", srv.URL(), "-protocol", "rabbitmq",
 		}
@@ -375,8 +375,10 @@ func TestCmdRun_FTPProtocol(t *testing.T) {
 	run := func(extra ...string) report.Result {
 		dir := t.TempDir()
 		out := filepath.Join(dir, "summary.json")
+		// Paced: these modes open a socket for each call. A free-running loop opens
+		// thousands, and on Windows that uses up the local ports for later tests.
 		args := []string{
-			"-vus", "2", "-duration", "300ms", "-no-report",
+			"-executor", "constant-arrival-rate", "-rate", "150", "-max-vus", "4", "-duration", "300ms", "-no-report",
 			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
 			"-target", srv.URL(), "-protocol", "ftp",
 		}
@@ -436,7 +438,7 @@ func TestCmdRun_SFTPProtocol(t *testing.T) {
 		dir := t.TempDir()
 		out := filepath.Join(dir, "summary.json")
 		args := []string{
-			"-vus", "2", "-duration", "300ms", "-no-report", "-insecure",
+			"-executor", "constant-arrival-rate", "-rate", "150", "-max-vus", "4", "-duration", "300ms", "-no-report", "-insecure",
 			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
 			"-target", srv.URL(), "-protocol", "sftp",
 			"-opt", "password_env=SFTP_PW",

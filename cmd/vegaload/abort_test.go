@@ -254,7 +254,10 @@ func TestCmdRun_AbortOnProtocolErrorRate(t *testing.T) {
 	code := cmdRun([]string{
 		"-target", srv.URL(), "-protocol", "ftp", "-vus", "4", "-duration", "30s", "-no-report",
 		"-audit-log", filepath.Join(dir, "audit.log"),
-		"-opt", "mode=download", "-opt", "path=/missing.bin",
+		// stat reuses the control connection, so a run of failing calls does
+		// not open a new socket for each call. A download would, and on
+		// Windows that uses up the local ports for every test that follows.
+		"-opt", "mode=stat", "-opt", "path=/missing.bin",
 		"-abort-on-breach", "-abort-grace", "0",
 		"-threshold", `error_rate{protocol="ftp"} < 5%`,
 	})
