@@ -71,6 +71,8 @@ const config = {
         indexDocs: true,
         indexBlog: false,
         docsRouteBasePath: '/',
+        // The site is noindex until launch. Search still indexes the pages.
+        forceIgnoreNoIndex: true,
       },
     ],
   ],
@@ -93,6 +95,8 @@ const config = {
           srcDark: 'img/logo-dark.svg',
         },
         items: [
+          {to: '/features', label: 'Features', position: 'left'},
+          {to: '/compare', label: 'Compare', position: 'left'},
           {to: '/get-started/install', label: 'Get started', position: 'left'},
           {
             href: 'https://github.com/vegaload/vegaload',

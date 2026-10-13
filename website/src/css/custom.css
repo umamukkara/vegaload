@@ -81,6 +81,17 @@
   border-bottom: 1px solid var(--hairline-soft);
 }
 
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown th:first-child,
+.markdown td:first-child {
+  white-space: nowrap;
+}
+
 .navbar__title {
   font-family: var(--ifm-heading-font-family);
 }

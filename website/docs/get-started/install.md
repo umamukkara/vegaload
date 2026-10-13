@@ -4,7 +4,7 @@ description: Install VegaLoad with Homebrew, a release archive, source, or Docke
 sidebar_position: 1
 ---
 
-With Homebrew (macOS and Linux), after the first tagged GitHub release:
+With Homebrew (macOS and Linux):
 
 ```
 brew install vegaload/tap/vegaload
@@ -12,8 +12,7 @@ vegaload version
 ```
 
 `brew tap vegaload/tap` followed by `brew install vegaload` does the same
-thing. Upgrade with `brew upgrade vegaload`. Until a tag exists, build from
-source below.
+thing. Upgrade with `brew upgrade vegaload`.
 
 Or build from source (Go 1.22+):
 
@@ -24,8 +23,8 @@ go build -o vegaload ./cmd/vegaload
 ./vegaload version
 ```
 
-`go install github.com/vegaload/vegaload/cmd/vegaload@latest` also works
-once the repository is public. Release archives for Linux, macOS and
+`go install github.com/vegaload/vegaload/cmd/vegaload@latest` also works.
+Release archives for Linux, macOS and
 Windows are attached to each [GitHub release](https://github.com/vegaload/vegaload/releases).
 
 On Windows 10 or later, download the zip for your CPU from the release page,
@@ -52,7 +51,7 @@ Files fetched with `gh release download`, `curl` or Homebrew have no such
 mark.
 
 A scratch-based Docker image is published to `ghcr.io/vegaload/vegaload` with
-each release from v0.9.0 on (`linux/amd64` and `linux/arm64`):
+each release from v0.5.0 on (`linux/amd64` and `linux/arm64`):
 
 ```
 docker run --rm ghcr.io/vegaload/vegaload:0.9.0 version
