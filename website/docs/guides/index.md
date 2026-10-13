@@ -11,6 +11,14 @@ protocol, including its options. `vegaload protocols -output json` prints the
 same data as JSON. Example paths are relative to a checkout of this repository.
 A released binary does not include the examples folder.
 
+- [Scenarios](/guides/scenarios). `vegaload new my-scenario` scaffolds `my-scenario.vl.js` (JavaScript by default; `-python` for a `.py` scenario shelling out to a local `python3`).
+- [Check a scenario](/guides/check-a-scenario). `validate` runs the scenario once, with one user and one iteration, and says whether it works.
+- [Data files](/guides/data-files). A scenario can read rows from a file and settings from the environment, so each virtual user can act on different data.
+- [Start from a browser recording](/guides/import-har). Record a real session in your browser (the network tab can save it as a HAR file), then turn it into a scenario:
+- [Thresholds](/guides/thresholds). Add `-threshold` to make a run pass or fail on its own numbers, for example in CI:
+- [Compare runs](/guides/compare-runs). After another run with `-out candidate.json`:
+- [Explain a run](/guides/explain-a-run). Keep a run's JSON summary alongside its HTML report with `-out`:
+
 <!-- vegaload:protocols -->
 | Protocol | Since | URL schemes | Example |
 | --- | --- | --- | --- |

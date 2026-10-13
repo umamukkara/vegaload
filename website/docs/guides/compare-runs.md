@@ -1,10 +1,10 @@
 ---
-title: "4. Compare a later run against the baseline"
+title: "Compare a later run against the baseline"
 description: "After another run with `-out candidate.json`:"
 sidebar_position: 17
 ---
 
-# 4. Compare a later run against the baseline
+# Compare a later run against the baseline
 
 After another run with `-out candidate.json`:
 

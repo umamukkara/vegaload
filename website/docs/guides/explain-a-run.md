@@ -1,10 +1,10 @@
 ---
-title: "3. Explain a run's results"
+title: "Explain a run's results"
 description: "Keep a run's JSON summary alongside its HTML report with `-out`:"
 sidebar_position: 18
 ---
 
-# 3. Explain a run's results
+# Explain a run's results
 
 Keep a run's JSON summary alongside its HTML report with `-out`:
 
