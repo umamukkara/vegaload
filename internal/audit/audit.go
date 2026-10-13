@@ -41,6 +41,16 @@ type Entry struct {
 	// whether the run stayed within the allowed regression.
 	Baseline       string `json:"baseline,omitempty"`
 	BaselinePassed *bool  `json:"baseline_passed,omitempty"`
+
+	// DataFiles is the name and row count of each data file a protocol
+	// run read. A cell is never recorded.
+	DataFiles []DataFile `json:"data_files,omitempty"`
+}
+
+// DataFile is one data file. Name is the file's base name.
+type DataFile struct {
+	Name string `json:"name"`
+	Rows int    `json:"rows"`
 }
 
 // DefaultPath is where a run's audit record is appended when the caller

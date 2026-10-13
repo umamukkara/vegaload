@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -36,6 +37,10 @@ type driverSpec struct {
 	scriptGlobal string   // "http" or "ws"; empty when the calls come from netapi
 	options      []string // -opt keys this driver accepts, in the driver's order
 	build        func(protocol.Target, time.Duration) (protocol.Protocol, error)
+	// perCall builds one call from a driver that already holds the connection.
+	// It is nil for a protocol that has no Call method. The result shares
+	// that connection, so the caller must not close it.
+	perCall func(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error)
 }
 
 var drivers = []driverSpec{
@@ -74,49 +79,49 @@ var drivers = []driverSpec{
 		}
 		return d, nil
 	}},
-	{name: "kafka", summary: "Kafka produce, consume, roundtrip and admin.", since: "0.6.0", modes: []string{"produce", "consume", "roundtrip", "admin"}, tls: true, examples: []string{"examples/scenarios/kafka-orders.vl.js"}, options: kafka.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "kafka", summary: "Kafka produce, consume, roundtrip and admin.", since: "0.6.0", modes: []string{"produce", "consume", "roundtrip", "admin"}, tls: true, examples: []string{"examples/scenarios/kafka-orders.vl.js"}, options: kafka.Options, perCall: callKafka, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := kafka.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "postgres", summary: "PostgreSQL queries. Writes need allow_writes.", since: "0.7.0", tls: true, writeFlags: []string{"allow_writes"}, examples: []string{"examples/scenarios/postgres-orders.vl.js", "examples/scenarios/postgres_orders.py"}, options: postgres.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "postgres", summary: "PostgreSQL queries. Writes need allow_writes.", since: "0.7.0", tls: true, writeFlags: []string{"allow_writes"}, examples: []string{"examples/scenarios/postgres-orders.vl.js", "examples/scenarios/postgres_orders.py"}, options: postgres.Options, perCall: callPostgres, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := postgres.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "mysql", summary: "MySQL queries. Writes need allow_writes.", since: "0.7.0", tls: true, writeFlags: []string{"allow_writes"}, examples: []string{"examples/scenarios/mysql-orders.vl.js", "examples/scenarios/mysql_orders.py"}, options: mysql.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "mysql", summary: "MySQL queries. Writes need allow_writes.", since: "0.7.0", tls: true, writeFlags: []string{"allow_writes"}, examples: []string{"examples/scenarios/mysql-orders.vl.js", "examples/scenarios/mysql_orders.py"}, options: mysql.Options, perCall: callMySQL, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := mysql.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "redis", summary: "Redis commands. Writes need allow_writes.", since: "0.7.0", tls: true, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/redis-cache.vl.js", "examples/scenarios/redis_cache.py"}, options: redis.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "redis", summary: "Redis commands. Writes need allow_writes.", since: "0.7.0", tls: true, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/redis-cache.vl.js", "examples/scenarios/redis_cache.py"}, options: redis.Options, perCall: callRedis, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := redis.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "rabbitmq", summary: "RabbitMQ publish, consume, roundtrip and admin.", since: "0.7.0", modes: []string{"publish", "consume", "roundtrip", "admin"}, tls: true, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/rabbitmq-orders.vl.js", "examples/scenarios/rabbitmq_orders.py"}, options: rabbitmq.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "rabbitmq", summary: "RabbitMQ publish, consume, roundtrip and admin.", since: "0.7.0", modes: []string{"publish", "consume", "roundtrip", "admin"}, tls: true, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/rabbitmq-orders.vl.js", "examples/scenarios/rabbitmq_orders.py"}, options: rabbitmq.Options, perCall: callRabbitMQ, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := rabbitmq.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "ftp", summary: "FTP and FTPS: upload, download, list, stat, delete and roundtrip.", since: "0.7.0", modes: []string{"connect", "download", "upload", "list", "stat", "delete", "roundtrip"}, tls: true, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/ftp-transfer.vl.js", "examples/scenarios/ftp_transfer.py"}, options: ftp.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "ftp", summary: "FTP and FTPS: upload, download, list, stat, delete and roundtrip.", since: "0.7.0", modes: []string{"connect", "download", "upload", "list", "stat", "delete", "roundtrip"}, tls: true, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/ftp-transfer.vl.js", "examples/scenarios/ftp_transfer.py"}, options: ftp.Options, perCall: callFTP, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := ftp.New(t, to)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}},
-	{name: "sftp", summary: "SFTP over SSH: upload, download, list, stat, delete and roundtrip.", since: "0.9.0", modes: []string{"connect", "download", "upload", "list", "stat", "delete", "roundtrip"}, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/sftp-transfer.vl.js", "examples/scenarios/sftp_transfer.py"}, options: sftp.Options, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
+	{name: "sftp", summary: "SFTP over SSH: upload, download, list, stat, delete and roundtrip.", since: "0.9.0", modes: []string{"connect", "download", "upload", "list", "stat", "delete", "roundtrip"}, writeFlags: []string{"allow_writes", "allow_admin"}, examples: []string{"examples/scenarios/sftp-transfer.vl.js", "examples/scenarios/sftp_transfer.py"}, options: sftp.Options, perCall: callSFTP, build: func(t protocol.Target, to time.Duration) (protocol.Protocol, error) {
 		d, err := sftp.New(t, to)
 		if err != nil {
 			return nil, err
@@ -182,4 +187,60 @@ func joinOr(names []string) string {
 		return names[0] + " or " + names[1]
 	}
 	return strings.Join(names[:n-1], ", ") + ", or " + names[n-1]
+}
+
+func callKafka(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*kafka.Driver)
+	if !ok {
+		return nil, fmt.Errorf("kafka: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
+}
+
+func callPostgres(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*postgres.Driver)
+	if !ok {
+		return nil, fmt.Errorf("postgres: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
+}
+
+func callMySQL(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*mysql.Driver)
+	if !ok {
+		return nil, fmt.Errorf("mysql: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
+}
+
+func callRedis(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*redis.Driver)
+	if !ok {
+		return nil, fmt.Errorf("redis: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
+}
+
+func callRabbitMQ(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*rabbitmq.Driver)
+	if !ok {
+		return nil, fmt.Errorf("rabbitmq: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
+}
+
+func callFTP(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*ftp.Driver)
+	if !ok {
+		return nil, fmt.Errorf("ftp: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
+}
+
+func callSFTP(base protocol.Protocol, opts map[string]string, body []byte, timeout time.Duration) (protocol.Protocol, error) {
+	d, ok := base.(*sftp.Driver)
+	if !ok {
+		return nil, fmt.Errorf("sftp: internal driver type")
+	}
+	return d.Call(opts, body, timeout)
 }

@@ -111,3 +111,26 @@ func TestTokenize_ArgsTypes(t *testing.T) {
 		t.Fatalf("%#v", got[0].argv)
 	}
 }
+
+func TestJoinTokens_RoundTrip(t *testing.T) {
+	lines := [][]string{
+		{"GET", "a\"b\\c café"},
+		{"SET", "?", ""},
+		{"GET", "a b"},
+	}
+	body := JoinTokens(lines)
+	got, err := parseCommands(body, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].argv[1] != lines[0][1] || got[1].argv[1] != "?" || got[1].argv[2] != "" || got[2].argv[1] != "a b" {
+		t.Fatalf("body %q parsed %#v", body, got)
+	}
+	split, err := SplitTokens(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(split) != 3 || split[0][1] != lines[0][1] {
+		t.Fatalf("split %#v", split)
+	}
+}

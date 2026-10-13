@@ -66,6 +66,18 @@ type Result struct {
 	// is its own measure, which a threshold can judge through the
 	// check_rate metric.
 	Checks []CheckResult `json:"checks,omitempty"`
+
+	// DataFiles is the name and row count of each data file a protocol
+	// run read. It is omitted when the run had no -data, so that JSON
+	// stays the same. A cell is never recorded.
+	DataFiles []DataFile `json:"data_files,omitempty"`
+}
+
+// DataFile is one data file a protocol run read. Name is the file's base
+// name. Rows is how many rows it has. A cell is not stored.
+type DataFile struct {
+	Name string `json:"name"`
+	Rows int    `json:"rows"`
 }
 
 // AbortInfo says why and when a run was stopped early (FR-CLI-13).

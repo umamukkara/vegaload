@@ -35,6 +35,7 @@ var identRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // Set is one data file's rows.
 type Set struct {
 	name string
+	path string
 	rows []map[string]any
 	next atomic.Uint64
 }
@@ -81,6 +82,28 @@ func copyValue(v any) any {
 // Len is the number of rows.
 func (s *Set) Len() int { return len(s.rows) }
 
+// Name is the data set name, the same name a script uses.
+func (s *Set) Name() string { return s.name }
+
+// Path is the file this set was loaded from.
+func (s *Set) Path() string { return s.path }
+
+// FileName is the base name of that file.
+func (s *Set) FileName() string { return filepath.Base(s.path) }
+
+// First is a copy of the first row. It does not move the next-row counter.
+func (s *Set) First() map[string]any { return copyRow(s.rows[0]) }
+
+// HasColumn reports whether every row has column.
+func (s *Set) HasColumn(column string) bool {
+	for _, row := range s.rows {
+		if _, ok := row[column]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // LoadSet reads a CSV file (a header row, then one row per line) or a JSON
 // file (an array of objects). The extension picks the format.
 func LoadSet(name, path string) (*Set, error) {
@@ -105,7 +128,7 @@ func LoadSet(name, path string) (*Set, error) {
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("data file %s has no rows", path)
 	}
-	return &Set{name: name, rows: rows}, nil
+	return &Set{name: name, path: path, rows: rows}, nil
 }
 
 func readCSV(r io.Reader) ([]map[string]any, error) {

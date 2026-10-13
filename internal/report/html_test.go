@@ -101,6 +101,16 @@ func TestWriteHTML_Thresholds(t *testing.T) {
 	}
 }
 
+func TestWriteHTML_DataFiles(t *testing.T) {
+	if out := renderHTML(&Result{Executor: "fixed-vus"}); strings.Contains(out, "Data files") {
+		t.Fatal("a run without a data file must not mention one")
+	}
+	out := renderHTML(&Result{Executor: "fixed-vus", DataFiles: []DataFile{{Name: "users.csv", Rows: 3}}})
+	if !strings.Contains(out, "Data files") || !strings.Contains(out, "users.csv (3 rows)") {
+		t.Fatal(out)
+	}
+}
+
 // SVG text defaults to a black fill, which is unreadable on the dark
 // theme's background; the chart labels must follow the page's text colour.
 func TestWriteHTML_ChartLabelsFollowTextColour(t *testing.T) {

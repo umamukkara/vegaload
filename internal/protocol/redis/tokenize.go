@@ -78,6 +78,92 @@ func parseCommands(body string, rawArgs string, hasArgs bool) ([]command, error)
 	return cmds, nil
 }
 
+// SplitTokens splits a redis-cli body into one token list per command line.
+// Blank lines and comments are left out. A quoted token is returned as the
+// text it stands for, so a later join can quote it again. An unquoted ?
+// is the text "?", not an args placeholder, until parseCommands sees it.
+func SplitTokens(body string) ([][]string, error) {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	var out [][]string
+	for _, line := range lines {
+		toks, err := tokenizeLine(line)
+		if err != nil {
+			return nil, err
+		}
+		if len(toks) == 0 {
+			continue
+		}
+		row := make([]string, len(toks))
+		for i, tok := range toks {
+			row[i] = tok.text
+		}
+		out = append(out, row)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("redis: the command is required (pass it with -body)")
+	}
+	return out, nil
+}
+
+// JoinTokens writes lines of tokens as one redis-cli body. A token that
+// parseCommands would split, or would read as an args placeholder, is quoted
+// so the text comes back as one argument.
+func JoinTokens(lines [][]string) string {
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		for j, tok := range line {
+			if j > 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(quoteToken(tok))
+		}
+	}
+	return b.String()
+}
+
+func quoteToken(tok string) string {
+	if tok != "" && tok != "?" && !tokenNeedsQuote(tok) {
+		return tok
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		switch c {
+		case '\\', '"':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if c < 0x20 {
+				fmt.Fprintf(&b, "\\x%02x", c)
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+func tokenNeedsQuote(tok string) bool {
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		if c <= ' ' || c == '"' || c == '\'' || c == '\\' {
+			return true
+		}
+	}
+	return false
+}
+
 func argText(i int, v any) (string, error) {
 	switch x := v.(type) {
 	case string:

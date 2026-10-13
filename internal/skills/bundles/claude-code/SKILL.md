@@ -94,7 +94,7 @@ couldn't also do.
    `max_regression`, in percent) to gate the run on it in one call. Pass
    `junit_path` to also write JUnit XML for a CI system. A scenario can read
    rows from `data_files` (CSV or JSON) as `data.NAME.next()` and variables
-   from `env` as `env.NAME`. Put tokens and passwords in `secret_env`, which
+   from `env` as `env.NAME`. With a target and protocol, the same data files fill `{data.NAME.COLUMN}` on each call for postgres, mysql, redis, ftp, sftp, kafka and rabbitmq; env stays for scenario files. Put tokens and passwords in `secret_env`, which
    removes them from every output. **validate_scenario** takes the same.
 4. Read the `report_path` it returns, or call **get_results** later to re-read
    it.
