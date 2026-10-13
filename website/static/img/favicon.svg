@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="VegaLoad">
+  <rect width="48" height="48" rx="11.5" fill="#0089B8"/>
+  <g transform="translate(24 24) scale(1.09) translate(-24 -24)">
+    <path d="M12.5 20 L24 39 L35.5 20" fill="none" stroke="#FFFFFF" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="24" cy="11" r="3.9" fill="#FFFFFF"/>
+  </g>
+</svg>
