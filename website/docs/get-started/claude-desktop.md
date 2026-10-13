@@ -1,14 +1,13 @@
 ---
 title: Use it with Claude Desktop
 description: Add the VegaLoad MCP server to Claude Desktop on macOS or Windows.
-draft: true
 sidebar_position: 6
 ---
 
 # Use it with Claude Desktop
 
-:::caution
-Draft. The steps below have not been tested on the Claude Desktop app yet. Do not publish until they are.
+:::note
+Tested on macOS with VegaLoad 0.9.0. The Windows steps use the same commands and the file path in the table below. They have not been tested yet.
 :::
 
 `vegaload init` sets up Cursor and Claude Code. It does not write Claude Desktop's settings. Claude Desktop is set up by hand, or with `vegaload doctor`.
@@ -48,13 +47,13 @@ If the file already has other servers, add `vegaload` next to them. Do not remov
 
 ## Check it
 
-Quit Claude Desktop completely and open it again. Then run:
+Quit Claude Desktop completely (on macOS, press Cmd+Q) and open it again. Then run:
 
 ```bash
 vegaload doctor -host claude-desktop
 ```
 
-It starts the server and expects all nine tools. In Claude Desktop, the tools list should show VegaLoad.
+It starts the server and expects all nine tools. Then open a new chat in Claude Desktop and ask: "Use VegaLoad to list the protocols it supports." Claude calls the `list_protocols` tool and lists the 14 protocols. Claude may ask you to allow the tool call first.
 
 ## What is different from Cursor and Claude Code
 
