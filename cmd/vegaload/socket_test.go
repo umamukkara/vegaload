@@ -31,8 +31,12 @@ func TestCmdRun_TCPProtocol(t *testing.T) {
 		}
 	}()
 	audit := filepath.Join(t.TempDir(), "audit.log")
+	// The tcp driver opens one socket per call. A fixed rate keeps it to a
+	// few dozen. A free-running loop opens thousands, and on Windows that
+	// uses up the local ports for every test that follows.
 	base := []string{"-target", "tcp://" + l.Addr().String(), "-protocol", "tcp", "-body", `PING\n`,
-		"-vus", "2", "-duration", "300ms", "-no-report", "-audit-log", audit}
+		"-executor", "constant-arrival-rate", "-rate", "100", "-max-vus", "4",
+		"-duration", "300ms", "-no-report", "-audit-log", audit}
 
 	if code := cmdRun(append(base, "-opt", "expect=PONG", "-threshold", "error_rate < 1%")); code != 0 {
 		t.Errorf("matching reply: exit code = %d, want 0", code)

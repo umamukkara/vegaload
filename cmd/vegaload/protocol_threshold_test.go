@@ -19,7 +19,7 @@ func TestCmdRun_ProtocolThreshold(t *testing.T) {
 		dir := t.TempDir()
 		out := filepath.Join(dir, "summary.json")
 		args := []string{
-			"-vus", "1", "-duration", "200ms", "-no-report",
+			"-executor", "constant-arrival-rate", "-rate", "150", "-max-vus", "4", "-duration", "200ms", "-no-report",
 			"-audit-log", filepath.Join(dir, "audit.log"), "-out", out,
 			"-target", srv.URL(), "-protocol", "ftp",
 			"-opt", "mode=download", "-opt", "path=/pub/data.bin",

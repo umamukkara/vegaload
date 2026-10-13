@@ -14,7 +14,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
@@ -73,9 +72,6 @@ func New(target protocol.Target, timeout time.Duration) (*Driver, error) {
 	}
 	if cfg != nil {
 		transport.TLSClientConfig = cfg
-	}
-	if dial := dialer.ContextDialer(); dial != nil {
-		transport.DialContext = dial
 	}
 	return &Driver{
 		target:    target,

@@ -28,7 +28,6 @@ import (
 
 	"github.com/jlaffaye/ftp"
 
-	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 	"github.com/vegaload/vegaload/internal/tlsconf"
@@ -475,9 +474,7 @@ func (s *session) dialFunc(network, address string) (net.Conn, error) {
 		}
 		address = net.JoinHostPort(host, port)
 	}
-	nd := &net.Dialer{}
-	dialer.Apply(nd)
-	raw, err := nd.DialContext(s.ctx, network, address)
+	raw, err := (&net.Dialer{}).DialContext(s.ctx, network, address)
 	if err != nil {
 		if first {
 			return nil, fmt.Errorf("ftp: could not connect to %s: %s", address, err.Error())

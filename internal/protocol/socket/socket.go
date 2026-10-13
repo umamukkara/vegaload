@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vegaload/vegaload/internal/dialer"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/tlsconf"
 	"github.com/vegaload/vegaload/internal/urlerr"
@@ -240,17 +239,16 @@ func fail(sent, got int64, err error) protocol.Result {
 }
 
 func (d *Driver) doTCP(ctx context.Context) (protocol.Result, []byte) {
-	var nd net.Dialer // no Timeout of its own: ctx carries the one budget
-	dialer.Apply(&nd)
+	var dialer net.Dialer // no Timeout of its own: ctx carries the one budget
 	var (
 		conn net.Conn
 		err  error
 	)
 	if d.useTLS {
-		td := &tls.Dialer{NetDialer: &nd, Config: d.tlsCfg.Clone()}
+		td := &tls.Dialer{NetDialer: &dialer, Config: d.tlsCfg.Clone()}
 		conn, err = td.DialContext(ctx, "tcp", d.addr)
 	} else {
-		conn, err = nd.DialContext(ctx, "tcp", d.addr)
+		conn, err = dialer.DialContext(ctx, "tcp", d.addr)
 	}
 	if err != nil {
 		return fail(0, 0, err), nil
@@ -325,9 +323,8 @@ func (d *Driver) readTCP(conn net.Conn) ([]byte, error) {
 }
 
 func (d *Driver) doUDP(ctx context.Context) (protocol.Result, []byte) {
-	var nd net.Dialer // no Timeout of its own: ctx carries the one budget
-	dialer.Apply(&nd)
-	conn, err := nd.DialContext(ctx, "udp", d.addr)
+	var dialer net.Dialer // no Timeout of its own: ctx carries the one budget
+	conn, err := dialer.DialContext(ctx, "udp", d.addr)
 	if err != nil {
 		return fail(0, 0, err), nil
 	}
