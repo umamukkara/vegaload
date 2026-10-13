@@ -81,6 +81,10 @@
   border-bottom: 1px solid var(--hairline-soft);
 }
 
+.navbar__item {
+  white-space: nowrap;
+}
+
 .markdown table {
   display: block;
   max-width: 100%;

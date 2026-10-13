@@ -95,12 +95,20 @@ const config = {
           srcDark: 'img/logo-dark.svg',
         },
         items: [
-          {to: '/why-vegaload', label: 'Why VegaLoad', position: 'left'},
-          {to: '/features', label: 'Features', position: 'left'},
-          {to: '/compare', label: 'Compare', position: 'left'},
-          {to: '/scale-with-harness', label: 'Scale with Harness', position: 'left'},
+          {
+            type: 'dropdown',
+            label: 'Learn',
+            position: 'left',
+            items: [
+              {to: '/why-vegaload', label: 'Why VegaLoad'},
+              {to: '/features', label: 'Features'},
+              {to: '/compare', label: 'Compare'},
+              {to: '/scale-with-harness', label: 'Scale with Harness'},
+            ],
+          },
           {to: '/get-started/install', label: 'Get started', position: 'left'},
           {to: '/ai-agents/how-it-works', label: 'AI agents', position: 'left'},
+          {to: '/cookbook', label: 'Cookbook', position: 'left'},
           {
             href: 'https://github.com/vegaload/vegaload',
             label: 'GitHub',
