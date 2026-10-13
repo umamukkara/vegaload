@@ -61,6 +61,23 @@ unpack it, and run `vegaload.exe`. Put its folder on your `PATH` to run
 all work. Python scenarios need Python 3 from python.org (VegaLoad finds
 `python3`, `python` or the `py` launcher). Scoop and winget packages are set
 up in [RELEASING.md](./RELEASING.md) and come after the first Windows release.
+
+On macOS, pick the archive for your CPU. Run `uname -m`. If it prints
+`arm64`, use the `darwin_arm64` archive. If it prints `x86_64`, use
+`darwin_amd64`. The wrong one fails with `bad CPU type in executable`.
+
+The macOS binaries are not signed yet. A file downloaded in a browser is
+blocked: you see "Apple could not verify vegaload is free of malware", or
+`zsh: killed`. Remove the download mark once, then run it:
+
+```
+xattr -d com.apple.quarantine ./vegaload
+./vegaload version
+```
+
+Files fetched with `gh release download`, `curl` or Homebrew have no such
+mark.
+
 A scratch-based Docker image is published to `ghcr.io/vegaload/vegaload` with
 each release from v0.5.0 on (`linux/amd64` and `linux/arm64`):
 
@@ -693,6 +710,8 @@ server.
   can leave a partial file. `roundtrip` still tries to delete its file. If
   that delete fails, the call can still pass and the text names the file
   that is left.
+  A call that the end of the run cuts off can also leave its file, at most
+  one per user. Use a scratch directory.
 - The account is the real lock. `allow_writes` and `allow_admin` only stop
   VegaLoad from sending the command. Give the account a scratch directory.
 - A listing skips lines the client cannot parse. `limit` trims what the
@@ -761,7 +780,7 @@ The host key is checked by SHA256 fingerprint. `host_key` is one fingerprint, or
 - One SSH connection carries many calls. A timeout closes that connection, so the other calls on it fail too. `connections` greater than 1 limits how many calls share one connection. The call timeout should be longer than the slowest transfer. An SSH connection uses one CPU core for encryption, so more connections can raise throughput.
 - `loginMs` is the whole SSH handshake, the login and the SFTP start. It is not split. A reused connection reports `connectMs` and `loginMs` as 0.
 - A listing does not report bytes received. Names that start with `.` are dropped unless `hidden=true`. The reply is sorted by name. `total` counts after that filter.
-- A failed upload can leave a partial file. `concurrent_writes` does not change that. `roundtrip` still checks the bytes and tries to delete its file, for up to one second. If that delete fails, the call can still pass and the text names the file that is left.
+- A failed upload can leave a partial file. `concurrent_writes` does not change that. `roundtrip` still checks the bytes and tries to delete its file, for up to one second. If that delete fails, the call can still pass and the text names the file that is left. A call that the end of the run cuts off can also leave its file, at most one per user. Use a scratch directory.
 - The timeout covers the whole call, including the dial and the transfer. A call that takes too long says `timed out after <duration>`. Throughput in the report is `bytesReceived` or `bytesSent` divided by the time the call took.
 - Servers limit how many logins may start at once (MaxStartups) and how many connections one user may hold. A large `connections` value can be refused.
 - There is no agent, no keyboard-interactive login, no certificates, no `known_hosts` file, no SCP, no port forwarding and no remote command. A very old key exchange such as `diffie-hellman-group1-sha1` will not connect. This build still accepts an `ssh-rsa` host key.
