@@ -6,9 +6,9 @@ sidebar_position: 3
 
 # VegaLoad vs JMeter
 
-**Checked on 13 October 2026, against the JMeter 5.6.x documentation.** Check the JMeter site for newer major releases.
+**Checked on 13 October 2026, against the JMeter 5.6.x documentation.** Its changes page lists 5.6.3 as current. A newer major release may be out by the time you read this, so check the JMeter site.
 
-Apache JMeter is one of the oldest and most widely used load testing tools. It is a Java application. You build a test plan in a GUI, and you run it from the command line.
+Apache JMeter is a long-established, widely used load testing tool. It is a Java application. You build a test plan in a GUI, and you run it from the command line.
 
 **Choose JMeter when** your team already has `.jmx` test plans, or you want a GUI and a recorder. **Choose VegaLoad when** you want tests as small files next to your code, a single binary with no Java, and an agent that can run them.
 
@@ -20,9 +20,9 @@ Apache JMeter is one of the oldest and most widely used load testing tools. It i
 | How a test is written | One command in direct mode, or a scenario file in JavaScript, TypeScript or Python | A test plan (`.jmx`) built in the GUI, then run in non-GUI mode |
 | Protocols | 14 built in: HTTP/1.1, HTTP/2, gRPC, WebSocket, MQTT, Kafka, PostgreSQL, MySQL, Redis, RabbitMQ, FTP, SFTP, TCP, UDP | HTTP and HTTPS, SOAP and REST, FTP, databases through JDBC, LDAP, JMS, mail (SMTP, POP3, IMAP), TCP, shell commands and Java objects |
 | Pass or fail limits | `-threshold`, checks and `-baseline`. A breach exits 3 | Not covered here. We did not check how JMeter fails a CI run |
-| Reports | Self-contained HTML, JSON and JUnit XML | A dynamic HTML dashboard from the command line (`-e -o`) |
+| Reports | Self-contained HTML, JSON and JUnit XML | An HTML dashboard from the command line (`-e -o`) |
 | Distributed load | Not built in. A Helm chart runs one test as a Kubernetes Job. Distributed load through Harness Resilience Testing is planned | A controller and remote servers over RMI. Each server runs the full plan, so 1,000 threads on 6 servers is 6,000 threads |
-| AI agents and MCP | MCP server in the same binary with 9 tools. `vegaload init` sets up Cursor and Claude Code. Host allow-list and audit log | We did not find an official MCP server. Community-built ones exist |
+| AI agents and MCP | MCP server in the same binary with 9 tools. `vegaload init` sets up Cursor and Claude Code. Host allow-list and audit log | We did not find an official MCP server. A community-built one is described by QAInsights (March 2025) |
 | License | Apache 2.0 | Apache 2.0 |
 | Import and recording | OpenAPI (`vegaload new -from-openapi`) and HAR (`vegaload import har`). JMeter import is planned | A built-in HTTP(S) proxy recorder for browser sessions |
 
@@ -44,13 +44,13 @@ You build the plan in the GUI and save it as a `.jmx` file. Then you run it with
 jmeter -n -t my_test.jmx -l results.jtl -e -o report
 ```
 
-We did not run JMeter for this page. The command and flags come from the JMeter manual. `-n` runs without the GUI, `-t` is the test plan, `-l` is the results file, and `-e -o` writes the HTML dashboard to a folder that does not exist yet.
+We did not run JMeter for this page. The command and flags come from the JMeter manual. `-n` runs without the GUI, `-t` is the test plan, `-l` is the results file, and `-e -o` writes the HTML dashboard to a folder that must not exist or must be empty.
 
 ## Choose JMeter when
 
 - Your team already has a library of `.jmx` plans.
 - You want a GUI to build and debug a test, and a recorder for browser sessions.
-- You need a plugin that only exists for JMeter. Its ecosystem has grown over many years.
+- You need a plugin that only exists for JMeter.
 - You want an Apache Software Foundation project.
 
 ## Choose VegaLoad when
@@ -76,3 +76,4 @@ A JMeter import is planned. It is not released yet. See [Moving to VegaLoad](./m
 - [JMeter user manual: remote (distributed) testing](https://jmeter.apache.org/usermanual/remote-test.html)
 - [JMeter changes](https://jmeter.apache.org/changes.html)
 - [Community JMeter MCP server (third party)](https://qainsights.com/?p=18021)
+- [JMeter HTTP(S) Test Script Recorder](https://jmeter.apache.org/usermanual/jmeter_proxy_step_by_step)
