@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -332,7 +333,12 @@ func TestProtocolData_RedisRace(t *testing.T) {
 }
 
 func TestProtocolData_SFTPPath(t *testing.T) {
-	const cell = "a\"b\\c café"
+	// The test server turns a backslash into a slash on Windows (pkg/sftp
+	// does filepath.ToSlash on the path), so keep the backslash off Windows.
+	cell := "a\"b\\c café"
+	if runtime.GOOS == "windows" {
+		cell = "a\"b c café"
+	}
 	srv := sftptest.Start(t)
 	path := "/export/" + cell
 	srv.Apply(sftptest.Config{Files: map[string][]byte{path: []byte("hi")}})
