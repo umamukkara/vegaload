@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -161,23 +162,46 @@ func unknownMode(err error) bool {
 }
 
 func TestReadmeProtocolsTableMatchesCommand(t *testing.T) {
-	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	got, err := protocolsTableBetweenMarkers(filepath.Join("..", "..", "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	const start = "<!-- vegaload:protocols -->\n"
-	const end = "<!-- /vegaload:protocols -->"
-	text := string(readme)
-	i := strings.Index(text, start)
-	j := strings.Index(text, end)
-	if i < 0 || j < 0 || j < i {
-		t.Fatal("README is missing the vegaload:protocols markers")
-	}
-	got := text[i+len(start) : j]
 	want := protocolReadmeTable()
 	if got != want {
 		t.Fatalf("the README table does not match `vegaload protocols`.\nRun `vegaload protocols` and update the marked table.\nwant:\n%sgot:\n%s", want, got)
 	}
+}
+
+func TestDocsProtocolsTableMatchesCommand(t *testing.T) {
+	got, err := protocolsTableBetweenMarkers(filepath.Join("..", "..", "website", "docs", "guides", "index.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := stripMarkdownLinks(protocolReadmeTable())
+	got = stripMarkdownLinks(got)
+	if got != want {
+		t.Fatalf("the docs protocol table does not match `vegaload protocols`.\nUpdate the marked table in website/docs/guides/index.md.\nwant:\n%sgot:\n%s", want, got)
+	}
+}
+
+func protocolsTableBetweenMarkers(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	const start = "<!-- vegaload:protocols -->\n"
+	const end = "<!-- /vegaload:protocols -->"
+	text := string(b)
+	i := strings.Index(text, start)
+	j := strings.Index(text, end)
+	if i < 0 || j < 0 || j < i {
+		return "", fmt.Errorf("%s is missing the vegaload:protocols markers", path)
+	}
+	return text[i+len(start) : j], nil
+}
+
+func stripMarkdownLinks(s string) string {
+	return regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`).ReplaceAllString(s, "$1")
 }
 
 func TestCmdProtocols_EveryName(t *testing.T) {

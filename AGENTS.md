@@ -85,6 +85,8 @@ When in doubt about where new code belongs, put it in the smallest module that n
 
 User-facing changes need the docs page changed in the same PR once the page exists. Do not describe a feature that is not released. Use short sentences. Every command in a page must run on the released binary.
 
+Until launch, the text of a guide page also lives in README.md. A PR that changes one changes the other, in the same PR. After launch the README keeps a summary and links, and the pages are the only copy.
+
 ## Where the real requirements live
 
 The PRD is the source of truth for what to build and why. This file is the source of truth for how to build it. If the two ever conflict, the PRD wins, and this file should be updated to match.
