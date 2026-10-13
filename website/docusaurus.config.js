@@ -98,6 +98,7 @@ const config = {
           {to: '/why-vegaload', label: 'Why VegaLoad', position: 'left'},
           {to: '/features', label: 'Features', position: 'left'},
           {to: '/compare', label: 'Compare', position: 'left'},
+          {to: '/scale-with-harness', label: 'Scale with Harness', position: 'left'},
           {to: '/get-started/install', label: 'Get started', position: 'left'},
           {to: '/ai-agents/how-it-works', label: 'AI agents', position: 'left'},
           {
