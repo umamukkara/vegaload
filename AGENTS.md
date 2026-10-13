@@ -47,6 +47,7 @@ When in doubt about where new code belongs, put it in the smallest module that n
 
 - Format Go code with `gofmt` before committing. No exceptions.
 - Write tests alongside the code they test (`_test.go`), not in a separate top-level test tree.
+- Tests must not open a socket per call in a free-running loop. Drivers like tcp, ftp, sftp and rabbitmq open a new socket for each call. On Windows, this can use up all ephemeral ports and make CI flaky. Pace such tests with `-executor constant-arrival-rate -rate N -max-vus M` instead of `-vus N -duration D`. For a missing-file check, prefer `mode=stat` for ftp. It reuses the control connection.
 - Every new CLI flag needs a corresponding line in `vegaload --help` output and in the docs. Don't ship an undocumented flag.
 - Never name the underlying scripting engine (Goja) in user-facing CLI output, error messages, or docs. Describe VegaLoad by the languages it supports: JavaScript, TypeScript, Python. This matches the existing Harness messaging rule.
 - Pass/fail limits on a run are called **thresholds** everywhere users read them: flags, output, errors, docs. Do not use Harness RT terms (probe, hypothesis, resilience score) for them. A threshold stays a plain name, metric, operator and value judged on the run's own numbers. Anything richer belongs to Harness RT, not here.
