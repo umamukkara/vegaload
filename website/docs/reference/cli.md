@@ -27,6 +27,7 @@ Every command takes `-output text` (the default) or `-output json`. `run` and `d
 | `protocols` | List the supported protocols, with their options. |
 | `init` | Set up the MCP server and agent rules for this project. |
 | `doctor` | Check that VegaLoad is installed and wired up. |
+| `live` | Print or open this machine's live view page. `live reset` starts a new project. |
 | `mcp serve` | Run the MCP server for an agent. |
 | `mcp eval` | Run the MCP tool-calling eval suite against this binary. |
 | `version` | Print the version. |
@@ -67,12 +68,12 @@ Give a scenario file, or give `-target` and `-protocol` for a protocol-direct ru
 
 | Flag | Meaning |
 | --- | --- |
-| `-executor` | `fixed-vus` (default), `ramp`, `step` or `constant-arrival-rate`. |
+| `-executor` | `fixed-vus` (default), `ramp`, `step`, `constant-arrival-rate` or `ramping-arrival-rate`. |
 | `-vus` | Number of virtual users. Default `1`. For `ramp` and `step`, this is the size of the scripting pool. |
 | `-duration` | Run length for `fixed-vus` and `constant-arrival-rate`. Default `10s`. |
-| `-stages` | Stages for `ramp` and `step`, as `target:duration` pairs, for example `10:30s,0:10s`. |
-| `-rate` | Iterations per second, for `constant-arrival-rate`. |
-| `-max-vus` | Most users that may run at once, for `constant-arrival-rate`. |
+| `-stages` | Stages for `ramp`, `step` and `ramping-arrival-rate`, as `target:duration` pairs, for example `10:30s,0:10s`. The target is a VU count for `ramp` and `step`, and iterations per second for `ramping-arrival-rate`. |
+| `-rate` | Iterations per second, for `constant-arrival-rate`. For `ramping-arrival-rate` it is the rate the first stage starts from (default `0`). |
+| `-max-vus` | Most users that may run at once, for `constant-arrival-rate` and `ramping-arrival-rate`. |
 
 ### Pass and fail
 
@@ -104,9 +105,30 @@ Threshold metrics are `p50`, `p90`, `p95`, `p99`, `mean`, `min`, `max`, `error_r
 | `-out` | Also write the JSON summary to this path. See [JSON report](./report-json.md). |
 | `-report` | Path for the HTML report. Default `vegaload-report-<timestamp>.html`. |
 | `-no-report` | Do not write the HTML report. |
-| `-no-open` | Do not open the report in the browser. |
+| `-no-open` | Open no browser tab: neither the HTML report nor the live view page. The live view still streams. Also `VEGALOAD_OPEN=off`. |
 | `-junit` | Also write a JUnit XML file. Each threshold, check and the baseline gate is one test case. |
 | `-no-step-summary` | Inside GitHub Actions, do not add the summary to the job summary. |
+
+### Live view and streaming
+
+By default a run is shown live in the browser. See [`docs/streaming.md`](https://github.com/vegaload/vegaload/blob/main/docs/streaming.md) for the event format.
+
+| Flag | Variable | Meaning |
+| --- | --- | --- |
+| `-live` | | Show the run in the live view even when `CI` is set or a `-stream-*` destination is used. |
+| `-no-live` | `VEGALOAD_LIVE=off` | Do not stream to the live view or open it. It is also off when `CI` is set and when you give `-stream-file` or `-stream-push`. |
+| `-live-url` | `VEGALOAD_LIVE_URL` | Address of the live view service. Default `http://127.0.0.1:7080`. |
+| `-stream-file` | `VEGALOAD_STREAM_FILE` | Write the run as NDJSON events to this path, or `auto` for `.vegaload/runs/<run id>.ndjson`. |
+| `-stream-push` | `VEGALOAD_STREAM_PUSH` | POST the events to this ingest URL, with retry. Repeat the flag, or separate URLs with commas. `http://` is only allowed for a loopback host. |
+| `-stream-insecure` | | Allow `-stream-push` over `http://` to a host that is not loopback. |
+| | `VEGALOAD_STREAM_TOKEN` | The Bearer token sent with `-stream-push`. |
+| `-run-id` | `VEGALOAD_RUN_ID` | The run id on every event. Default: 12 random hex characters. |
+| `-label` | | A `key=value` label on every event. Repeat the flag. |
+| | `VEGALOAD_CONFIG_DIR` | The folder where the live view keeps this machine's project (`live.json`). |
+
+To share one live view project with litmus-lite (a load run and a chaos run on one page), run `vegaload init -live-dir DIR` and give litmus-lite's MCP server the same folder. Terminal runs still use the default folder unless you export `VEGALOAD_CONFIG_DIR`.
+
+A flag wins over its variable. The live view sends the run's numbers, thresholds, step and protocol names, labels and the target (without credentials) to the service. It never sends headers, bodies, options, environment values, secrets or data. Turn it off with `-no-live` or `VEGALOAD_LIVE=off`.
 
 ### Safety
 
@@ -210,7 +232,10 @@ vegaload init [flags]
 | `-dir` | Project folder. Default `.`. |
 | `-status` | Change nothing. Report what is set up. Exit 1 if anything is missing. |
 | `-force` | Overwrite files that exist. |
+| `-live-dir DIR` | Add `env` `VEGALOAD_CONFIG_DIR=DIR` (made absolute) to the `vegaload` MCP entry, so the server keeps its [live view](#live-view-and-streaming) project in `DIR`. Use the same folder for litmus-lite's MCP server to share one project. An existing entry is updated even without `-force`; other servers and `env` keys are kept. Without the flag there is no `env`. |
 | `-output` | `text` or `json`. |
+
+`-live-dir` only changes the MCP server. A `vegaload run` in a terminal uses the default folder unless you export `VEGALOAD_CONFIG_DIR`.
 
 ## `doctor`
 

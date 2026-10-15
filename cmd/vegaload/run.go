@@ -47,6 +47,7 @@ import (
 	"github.com/vegaload/vegaload/internal/compare"
 	"github.com/vegaload/vegaload/internal/engine"
 	"github.com/vegaload/vegaload/internal/inputs"
+	"github.com/vegaload/vegaload/internal/live"
 	"github.com/vegaload/vegaload/internal/protocol"
 	"github.com/vegaload/vegaload/internal/protocol/xfercommon"
 	"github.com/vegaload/vegaload/internal/report"
@@ -120,7 +121,7 @@ type runConfig struct {
 	// callRecorder is where scripted VUs and -protocol mode report each call.
 	callRecorder netapi.CallRecorder
 
-	Executor string // fixed-vus, ramp, step, constant-arrival-rate
+	Executor string // fixed-vus, ramp, step, constant-arrival-rate, ramping-arrival-rate
 	VUs      int
 	Duration time.Duration
 	Stages   []engine.Stage
@@ -186,6 +187,12 @@ type runConfig struct {
 	DataSets map[string]*inputs.Set
 	DataPick string
 	DataPlan *dataPlan
+
+	// Stream holds the -stream-*, -run-id, -label and live view flags
+	// (docs/streaming.md). stream is what they produced for this run; it is
+	// nil when the run is not streamed, and then nothing streams.
+	Stream runStream
+	stream *streaming
 }
 
 // parseRunArgs parses run's flags into a runConfig. It returns a usage
@@ -205,12 +212,12 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	var thresholdExprs repeatedFlags
 	var thresholdsFile string
 
-	fs.StringVar(&cfg.Executor, "executor", "fixed-vus", "load shape: fixed-vus, ramp, step, constant-arrival-rate")
+	fs.StringVar(&cfg.Executor, "executor", "fixed-vus", "load shape: fixed-vus, ramp, step, constant-arrival-rate, ramping-arrival-rate")
 	fs.IntVar(&cfg.VUs, "vus", 1, "number of virtual users (fixed-vus; also the scripting VU pool size for ramp/step)")
 	fs.DurationVar(&cfg.Duration, "duration", 10*time.Second, "run duration (fixed-vus, constant-arrival-rate)")
 	fs.StringVar(&stagesRaw, "stages", "", "comma-separated target:duration stages for ramp/step, e.g. 10:30s,0:10s")
-	fs.Float64Var(&cfg.Rate, "rate", 0, "iterations per second (constant-arrival-rate)")
-	fs.IntVar(&cfg.MaxVUs, "max-vus", 0, "max concurrent VUs (constant-arrival-rate)")
+	fs.Float64Var(&cfg.Rate, "rate", 0, "iterations per second (constant-arrival-rate); the starting rate of -stages for ramping-arrival-rate (default 0)")
+	fs.IntVar(&cfg.MaxVUs, "max-vus", 0, "max concurrent VUs (constant-arrival-rate, ramping-arrival-rate)")
 	fs.StringVar(&cfg.Target.URL, "target", "", "target URL or host:port (protocol-direct mode; omit if a scenario file is given)")
 	fs.StringVar(&cfg.Protocol, "protocol", "", protocolList()+" (protocol-direct mode)")
 	fs.StringVar(&method, "method", "", "HTTP verb, or the full gRPC method (e.g. /package.Service/Method)")
@@ -227,7 +234,7 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	cfg.Limits = safety.DefaultLimits
 	fs.IntVar(&cfg.Limits.MaxVUs, "cap-vus", safety.DefaultLimits.MaxVUs, "hard cap on virtual users for this run")
 	fs.DurationVar(&cfg.Limits.MaxDuration, "cap-duration", safety.DefaultLimits.MaxDuration, "hard cap on run duration")
-	fs.Float64Var(&cfg.Limits.MaxRate, "cap-rate", safety.DefaultLimits.MaxRate, "hard cap on iterations/sec (constant-arrival-rate)")
+	fs.Float64Var(&cfg.Limits.MaxRate, "cap-rate", safety.DefaultLimits.MaxRate, "hard cap on iterations/sec (constant-arrival-rate, ramping-arrival-rate)")
 
 	// FR-CLI-07: audit log.
 	fs.StringVar(&cfg.Trigger, "trigger", "cli", "what started this run, recorded in the audit log (e.g. \"cli\", or \"mcp:<session-id>\")")
@@ -237,7 +244,10 @@ func parseRunArgs(args []string) (*runConfig, error) {
 	fs.StringVar(&cfg.OutputMode, "output", "text", "output mode: text, json, or jsonl (FR-CLI-05's structured and streaming modes)")
 	fs.StringVar(&cfg.ReportPath, "report", "", "path for the self-contained HTML report (default: vegaload-report-<timestamp>.html)")
 	fs.BoolVar(&cfg.NoReport, "no-report", false, "skip writing the HTML report")
-	fs.BoolVar(&cfg.NoOpen, "no-open", false, "don't auto-open the HTML report in the default browser")
+	fs.BoolVar(&cfg.NoOpen, "no-open", false, "don't open a browser tab: neither the HTML report nor the live view page (also VEGALOAD_OPEN=off). The live view still streams. When the live view page opens, the HTML report is written but not opened")
+
+	// docs/streaming.md: stream the run, and the live view.
+	cfg.Stream.register(fs)
 
 	// FR-CLI-11: pass/fail thresholds.
 	fs.Var(&thresholdExprs, "threshold", "pass/fail threshold on the run, e.g. \"p95 < 300ms\", \"p95{step=\\\"login\\\"} < 300ms\" or \"p95{protocol=\\\"ftp\\\"} < 500ms\" (repeatable; metrics: "+strings.Join(threshold.MetricNames(), ", ")+"). A breach exits 3")
@@ -392,7 +402,7 @@ func parseStages(s string) ([]engine.Stage, error) {
 		}
 		target, err := strconv.Atoi(strings.TrimSpace(targetStr))
 		if err != nil {
-			return nil, fmt.Errorf("stage %q: invalid target VU count: %w", p, err)
+			return nil, fmt.Errorf("stage %q: invalid target (a VU count, or iterations per second for ramping-arrival-rate): %w", p, err)
 		}
 		dur, err := time.ParseDuration(strings.TrimSpace(durStr))
 		if err != nil {
@@ -423,8 +433,16 @@ func buildExecutor(cfg *runConfig) (engine.Executor, error) {
 			return nil, fmt.Errorf("-executor constant-arrival-rate requires -rate > 0")
 		}
 		return engine.ConstantArrivalRate{Rate: cfg.Rate, Dur: cfg.Duration, MaxVUs: cfg.MaxVUs}, nil
+	case "ramping-arrival-rate":
+		if len(cfg.Stages) == 0 {
+			return nil, fmt.Errorf("-executor ramping-arrival-rate requires -stages (target:duration pairs; the target is iterations per second)")
+		}
+		if cfg.Rate < 0 {
+			return nil, fmt.Errorf("-rate %g: want zero or more (it is the starting rate of -stages)", cfg.Rate)
+		}
+		return engine.RampingArrivalRate{StartRate: cfg.Rate, Stages: cfg.Stages, MaxVUs: cfg.MaxVUs}, nil
 	default:
-		return nil, fmt.Errorf("unknown -executor %q (want fixed-vus, ramp, step, or constant-arrival-rate)", cfg.Executor)
+		return nil, fmt.Errorf("unknown -executor %q (want fixed-vus, ramp, step, constant-arrival-rate, or ramping-arrival-rate)", cfg.Executor)
 	}
 }
 
@@ -434,7 +452,7 @@ func buildExecutor(cfg *runConfig) (engine.Executor, error) {
 // grows past it (closing the overflow on return) rather than blocking.
 func concurrencyHint(cfg *runConfig) int {
 	switch cfg.Executor {
-	case "constant-arrival-rate":
+	case "constant-arrival-rate", "ramping-arrival-rate":
 		if cfg.MaxVUs > 0 {
 			return cfg.MaxVUs
 		}
@@ -713,6 +731,15 @@ func runScenarioWithCollector(cfg *runConfig, collector *report.Collector) (*rep
 	cfg.stepRecorder = collector
 	cfg.callRecorder = collector
 
+	// A streamed run says it has started before the scenario is loaded, so a
+	// scenario that cannot be loaded is a run.failed after a run.started.
+	var feed *pointFeed
+	if cfg.stream != nil {
+		feed = cfg.stream.begin(cfg, ex, collector)
+		// Every path out of here, an error included, ends the points.
+		defer feed.finish()
+	}
+
 	iter, closeFn, err := buildIteration(cfg)
 	if err != nil {
 		return nil, err
@@ -803,14 +830,26 @@ func applyBaseline(cfg *runConfig, result *report.Result) {
 // known until the script actually runs, unlike -target here.
 func enforceSafety(cfg *runConfig, in io.Reader, out io.Writer, confirm func(io.Reader, io.Writer, string) bool) error {
 	rate := cfg.Rate
-	if err := safety.CheckLimits(cfg.VUs, cfg.Duration, rate, cfg.Limits); err != nil {
+	dur := cfg.Duration
+	if cfg.Executor == "ramping-arrival-rate" {
+		// The stages carry the rates and the length of this shape: the cap
+		// applies to the highest rate it reaches and to its total duration.
+		dur = 0
+		for _, s := range cfg.Stages {
+			dur += s.Duration
+			if float64(s.Target) > rate {
+				rate = float64(s.Target)
+			}
+		}
+	}
+	if err := safety.CheckLimits(cfg.VUs, dur, rate, cfg.Limits); err != nil {
 		return err
 	}
 	// ramp/step can reach a higher VU count than -vus via -stages; check
 	// that too, using the same concurrency estimate the scripting pool
 	// is sized with.
 	if peak := concurrencyHint(cfg); peak > cfg.VUs {
-		if err := safety.CheckLimits(peak, cfg.Duration, rate, cfg.Limits); err != nil {
+		if err := safety.CheckLimits(peak, dur, rate, cfg.Limits); err != nil {
 			return err
 		}
 	}
@@ -863,6 +902,31 @@ func cmdRun(args []string) int {
 		abortNote(os.Stderr, cfg.Thresholds)
 	}
 
+	// The stream and the live view, when there is one. A destination that
+	// breaks a rule stops the run before it starts.
+	st, err := cfg.Stream.setup(cfg.NoOpen)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "vegaload run: %v\n", err)
+		return 2
+	}
+	var out runOutcome
+	if st != nil {
+		cfg.stream = st
+		for _, w := range st.warnings {
+			fmt.Fprintln(os.Stderr, w)
+		}
+		st.watchSignals()
+	}
+	code := executeRun(cfg, &out)
+	st.end(cfg, &out, code)
+	return code
+}
+
+// executeRun is the run itself: the load test, its outputs and its gates. It
+// returns the process exit code. out gets the result, or why there is none, so
+// that the stream can end with the right event.
+func executeRun(cfg *runConfig, out *runOutcome) int {
+	var err error
 	var result *report.Result
 	switch cfg.OutputMode {
 	case "jsonl":
@@ -875,9 +939,11 @@ func cmdRun(args []string) int {
 	}
 	recordAudit("run", cfg, result, err)
 	if err != nil {
+		out.fail(err)
 		fmt.Fprintf(os.Stderr, "vegaload run: %s\n", secrets.Redact(err.Error()))
 		return 1
 	}
+	out.result = result
 
 	switch cfg.OutputMode {
 	case "json":
@@ -1000,6 +1066,18 @@ func runJSONL(cfg *runConfig, w io.Writer) (*report.Result, error) {
 	return result, nil
 }
 
+// opensReport says whether the HTML report is opened in the browser when it
+// is written. It is not with -no-open or VEGALOAD_OPEN=off (which stop every
+// browser tab), when the live view is showing the run (its page is the tab),
+// or for a run an agent started (-trigger mcp...), which has no one at the
+// screen to want a second tab.
+func (c *runConfig) opensReport() bool {
+	if c.NoOpen || (c.stream != nil && c.stream.liveActive) || strings.HasPrefix(c.Trigger, "mcp") {
+		return false
+	}
+	return live.OpenEnvAllows()
+}
+
 // writeAndMaybeOpenReport implements FR-RPT-01/02: write the
 // self-contained HTML report, then (unless -no-open) best-effort open
 // it in the default browser. Both steps are reported to the caller as
@@ -1015,7 +1093,7 @@ func writeAndMaybeOpenReport(cfg *runConfig, result *report.Result) error {
 	if cfg.OutputMode == "text" {
 		fmt.Printf("report: %s\n", path)
 	}
-	if !cfg.NoOpen {
+	if cfg.opensReport() {
 		if err := openBrowser(path); err != nil {
 			return fmt.Errorf("opening report in browser (the file itself was written to %s): %w", path, err)
 		}
@@ -1055,6 +1133,9 @@ func recordAudit(command string, cfg *runConfig, result *report.Result, runErr e
 	}
 	for _, t := range cfg.Thresholds {
 		entry.Thresholds = append(entry.Thresholds, t.Expression())
+	}
+	if cfg.stream != nil {
+		entry.Stream = cfg.stream.audit // kinds and hosts, never a path, query, id or token
 	}
 	if cfg.DataPlan != nil {
 		for _, f := range cfg.DataPlan.files {

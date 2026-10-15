@@ -39,7 +39,9 @@ couldn't also do.
 - **run_test** — run a load test, either a scenario file or a protocol-direct
   target (`target` + `protocol`, e.g. `http1`). Pick an `executor`: `fixed-vus`
   (steady concurrency), `ramp` (stages that climb then fall), `step` (stages
-  that jump), or `constant-arrival-rate` (fixed throughput via `rate`).
+  that jump), `constant-arrival-rate` (fixed throughput via `rate`), or
+  `ramping-arrival-rate` (throughput that climbs, spikes and falls: `stages` are
+  `rate:duration` pairs, plus `max_vus`).
   Returns a `report.Result` (total/failed/error_rate/latency percentiles/a
   per-second time series) and, unless `no_report` is set, a path to a
   self-contained HTML report you can open or point the user at. For a long
@@ -108,3 +110,11 @@ couldn't also do.
 Report numbers back to the user plainly (total requests, failure rate, p95
 latency) rather than dumping the raw JSON, and mention the HTML report path
 so they can open it themselves.
+
+## The live view
+
+A `run_test` is also shown live in the user's browser by default (the live view):
+the page opens by itself, and its address comes back as `live view: URL`, the
+second text item of the result (the first is always the result JSON). After you
+start a run, tell the user that URL. Pass `no-live` only if they do not want it,
+and `no-open` to keep it from opening a browser tab. It is off in CI.
